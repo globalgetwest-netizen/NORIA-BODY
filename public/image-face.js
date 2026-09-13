@@ -37,6 +37,7 @@ export class ImageFace {
     this.speaking = false; this.listening = false
     this.energy = 1; this.emotion = 'neutral'
     this._time = 0; this._nextBlink = 1.5; this._nextSaccade = 2; this._mouthPulse = 0
+    this._blinkFactor = 1; this._lid = null
     this._img = null; this._skin = 'rgba(220,180,150,1)'
     this._resize(); window.addEventListener('resize', () => this._resize())
     this.setVariant(variant)
@@ -60,8 +61,10 @@ export class ImageFace {
     try {
       const o = document.createElement('canvas'); o.width = im.naturalWidth; o.height = im.naturalHeight
       const octx = o.getContext('2d'); octx.drawImage(im, 0, 0)
-      const px = octx.getImageData(Math.floor(o.width * 0.5), Math.floor(o.height * 0.24), 1, 1).data
-      this._skin = `rgb(${px[0]},${px[1]},${px[2]})`
+      const at = (nx, ny) => { const d = octx.getImageData(Math.floor(o.width * clamp(nx, 0.02, 0.98)), Math.floor(o.height * clamp(ny, 0.02, 0.98)), 1, 1).data; return `rgb(${d[0]},${d[1]},${d[2]})` }
+      this._skin = at(0.5, 0.24)
+      // Eyelid tone per eye (sampled just above each eye) so a blink lid blends.
+      this._lid = this.cal.eyes.map(([ex, ey]) => at(ex, ey - 0.04))
     } catch { /* keep default */ }
   }
 
@@ -90,7 +93,13 @@ export class ImageFace {
     this.emotion = name
     const E = { joy: 1.5, warm: 1.18, neutral: 1.0, concern: 0.82, thinking: 0.85 }
     this.energy = (E[name] ?? 1.0) * (0.7 + 0.3 * intensity)
+    this._blinkFactor = this._blinkRate(name)
     if (name === 'thinking') { this.t.gazeX = 0.3; this.t.gazeY = -0.32 }
+  }
+  // Blink interval multiplier: <1 = blink MORE (stress/anxiety), >1 = LESS (focus).
+  _blinkRate(name) {
+    const BF = { concern: 0.55, concerned: 0.55, anxious: 0.5, joy: 0.95, playful: 0.9, warm: 1.0, neutral: 1.1, calm: 1.3, supportive: 1.1, curious: 0.9, thinking: 1.7, focused: 1.9 }
+    return BF[name] ?? 1.0
   }
   setExpression(name) {
     const M = { smile: 'joy', curious: 'warm', concerned: 'concern', thinking: 'thinking', neutral: 'neutral' }
@@ -111,6 +120,8 @@ export class ImageFace {
     const cond = c.condition || {}
     if (typeof cond.arousal === 'number') this.energy = clamp(0.7 + 0.7 * (num(cond.arousal, 0.4) * 0.5 + num(cond.energy, 0.5) * 0.5), 0.6, 1.5)
     else this.energy = map[emotion] ?? 1.0
+    this.emotion = emotion
+    this._blinkFactor = this._blinkRate(c.emotion || emotion)
 
     const gaze = c.gaze || (c.eyes && c.eyes.gaze)
     if (gaze === 'slight-left') this.lookAt(-0.4, 0)
@@ -126,9 +137,13 @@ export class ImageFace {
 
   update(dt) {
     this._time += dt
-    // Blink scheduler.
+    // Blink scheduler — interval scales with emotion (more when anxious, fewer
+    // when focused). Occasional natural double-blink.
     this._nextBlink -= dt
-    if (this._nextBlink <= 0 && !this._doBlink) { this._doBlink = Math.random() < 0.1 ? 2 : 1; this._nextBlink = 2.5 + Math.random() * 4 }
+    if (this._nextBlink <= 0 && !this._doBlink) {
+      this._doBlink = Math.random() < 0.12 ? 2 : 1
+      this._nextBlink = (2.2 + Math.random() * 3.8) * (this._blinkFactor || 1)
+    }
     if (this._doBlink) { this.t.blink = 0; if (this.p.blink < 0.06) { this._doBlink -= 1; this.t.blink = 1 } } else this.t.blink = 1
 
     // Idle micro-saccades.
@@ -147,9 +162,8 @@ export class ImageFace {
     }
 
     const k = 1 - Math.pow(0.002, dt)
-    const blinkK = 1 - Math.pow(1e-7, dt)
     for (const key of Object.keys(this.p)) {
-      const rate = key === 'blink' ? blinkK : key === 'mouth' ? Math.min(1, k * 2.4) : k
+      const rate = key === 'blink' ? Math.min(1, dt * 16) : key === 'mouth' ? Math.min(1, k * 2.4) : k
       this.p[key] = lerp(this.p[key], this.t[key], rate)
     }
 
@@ -188,16 +202,34 @@ export class ImageFace {
     // engine — see the roadmap; the laptop just isn't the place for it.
     if (p.mouth > 0.03) {
       const [mx, my] = P(this.cal.mouth[0], this.cal.mouth[1])
-      ctx.save(); ctx.globalAlpha = clamp(p.mouth * 0.28, 0, 0.28)
+      const g = clamp(0.85 + (this.energy - 1) * 0.6, 0.7, 1.35) // livelier when energetic/happy
+      ctx.save(); ctx.globalAlpha = clamp(p.mouth * 0.28 * g, 0, 0.34)
       const mg = ctx.createRadialGradient(mx, my, 1, mx, my, this.cal.mouthR[0] * iw)
       mg.addColorStop(0, 'rgba(45,16,18,0.8)'); mg.addColorStop(1, 'rgba(45,16,18,0)')
       ctx.fillStyle = mg
-      ctx.beginPath(); ctx.ellipse(mx, my, this.cal.mouthR[0] * iw * 0.8, this.cal.mouthR[1] * ih * 1.3, 0, 0, Math.PI * 2); ctx.fill()
+      ctx.beginPath(); ctx.ellipse(mx, my, this.cal.mouthR[0] * iw * 0.8, this.cal.mouthR[1] * ih * 1.3 * g, 0, 0, Math.PI * 2); ctx.fill()
       ctx.restore()
     }
 
-    // (Drawn eyelid blink removed — on a real photo a painted lid reads as a
-    //  pale bar. Better no blink than a bad one; life comes from head motion.)
+    // BLINK — a real eyelid descends from the top of each eye, clipped to the
+    // eye's rounded shape (no rectangular "bar"), tinted to the eyelid skin, with
+    // a soft lash line at its moving edge.
+    const closed = 1 - p.blink
+    if (closed > 0.03) {
+      for (let i = 0; i < this.cal.eyes.length; i++) {
+        const [ex, ey] = this.cal.eyes[i]
+        const [cx, cy] = P(ex, ey)
+        const rx = this.cal.eyeR[0] * iw * 1.2, ry = this.cal.eyeR[1] * ih * 1.35
+        const top = cy - ry, lidBottom = top + 2 * ry * closed
+        ctx.save()
+        ctx.beginPath(); ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2); ctx.clip()
+        ctx.fillStyle = (this._lid && this._lid[i]) || this._skin
+        ctx.fillRect(cx - rx, top, rx * 2, lidBottom - top)
+        ctx.strokeStyle = 'rgba(45,28,22,0.5)'; ctx.lineWidth = Math.max(1.1, ry * 0.13)
+        ctx.beginPath(); ctx.moveTo(cx - rx * 0.96, lidBottom); ctx.lineTo(cx + rx * 0.96, lidBottom); ctx.stroke()
+        ctx.restore()
+      }
+    }
     ctx.restore()
 
     if (this.listening) {
