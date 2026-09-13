@@ -1,0 +1,188 @@
+/**
+ * NORIA FACE (image variant) — a LIVING PORTRAIT of the real Noria renders.
+ *
+ * Instead of drawing a cartoon, this shows the actual Noria-F / Noria-M image
+ * and animates it: head sway, breathing, gaze parallax, blink, and a speaking
+ * mouth pulse. Same public API as the procedural face, so the rest of the Body
+ * (engine link, audio, embodiment layer) is unchanged.
+ *
+ * Per-image calibration (eye + mouth positions, normalized 0..1) lets the blink
+ * and mouth animation land on the right spot. Tune CAL after adding the images.
+ */
+const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v))
+const lerp = (a, b, t) => a + (b - a) * t
+
+const CAL = {
+  // srcs: tried in order until one loads. eyes/mouth are normalized [x,y]; r are [rx,ry].
+  // Calibrated to the real renders (noria-f.png 1254×1254, noria-m.png 1054×1492).
+  F: {
+    srcs: ['assets/noria-f.png', 'assets/noria-f.jpg', 'assets/noria-f.jpeg', 'assets/noria-f.webp'],
+    eyes: [[0.40, 0.347], [0.59, 0.347]], eyeR: [0.052, 0.024],
+    mouth: [0.49, 0.55], mouthR: [0.075, 0.03],
+  },
+  M: {
+    srcs: ['assets/noria-m.png', 'assets/noria-m.jpg', 'assets/noria-m.jpeg', 'assets/noria-m.webp'],
+    eyes: [[0.445, 0.342], [0.588, 0.342]], eyeR: [0.05, 0.023],
+    mouth: [0.505, 0.525], mouthR: [0.07, 0.03],
+  },
+}
+
+export class ImageFace {
+  constructor(canvas, variant = 'F') {
+    this.canvas = canvas
+    this.ctx = canvas.getContext('2d')
+    this.p = { blink: 1, gazeX: 0, gazeY: 0, mouth: 0, yaw: 0, pitch: 0 }
+    this.t = { ...this.p }
+    this.speaking = false; this.listening = false
+    this.energy = 1; this.emotion = 'neutral'
+    this._time = 0; this._nextBlink = 1.5; this._nextSaccade = 2; this._mouthPulse = 0
+    this._img = null; this._skin = 'rgba(220,180,150,1)'
+    this._resize(); window.addEventListener('resize', () => this._resize())
+    this.setVariant(variant)
+  }
+
+  setVariant(v) {
+    this.variant = CAL[v] ? v : 'F'; this.cal = CAL[this.variant]
+    this._img = null; this._loadImage(this.cal.srcs.slice())
+  }
+
+  _loadImage(srcs) {
+    if (!srcs.length) { this._img = 'missing'; return }
+    const src = srcs.shift()
+    const im = new Image()
+    im.onload = () => { this._img = im; this._sampleSkin(im) }
+    im.onerror = () => this._loadImage(srcs)
+    im.src = src
+  }
+
+  _sampleSkin(im) {
+    try {
+      const o = document.createElement('canvas'); o.width = im.naturalWidth; o.height = im.naturalHeight
+      const octx = o.getContext('2d'); octx.drawImage(im, 0, 0)
+      const px = octx.getImageData(Math.floor(o.width * 0.5), Math.floor(o.height * 0.24), 1, 1).data
+      this._skin = `rgb(${px[0]},${px[1]},${px[2]})`
+    } catch { /* keep default */ }
+  }
+
+  _resize() {
+    const dpr = window.devicePixelRatio || 1
+    const r = this.canvas.getBoundingClientRect()
+    this.w = r.width; this.h = r.height
+    this.canvas.width = Math.round(r.width * dpr); this.canvas.height = Math.round(r.height * dpr)
+    this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+  }
+
+  // ── Embodiment primitives (same API as the procedural face) ────────────────
+  blink(double = false) { this._doBlink = double ? 2 : 1 }
+  lookAt(nx, ny) { this.t.gazeX = clamp(nx, -1, 1); this.t.gazeY = clamp(ny, -1, 1); this.t.yaw = clamp(nx * 0.3, -0.4, 0.4); this.t.pitch = clamp(ny * 0.18, -0.25, 0.25) }
+  turnHead(yaw, pitch) { this.t.yaw = clamp(yaw, -0.5, 0.5); this.t.pitch = clamp(pitch, -0.3, 0.3) }
+  setListening(on) { this.listening = on }
+  setSpeaking(on) { this.speaking = on; if (!on) this.t.mouth = 0 }
+  pulseMouth(i = 1) { this._mouthPulse = Math.min(1, this._mouthPulse + 0.5 * i) }
+  // Emotion → how alive she is (energy scales mouth animation + head motion),
+  // plus gaze cues. On a real photo we convey feeling through motion + energy,
+  // not by distorting the face.
+  setEmotion(name, intensity = 1) {
+    this.emotion = name
+    const E = { joy: 1.5, warm: 1.18, neutral: 1.0, concern: 0.82, thinking: 0.85 }
+    this.energy = (E[name] ?? 1.0) * (0.7 + 0.3 * intensity)
+    if (name === 'thinking') { this.t.gazeX = 0.3; this.t.gazeY = -0.32 }
+  }
+  setExpression(name) {
+    const M = { smile: 'joy', curious: 'warm', concerned: 'concern', thinking: 'thinking', neutral: 'neutral' }
+    this.setEmotion(M[name] || 'neutral')
+  }
+  gesture(kind) { this._gesture = { k: kind === 'greet' ? 'nod' : kind, t: 0 } }
+
+  update(dt) {
+    this._time += dt
+    // Blink scheduler.
+    this._nextBlink -= dt
+    if (this._nextBlink <= 0 && !this._doBlink) { this._doBlink = Math.random() < 0.1 ? 2 : 1; this._nextBlink = 2.5 + Math.random() * 4 }
+    if (this._doBlink) { this.t.blink = 0; if (this.p.blink < 0.06) { this._doBlink -= 1; this.t.blink = 1 } } else this.t.blink = 1
+
+    // Idle micro-saccades.
+    this._nextSaccade -= dt
+    if (this._nextSaccade <= 0 && !this.listening) {
+      this.t.gazeX = clamp(this.t.gazeX + (Math.random() - 0.5) * 0.4, -0.5, 0.5)
+      this.t.gazeY = clamp(this.t.gazeY + (Math.random() - 0.5) * 0.25, -0.35, 0.35)
+      this._nextSaccade = 1.6 + Math.random() * 3
+    }
+
+    if (this.speaking) {
+      const s = this._time
+      const base = 0.2 + 0.24 * Math.abs(Math.sin(s * 10.5)) + 0.14 * Math.abs(Math.sin(s * 17 + 1))
+      this._mouthPulse = Math.max(0, this._mouthPulse - dt * 3)
+      this.t.mouth = clamp((base + this._mouthPulse * 0.5) * this.energy, 0, 1)
+    }
+
+    const k = 1 - Math.pow(0.002, dt)
+    const blinkK = 1 - Math.pow(1e-7, dt)
+    for (const key of Object.keys(this.p)) {
+      const rate = key === 'blink' ? blinkK : key === 'mouth' ? Math.min(1, k * 2.4) : k
+      this.p[key] = lerp(this.p[key], this.t[key], rate)
+    }
+
+    this._go = { yaw: 0, pitch: 0, roll: 0 }
+    if (this._gesture) {
+      const g = this._gesture; g.t += dt; const d = 0.7
+      if (g.t > d) this._gesture = null
+      else { const a = Math.sin((g.t / d) * Math.PI); if (g.k === 'nod') this._go.pitch = a * 0.5; if (g.k === 'shake') this._go.yaw = Math.sin(g.t * 18) * a * 0.4; if (g.k === 'tilt') this._go.roll = a * 0.12 }
+    }
+  }
+
+  draw() {
+    const { ctx, w, h, p } = this
+    ctx.clearRect(0, 0, w, h)
+    if (this._img === 'missing' || !this._img) { this._placeholder(); return }
+    const im = this._img
+    const scale = Math.max(w / im.naturalWidth, h / im.naturalHeight)
+    const iw = im.naturalWidth * scale, ih = im.naturalHeight * scale
+    const breathe = 1 + Math.sin(this._time * 1.1) * 0.006
+    const sway = Math.sin(this._time * 0.6) * 4 * this.energy
+
+    ctx.save()
+    ctx.translate(w / 2 + sway + p.yaw * 22 + (this._go?.yaw || 0) * 26, h / 2 + p.pitch * 16 + (this._go?.pitch || 0) * 22)
+    ctx.rotate((this._go?.roll || 0) + p.yaw * 0.03)
+    ctx.scale(breathe, breathe)
+
+    // Cover-fit base — the clean, untouched real face (never distorted).
+    ctx.drawImage(im, -iw / 2, -ih / 2, iw, ih)
+
+    // helper: image-normalized coords → local (pre-translate) canvas coords
+    const P = (nx, ny) => [(nx - 0.5) * iw, (ny - 0.5) * ih]
+
+    // While speaking: a whisper-soft darkening at the mouth only. No geometry
+    // warp (that tears a photo). True mouth motion needs a server-side realism
+    // engine — see the roadmap; the laptop just isn't the place for it.
+    if (p.mouth > 0.03) {
+      const [mx, my] = P(this.cal.mouth[0], this.cal.mouth[1])
+      ctx.save(); ctx.globalAlpha = clamp(p.mouth * 0.28, 0, 0.28)
+      const mg = ctx.createRadialGradient(mx, my, 1, mx, my, this.cal.mouthR[0] * iw)
+      mg.addColorStop(0, 'rgba(45,16,18,0.8)'); mg.addColorStop(1, 'rgba(45,16,18,0)')
+      ctx.fillStyle = mg
+      ctx.beginPath(); ctx.ellipse(mx, my, this.cal.mouthR[0] * iw * 0.8, this.cal.mouthR[1] * ih * 1.3, 0, 0, Math.PI * 2); ctx.fill()
+      ctx.restore()
+    }
+
+    // (Drawn eyelid blink removed — on a real photo a painted lid reads as a
+    //  pale bar. Better no blink than a bad one; life comes from head motion.)
+    ctx.restore()
+
+    if (this.listening) {
+      ctx.strokeStyle = `rgba(96,165,250,${0.35 + 0.2 * Math.sin(this._time * 4)})`
+      ctx.lineWidth = 4
+      ctx.strokeRect(3, 3, w - 6, h - 6)
+    }
+  }
+
+  _placeholder() {
+    const { ctx, w, h } = this
+    ctx.fillStyle = 'rgba(255,255,255,0.06)'; ctx.fillRect(0, 0, w, h)
+    ctx.fillStyle = '#9fb4c9'; ctx.textAlign = 'center'
+    ctx.font = '600 15px system-ui'
+    ctx.fillText(`Add Noria-${this.variant} image at:`, w / 2, h / 2 - 12)
+    ctx.font = '13px ui-monospace, monospace'
+    ctx.fillText(`public/assets/noria-${this.variant.toLowerCase()}.png`, w / 2, h / 2 + 12)
+  }
+}

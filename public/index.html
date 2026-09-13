@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Virtual Noria</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <div class="brand"><span class="star">✦</span> Virtual Noria <span class="tag">Digital Human — Phase 2</span></div>
+      <div class="status" id="status">connecting to brain…</div>
+    </header>
+
+    <main class="stage">
+      <div class="face-wrap">
+        <canvas id="face"></canvas>
+        <div class="statechip" id="statechip">idle</div>
+      </div>
+      <video id="cam" playsinline muted hidden></video>
+    </main>
+
+    <section class="transcript" id="transcript" aria-live="polite"></section>
+
+    <footer class="controls">
+      <button id="mic" class="icon" title="Speak to Noria">🎙️</button>
+      <input id="text" type="text" placeholder="Ask Noria anything…" autocomplete="off" />
+      <button id="send" class="primary">Send</button>
+      <div class="opts">
+        <label class="seg"><input type="radio" name="variant" value="F" checked /> Noria-F</label>
+        <label class="seg"><input type="radio" name="variant" value="M" /> Noria-M</label>
+        <label class="seg" title="Noria's gaze follows your cursor / face"><input type="checkbox" id="vision" /> Vision</label>
+      </div>
+    </footer>
+  </div>
+  <script type="module" src="app.js"></script>
+</body>
+</html>

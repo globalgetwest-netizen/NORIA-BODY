@@ -1,0 +1,13 @@
+# Deploy Noria Body free on Render (same as the Noria Engine).
+# After the first deploy you get a public HTTPS URL anyone worldwide can open.
+services:
+  - type: web
+    name: noria-body
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: node server.js
+    envVars:
+      # The brain. Body only ever calls this one URL (never the Engine's secrets).
+      - key: NORIA_ENGINE_URL
+        value: https://noria-engine.onrender.com

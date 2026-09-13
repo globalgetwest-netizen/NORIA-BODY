@@ -1,0 +1,13 @@
+{
+  "name": "noria-body",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "NORIA Body — the embodiment layer around the existing Noria Engine. Separate project; never modifies the Engine.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "engines": { "node": ">=20" }
+}
