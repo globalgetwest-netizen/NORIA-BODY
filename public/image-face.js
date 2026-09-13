@@ -211,25 +211,9 @@ export class ImageFace {
       ctx.restore()
     }
 
-    // BLINK — a real eyelid descends from the top of each eye, clipped to the
-    // eye's rounded shape (no rectangular "bar"), tinted to the eyelid skin, with
-    // a soft lash line at its moving edge.
-    const closed = 1 - p.blink
-    if (closed > 0.03) {
-      for (let i = 0; i < this.cal.eyes.length; i++) {
-        const [ex, ey] = this.cal.eyes[i]
-        const [cx, cy] = P(ex, ey)
-        const rx = this.cal.eyeR[0] * iw * 1.2, ry = this.cal.eyeR[1] * ih * 1.35
-        const top = cy - ry, lidBottom = top + 2 * ry * closed
-        ctx.save()
-        ctx.beginPath(); ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2); ctx.clip()
-        ctx.fillStyle = (this._lid && this._lid[i]) || this._skin
-        ctx.fillRect(cx - rx, top, rx * 2, lidBottom - top)
-        ctx.strokeStyle = 'rgba(45,28,22,0.5)'; ctx.lineWidth = Math.max(1.1, ry * 0.13)
-        ctx.beginPath(); ctx.moveTo(cx - rx * 0.96, lidBottom); ctx.lineTo(cx + rx * 0.96, lidBottom); ctx.stroke()
-        ctx.restore()
-      }
-    }
+    // (No painted blink: a real eyelid can't be drawn on a flat photo without
+    //  looking like a patch. A clean, calm real photo is the honest choice; real
+    //  blinking needs an AI model + GPU, which is out of scope for the free site.)
     ctx.restore()
 
     if (this.listening) {
