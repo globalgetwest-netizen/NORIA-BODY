@@ -104,20 +104,24 @@ export class ImageFace {
   // mouth-shape fields need the Stage-2 photoreal engine and are ignored here.
   applyControls(c) {
     if (!c || typeof c !== 'object') return
+    // Supports the flat real-time format (expression/gaze/head_movement/emotion)
+    // and the older nested one (condition/eyes/body).
+    const emotion = c.emotion || (c.expression === 'bright' || c.expression === 'soft-smile' ? 'joy' : c.expression === 'concerned' ? 'concern' : c.expression === 'thoughtful' ? 'thinking' : 'warm')
+    const map = { joy: 1.4, warm: 1.12, calm: 1.0, curious: 1.15, playful: 1.35, focused: 0.95, supportive: 0.9, concerned: 0.82, concern: 0.82, thinking: 0.85 }
     const cond = c.condition || {}
-    const arousal = num(cond.arousal, 0.4), energy = num(cond.energy, 0.5)
-    this.energy = clamp(0.7 + 0.7 * (arousal * 0.5 + energy * 0.5), 0.6, 1.5)
+    if (typeof cond.arousal === 'number') this.energy = clamp(0.7 + 0.7 * (num(cond.arousal, 0.4) * 0.5 + num(cond.energy, 0.5) * 0.5), 0.6, 1.5)
+    else this.energy = map[emotion] ?? 1.0
 
-    const gaze = c.eyes && c.eyes.gaze
+    const gaze = c.gaze || (c.eyes && c.eyes.gaze)
     if (gaze === 'slight-left') this.lookAt(-0.4, 0)
     else if (gaze === 'slight-right') this.lookAt(0.4, 0)
     else if (gaze === 'down-thoughtful') this.lookAt(0.12, 0.5)
     else this.lookAt(0, 0)
 
-    const body = c.body || {}
-    if (body.head_movement === 'small-nod') this.gesture('nod')
-    else if (body.head_movement === 'gentle-tilt') this.gesture('tilt')
-    this._lean = (body.head_movement === 'lean-in' || body.posture === 'focused' || body.posture === 'attentive') ? 1 : 0
+    const hm = c.head_movement || (c.body && c.body.head_movement)
+    if (hm === 'small-nod') this.gesture('nod')
+    else if (hm === 'gentle-tilt') this.gesture('tilt')
+    this._lean = (hm === 'lean-in' || (c.body && (c.body.posture === 'focused' || c.body.posture === 'attentive'))) ? 1 : 0
   }
 
   update(dt) {

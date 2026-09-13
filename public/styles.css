@@ -36,6 +36,7 @@ button { cursor: pointer; border: 1px solid var(--line); background: var(--panel
 button.primary { background: var(--gold); color: #2a2000; border-color: var(--gold); font-weight: 700; }
 button.icon { font-size: 18px; padding: 9px 12px; }
 button.icon.on { background: var(--bad); border-color: var(--bad); }
+#talk.on { background: var(--bad); border-color: var(--bad); color: #fff; font-weight: 700; }
 button:disabled { opacity: .5; cursor: default; }
 .opts { display: flex; gap: 6px; width: 100%; margin-top: 2px; }
 .seg { font-size: 12.5px; color: var(--muted); display: inline-flex; align-items: center; gap: 5px; background: var(--panel); border: 1px solid var(--line); padding: 6px 10px; border-radius: 10px; }

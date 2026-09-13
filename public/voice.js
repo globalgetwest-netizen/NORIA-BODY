@@ -8,6 +8,21 @@
  * While speaking, real audio amplitude is exposed via onLevel() so Noria's mouth
  * moves with her actual voice. Falls back to the browser voice if it can't load.
  */
+// Strip anything that must never be voiced: emoji/pictographs, code, markdown,
+// links, symbols. Applied to EVERY string before it reaches text-to-speech.
+export function cleanForSpeech(t) {
+  return String(t || '')
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/`[^`]*`/g, ' ')
+    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/https?:\/\/\S+/g, ' ')
+    .replace(/\p{Extended_Pictographic}/gu, ' ')     // all emoji/pictographs
+    .replace(/[\u{1F1E6}-\u{1F1FF}]/gu, ' ')          // flag letters
+    .replace(/[←-⇿⌀-➿⬀-⯿️‍]/g, ' ')
+    .replace(/[#*_>~|]+/g, ' ')
+    .replace(/\s+/g, ' ').trim()
+}
+
 let _ttsPromise = null
 async function loadTTS(onProgress = () => {}) {
   if (_ttsPromise) return _ttsPromise
@@ -40,6 +55,7 @@ export class NeuralVoice {
   async speak(text, { variant = 'F', onStart = () => {}, onLevel = () => {}, onEnd = () => {} } = {}) {
     if (!this.ready && !(await this.warmup())) throw new Error('neural voice not ready')
     this._cancel = false
+    text = cleanForSpeech(text) // never voice emoji/symbols/code
     const ctx = this.ctx || (this.ctx = new (window.AudioContext || window.webkitAudioContext)())
     try { await ctx.resume() } catch {}
     const voice = VOICE_FOR[variant] || 'af_heart'

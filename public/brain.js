@@ -15,7 +15,9 @@ function speechify(t) {
     .replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1')
     .replace(/https?:\/\/\S+/g, ' ')
     .replace(/[#*_>~|]+/g, ' ')
-    .replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{2190}-\u{21FF}\u{2B00}-\u{2BFF}]/gu, ' ')
+    .replace(/\p{Extended_Pictographic}/gu, ' ')
+    .replace(/[\u{1F1E6}-\u{1F1FF}]/gu, ' ')
+    .replace(/[←-⇿⌀-➿⬀-⯿️‍]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim()
 }
@@ -116,6 +118,7 @@ export class Brain {
 
   speak(text, { variant = 'F', emotion = 'warm', pace = '', tone = '', onStart = () => {}, onWord = () => {}, onEnd = () => {} } = {}) {
     if (!('speechSynthesis' in window)) { onStart(); onEnd(); return }
+    text = speechify(text) // never voice emoji/symbols/markdown
     speechSynthesis.cancel()
     // Voice control: pace → rate, tone → pitch feel (falls back to emotion).
     const TONE = { calm: -0.05, warm: 0.05, curious: 0.08, playful: 0.12, focused: 0, supportive: -0.03, concerned: -0.08 }
