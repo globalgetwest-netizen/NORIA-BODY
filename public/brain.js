@@ -5,6 +5,21 @@
  *   - listen(): browser STT (mic) for voice input.
  * The Engine is never called cross-origin; only our own server is.
  */
+// Fallback: turn chat/markdown text into clean speech if the model omits
+// spoken_text — strip code, markdown, links, URLs and emoji so TTS doesn't
+// read symbols aloud like a screen reader.
+function speechify(t) {
+  return String(t || '')
+    .replace(/```[\s\S]*?```/g, ' (code is shown in the chat) ')
+    .replace(/`[^`]*`/g, ' ')
+    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/https?:\/\/\S+/g, ' ')
+    .replace(/[#*_>~|]+/g, ' ')
+    .replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{2190}-\u{21FF}\u{2B00}-\u{2BFF}]/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
 export class Brain {
   constructor() {
     this.history = []
@@ -63,9 +78,11 @@ export class Brain {
     const data = await res.json()
     const raw = data.answer ?? data.reply ?? ''
     const parsed = this._parseControls(raw)
-    const reply = (parsed && parsed.reply) || raw || "I'm here."
-    this.history.push({ role: 'user', content: query }, { role: 'assistant', content: reply })
-    return { reply, controls: parsed }
+    // display_text is shown in chat; spoken_text is voiced. Fall back gracefully.
+    const display = (parsed && (parsed.display_text || parsed.reply)) || raw || "I'm here."
+    const spoken = (parsed && parsed.spoken_text) || speechify(display)
+    this.history.push({ role: 'user', content: query }, { role: 'assistant', content: display })
+    return { display, spoken, controls: parsed }
   }
 
   // Send a 👍/👎 on an answer to the Engine's feedback/review pipeline.

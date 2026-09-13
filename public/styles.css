@@ -26,6 +26,8 @@ body { margin: 0; background: radial-gradient(1200px 700px at 50% -10%, #16324c 
 .bubble { max-width: 82%; padding: 9px 13px; border-radius: 14px; font-size: 14px; white-space: pre-wrap; }
 .bubble.you { align-self: flex-end; background: var(--gold); color: #2a2000; border-bottom-right-radius: 4px; }
 .bubble.noria { align-self: flex-start; background: var(--panel); border: 1px solid var(--line); border-bottom-left-radius: 4px; }
+.bubble code { background: rgba(255,255,255,.08); padding: 1px 5px; border-radius: 5px; font-family: ui-monospace, monospace; font-size: 13px; }
+.bubble pre.code { background: #071522; border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin: 8px 0; overflow-x: auto; font-family: ui-monospace, monospace; font-size: 13px; line-height: 1.45; white-space: pre; }
 
 .controls { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .controls input[type=text] { flex: 1; min-width: 180px; background: var(--panel); border: 1px solid var(--line); color: var(--ink); border-radius: 12px; padding: 12px 14px; font-size: 15px; }
