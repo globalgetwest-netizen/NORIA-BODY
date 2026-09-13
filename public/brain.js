@@ -107,13 +107,30 @@ export class Brain {
   }
 
   // ── Speech out ──────────────────────────────────────────────────────────
+  // Pick the MOST NATURAL voice the device offers — strongly prefer modern
+  // neural/"Natural"/online voices over the old robotic "Desktop" ones.
   pickVoice(variant) {
     const v = this.voices
     if (!v.length) return null
-    const en = v.filter((x) => /^en/i.test(x.lang))
-    const wantFemale = variant !== 'M'
-    const byName = en.find((x) => (wantFemale ? /female|zira|samantha|aria|jenny|libby|sonia/i : /male|david|guy|mark|ryan/i).test(x.name))
-    return byName || en[0] || v[0]
+    const en = v.filter((x) => /^en(-|_|$)/i.test(x.lang))
+    const pool = en.length ? en : v
+    const wantF = variant !== 'M'
+    const fNames = /aria|jenny|libby|sonia|michelle|emma|ava|clara|natasha|nicole|samantha|female|zira/i
+    const mNames = /guy|ryan|eric|christopher|brian|liam|male|mark|david/i
+    const score = (x) => {
+      const n = (x.name || '').toLowerCase(); let s = 0
+      if (/natural|neural/.test(n)) s += 120
+      if (/online/.test(n)) s += 50
+      if (/google/.test(n)) s += 35
+      if (/microsoft/.test(n)) s += 12
+      if (/desktop/.test(n)) s -= 40        // old robotic SAPI voices
+      if (wantF && fNames.test(n)) s += 25
+      if (!wantF && mNames.test(n)) s += 25
+      if (/en-us/i.test(x.lang)) s += 6
+      if (x.localService === false) s += 8   // network neural voices sound better
+      return s
+    }
+    return [...pool].sort((a, b) => score(b) - score(a))[0]
   }
 
   speak(text, { variant = 'F', emotion = 'warm', pace = '', tone = '', onStart = () => {}, onWord = () => {}, onEnd = () => {} } = {}) {
