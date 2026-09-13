@@ -11,6 +11,7 @@
  */
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v))
 const lerp = (a, b, t) => a + (b - a) * t
+const num = (v, d) => (typeof v === 'number' && isFinite(v) ? v : d)
 
 const CAL = {
   // srcs: tried in order until one loads. eyes/mouth are normalized [x,y]; r are [rx,ry].
@@ -94,6 +95,28 @@ export class ImageFace {
   }
   gesture(kind) { this._gesture = { k: kind === 'greet' ? 'nod' : kind, t: 0 } }
 
+  // Apply the PHYSICAL HUMAN PRESENCE control JSON. On a static photo we can
+  // honestly act on: energy (condition), head orientation (gaze→subtle turn),
+  // head movement, lean, breathing, gesture intensity. The detailed face/eye/
+  // mouth-shape fields need the Stage-2 photoreal engine and are ignored here.
+  applyControls(c) {
+    if (!c || typeof c !== 'object') return
+    const cond = c.condition || {}
+    const arousal = num(cond.arousal, 0.4), energy = num(cond.energy, 0.5)
+    this.energy = clamp(0.7 + 0.7 * (arousal * 0.5 + energy * 0.5), 0.6, 1.5)
+
+    const gaze = c.eyes && c.eyes.gaze
+    if (gaze === 'slight-left') this.lookAt(-0.4, 0)
+    else if (gaze === 'slight-right') this.lookAt(0.4, 0)
+    else if (gaze === 'down-thoughtful') this.lookAt(0.12, 0.5)
+    else this.lookAt(0, 0)
+
+    const body = c.body || {}
+    if (body.head_movement === 'small-nod') this.gesture('nod')
+    else if (body.head_movement === 'gentle-tilt') this.gesture('tilt')
+    this._lean = (body.head_movement === 'lean-in' || body.posture === 'focused' || body.posture === 'attentive') ? 1 : 0
+  }
+
   update(dt) {
     this._time += dt
     // Blink scheduler.
@@ -144,7 +167,8 @@ export class ImageFace {
     ctx.save()
     ctx.translate(w / 2 + sway + p.yaw * 22 + (this._go?.yaw || 0) * 26, h / 2 + p.pitch * 16 + (this._go?.pitch || 0) * 22)
     ctx.rotate((this._go?.roll || 0) + p.yaw * 0.03)
-    ctx.scale(breathe, breathe)
+    const lean = 1 + (this._lean || 0) * 0.025 // lean-in = a subtle move toward the viewer
+    ctx.scale(breathe * lean, breathe * lean)
 
     // Cover-fit base — the clean, untouched real face (never distorted).
     ctx.drawImage(im, -iw / 2, -ih / 2, iw, ih)

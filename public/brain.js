@@ -51,6 +51,31 @@ export class Brain {
     return { text: full, ...meta }
   }
 
+  // Structured ask: returns { reply, controls } where controls is the full
+  // PHYSICAL HUMAN PRESENCE JSON (situation/condition/face/eyes/body/voice).
+  // Falls back gracefully to plain text if the model doesn't return clean JSON.
+  async ask2(query, { system = '' } = {}) {
+    const res = await fetch('/brain/ask', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query, history: this.history.slice(-8), system }),
+    })
+    if (!res.ok) throw new Error('Brain unreachable (' + res.status + ')')
+    const data = await res.json()
+    const raw = data.answer ?? data.reply ?? ''
+    const parsed = this._parseControls(raw)
+    const reply = (parsed && parsed.reply) || raw || "I'm here."
+    this.history.push({ role: 'user', content: query }, { role: 'assistant', content: reply })
+    return { reply, controls: parsed }
+  }
+
+  _parseControls(raw) {
+    if (!raw) return null
+    let s = String(raw).trim().replace(/^```(?:json)?/i, '').replace(/```$/, '').trim()
+    const a = s.indexOf('{'), b = s.lastIndexOf('}')
+    if (a >= 0 && b > a) s = s.slice(a, b + 1)
+    try { const o = JSON.parse(s); return typeof o === 'object' ? o : null } catch { return null }
+  }
+
   // ── Speech out ──────────────────────────────────────────────────────────
   pickVoice(variant) {
     const v = this.voices
@@ -61,12 +86,14 @@ export class Brain {
     return byName || en[0] || v[0]
   }
 
-  speak(text, { variant = 'F', emotion = 'warm', onStart = () => {}, onWord = () => {}, onEnd = () => {} } = {}) {
+  speak(text, { variant = 'F', emotion = 'warm', pace = '', tone = '', onStart = () => {}, onWord = () => {}, onEnd = () => {} } = {}) {
     if (!('speechSynthesis' in window)) { onStart(); onEnd(); return }
     speechSynthesis.cancel()
-    // Emotion shapes her voice a little, the way a person's does.
-    const PROS = { joy: { r: 1.08, p: 0.12 }, warm: { r: 1.0, p: 0.05 }, neutral: { r: 1.0, p: 0 }, concern: { r: 0.92, p: -0.06 } }
-    const pr = PROS[emotion] || PROS.warm
+    // Voice control: pace → rate, tone → pitch feel (falls back to emotion).
+    const TONE = { calm: -0.05, warm: 0.05, curious: 0.08, playful: 0.12, focused: 0, supportive: -0.03, concerned: -0.08 }
+    const PACE = { slow: 0.9, natural: 1.0, energetic: 1.1 }
+    const EMO = { joy: { r: 1.08, p: 0.12 }, warm: { r: 1.0, p: 0.05 }, neutral: { r: 1.0, p: 0 }, concern: { r: 0.92, p: -0.06 } }
+    const pr = { r: PACE[pace] ?? (EMO[emotion] || EMO.warm).r, p: (tone in TONE) ? TONE[tone] : (EMO[emotion] || EMO.warm).p }
     // Split into sentences so long answers start talking sooner.
     const parts = text.replace(/\s+/g, ' ').match(/[^.!?]+[.!?]*/g) || [text]
     let started = false, idx = 0

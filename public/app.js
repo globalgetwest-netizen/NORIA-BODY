@@ -53,14 +53,17 @@ async function ask(query) {
   const out = bubble('noria', '…')
   let acc = ''
   try {
-    const { text } = await brain.ask(query, { system: noriaSystem(), onToken: (d) => { acc += d; out.textContent = acc } })
-    const reply = text || acc
+    const { reply, controls } = await brain.ask2(query, { system: noriaSystem() })
     out.textContent = reply
-    const emotion = body.emotionFor(reply) // her feeling → face + voice
+    // Her silent self-assessment drives the face; detailed face/mouth fields
+    // await the Stage-2 photoreal engine but are produced and logged now.
+    if (controls) { face.applyControls(controls); if (window.NORIA_DEBUG) console.log('NORIA controls', controls) }
+    const voice = (controls && controls.voice) || {}
+    const emotion = body.emotionFor(reply)
     chip('speaking')
     brain.speak(reply, {
-      variant, emotion,
-      onStart: () => { face.setSpeaking(true); body.react(reply, 'speaking') },
+      variant, emotion, pace: voice.pace, tone: voice.tone,
+      onStart: () => { face.setSpeaking(true) },
       onWord: () => face.pulseMouth(1),
       onEnd: () => { face.setSpeaking(false); chip('idle'); body.react('', 'idle') },
     })

@@ -78,6 +78,20 @@ const server = http.createServer(async (req, res) => {
     return
   }
 
+  // Non-streaming ask — used for the structured JSON control protocol (we need
+  // the whole answer to parse it, so streaming tokens don't apply here).
+  if (pathname === '/brain/ask' && req.method === 'POST') {
+    const body = await readBody(req)
+    try {
+      const r = await fetch(`${ENGINE}/v1/ask`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body })
+      const t = await r.text()
+      res.writeHead(r.status, { 'Content-Type': 'application/json' }).end(t)
+    } catch (e) {
+      res.writeHead(502, { 'Content-Type': 'application/json' }).end(JSON.stringify({ error: 'Cannot reach Noria Engine: ' + e.message }))
+    }
+    return
+  }
+
   // Convenience: health passthrough so the UI can show which brain it's wired to.
   if (pathname === '/brain/health') {
     try {
