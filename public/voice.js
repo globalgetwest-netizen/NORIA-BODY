@@ -31,8 +31,9 @@ async function loadTTS(onProgress = () => {}) {
     const KokoroTTS = mod.KokoroTTS
     const webgpu = !!navigator.gpu
     onProgress('loading')
+    // Full-quality model on the GPU (natural), quantized only as a CPU fallback.
     const tts = await KokoroTTS.from_pretrained('onnx-community/Kokoro-82M-v1.0-ONNX', {
-      dtype: 'q8', // ~86MB, good quality; keeps the download light
+      dtype: webgpu ? 'fp32' : 'q8',
       device: webgpu ? 'webgpu' : 'wasm',
     })
     return tts
@@ -40,7 +41,8 @@ async function loadTTS(onProgress = () => {}) {
   return _ttsPromise
 }
 
-const VOICE_FOR = { F: 'af_heart', M: 'am_michael' }
+// Warm, natural voices (Kokoro's highest-graded).
+const VOICE_FOR = { F: 'af_bella', M: 'am_michael' }
 
 export class NeuralVoice {
   constructor() { this.ctx = null; this.tts = null; this.ready = false; this._cancel = false }
