@@ -30,6 +30,8 @@ export class Brain {
       const load = () => (this.voices = speechSynthesis.getVoices())
       load(); speechSynthesis.onvoiceschanged = load
     }
+    // Console voice test: run  __testVoice()  in DevTools to check TTS directly.
+    try { window.__testVoice = (t) => this.speak(t || 'Hello, this is a Noria voice test. If you can hear me, the voice works.', {}) } catch {}
   }
 
   async health() {
@@ -134,33 +136,39 @@ export class Brain {
   }
 
   speak(text, { variant = 'F', emotion = 'warm', pace = '', tone = '', onStart = () => {}, onWord = () => {}, onEnd = () => {} } = {}) {
-    if (!('speechSynthesis' in window)) { onStart(); onEnd(); return }
+    const synth = window.speechSynthesis
+    if (!synth) { console.warn('[Noria voice] speechSynthesis is not available in this browser.'); onStart(); onEnd(); return }
     text = speechify(text) // never voice emoji/symbols/markdown
-    speechSynthesis.cancel()
-    // Voice control: pace → rate, tone → pitch feel (falls back to emotion).
+    if (!text) { onStart(); onEnd(); return }
+    if (!this.voices || !this.voices.length) this.voices = synth.getVoices() // ensure voices loaded
+    try { synth.cancel() } catch {}
     const TONE = { calm: -0.05, warm: 0.05, curious: 0.08, playful: 0.12, focused: 0, supportive: -0.03, concerned: -0.08 }
     const PACE = { slow: 0.9, natural: 1.0, energetic: 1.1 }
     const EMO = { joy: { r: 1.08, p: 0.12 }, warm: { r: 1.0, p: 0.05 }, neutral: { r: 1.0, p: 0 }, concern: { r: 0.92, p: -0.06 } }
     const pr = { r: PACE[pace] ?? (EMO[emotion] || EMO.warm).r, p: (tone in TONE) ? TONE[tone] : (EMO[emotion] || EMO.warm).p }
-    // Split into sentences so long answers start talking sooner.
     const parts = text.replace(/\s+/g, ' ').match(/[^.!?]+[.!?]*/g) || [text]
-    let started = false, idx = 0
+    let started = false, idx = 0, keepAlive = null
+    const stop = () => { if (keepAlive) { clearInterval(keepAlive); keepAlive = null } }
     const speakPart = () => {
-      if (idx >= parts.length) { onEnd(); return }
+      if (idx >= parts.length) { stop(); onEnd(); return }
       const u = new SpeechSynthesisUtterance(parts[idx++].trim())
       const voice = this.pickVoice(variant)
       if (voice) u.voice = voice
-      u.rate = pr.r; u.pitch = (variant === 'M' ? 0.9 : 1.05) + pr.p
-      u.onstart = () => { if (!started) { started = true; onStart() } }
+      u.rate = pr.r; u.pitch = (variant === 'M' ? 0.9 : 1.05) + pr.p; u.volume = 1
+      u.onstart = () => { if (!started) { started = true; console.log('[Noria voice] speaking with:', (voice && voice.name) || 'default voice'); onStart() } }
       u.onboundary = () => onWord()
       u.onend = () => speakPart()
-      u.onerror = () => speakPart()
-      speechSynthesis.speak(u)
+      u.onerror = (e) => { console.warn('[Noria voice] utterance error:', e && e.error); speakPart() }
+      try { synth.speak(u) } catch (e) { console.warn('[Noria voice] speak() threw:', e); speakPart() }
     }
-    speakPart()
+    // Chrome bugs: synth can be silently "paused", and long speech stalls ~15s.
+    // resume() now + a keep-alive resume, and start just after cancel settles.
+    try { synth.resume() } catch {}
+    keepAlive = setInterval(() => { try { if (synth.speaking) synth.resume() } catch {} }, 4000)
+    setTimeout(speakPart, 60)
   }
 
-  stopSpeaking() { if ('speechSynthesis' in window) speechSynthesis.cancel() }
+  stopSpeaking() { try { window.speechSynthesis && window.speechSynthesis.cancel() } catch {} }
 
   // ── Speech in ─────────────────────────────────────────────────────────────
   listen({ onResult = () => {}, onEnd = () => {} } = {}) {
