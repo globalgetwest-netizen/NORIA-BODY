@@ -61,9 +61,12 @@ export class Brain {
     return byName || en[0] || v[0]
   }
 
-  speak(text, { variant = 'F', onStart = () => {}, onWord = () => {}, onEnd = () => {} } = {}) {
+  speak(text, { variant = 'F', emotion = 'warm', onStart = () => {}, onWord = () => {}, onEnd = () => {} } = {}) {
     if (!('speechSynthesis' in window)) { onStart(); onEnd(); return }
     speechSynthesis.cancel()
+    // Emotion shapes her voice a little, the way a person's does.
+    const PROS = { joy: { r: 1.08, p: 0.12 }, warm: { r: 1.0, p: 0.05 }, neutral: { r: 1.0, p: 0 }, concern: { r: 0.92, p: -0.06 } }
+    const pr = PROS[emotion] || PROS.warm
     // Split into sentences so long answers start talking sooner.
     const parts = text.replace(/\s+/g, ' ').match(/[^.!?]+[.!?]*/g) || [text]
     let started = false, idx = 0
@@ -72,7 +75,7 @@ export class Brain {
       const u = new SpeechSynthesisUtterance(parts[idx++].trim())
       const voice = this.pickVoice(variant)
       if (voice) u.voice = voice
-      u.rate = 1.0; u.pitch = variant === 'M' ? 0.9 : 1.05
+      u.rate = pr.r; u.pitch = (variant === 'M' ? 0.9 : 1.05) + pr.p
       u.onstart = () => { if (!started) { started = true; onStart() } }
       u.onboundary = () => onWord()
       u.onend = () => speakPart()

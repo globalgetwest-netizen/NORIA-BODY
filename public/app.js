@@ -6,6 +6,7 @@
 import { ImageFace } from './image-face.js'
 import { Embodiment } from './embodiment.js'
 import { Brain } from './brain.js'
+import { noriaSystem } from './persona.js'
 
 const $ = (id) => document.getElementById(id)
 const canvas = $('face')
@@ -52,12 +53,14 @@ async function ask(query) {
   const out = bubble('noria', '…')
   let acc = ''
   try {
-    const { text } = await brain.ask(query, { onToken: (d) => { acc += d; out.textContent = acc } })
-    out.textContent = text || acc
+    const { text } = await brain.ask(query, { system: noriaSystem(), onToken: (d) => { acc += d; out.textContent = acc } })
+    const reply = text || acc
+    out.textContent = reply
+    const emotion = body.emotionFor(reply) // her feeling → face + voice
     chip('speaking')
-    brain.speak(text || acc, {
-      variant,
-      onStart: () => { face.setSpeaking(true); body.react(text || acc, 'speaking') },
+    brain.speak(reply, {
+      variant, emotion,
+      onStart: () => { face.setSpeaking(true); body.react(reply, 'speaking') },
       onWord: () => face.pulseMouth(1),
       onEnd: () => { face.setSpeaking(false); chip('idle'); body.react('', 'idle') },
     })

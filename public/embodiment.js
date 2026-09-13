@@ -26,24 +26,31 @@ export class Embodiment {
     }
   }
 
+  // Classify the feeling in Noria's reply → { emotion, expression, gesture }.
+  // Shared by the face (expression/energy) and the voice (prosody).
+  classify(text = '') {
+    const t = text.toLowerCase()
+    if (/\b(hello|hi|hey|welcome|good (morning|afternoon|evening)|greetings|nice to meet)\b/.test(t)) return { emotion: 'joy', expression: 'smile', gesture: 'greet' }
+    if (/\b(congratulations|wonderful|excellent|great news|so happy|thrilled|approved|success|delighted|exciting)\b/.test(t)) return { emotion: 'joy', expression: 'smile', gesture: 'nod' }
+    if (/\b(sorry|apolog|unfortunately|i can'?t|cannot|i understand how|that must be|stressful|worried|difficult|hard time|refus|denied|rejected)\b/.test(t)) return { emotion: 'concern', expression: 'concerned', gesture: null }
+    if (/\?\s*$/.test(text.trim()) || /\b(could you|can you|would you like|tell me more|what kind|which one|how about)\b/.test(t)) return { emotion: 'warm', expression: 'curious', gesture: 'tilt' }
+    if (/\b(glad|happy to|of course|absolutely|certainly|wonderful)\b/.test(t)) return { emotion: 'warm', expression: 'smile', gesture: 'nod' }
+    if (/\b(no|not|never|incorrect)\b/.test(t)) return { emotion: 'neutral', expression: 'neutral', gesture: 'shake' }
+    return { emotion: 'warm', expression: 'neutral', gesture: null }
+  }
+
+  // Just the emotion label (for voice prosody).
+  emotionFor(text = '') { return this.classify(text).emotion }
+
   // Derive intention from Noria's reply text + phase, emit commands.
   // phase: 'thinking' | 'speaking' | 'idle'
   react(text = '', phase = 'idle') {
     if (phase === 'thinking') { this.execute({ type: 'SET_EXPRESSION', expression: 'thinking' }); return }
     if (phase === 'idle') { this.execute({ type: 'IDLE' }); return }
 
-    const t = text.toLowerCase()
-    let expression = 'neutral'
-    let gesture = null
-    if (/\b(hello|hi|hey|welcome|good (morning|afternoon|evening)|greetings|nice to meet)\b/.test(t)) { expression = 'smile'; gesture = 'greet' }
-    else if (/\b(sorry|apolog|unfortunately|i can'?t|cannot|difficult|concern|careful|risk|warning)\b/.test(t)) expression = 'concerned'
-    else if (/\?\s*$/.test(text.trim()) || /\b(could you|can you|would you like|which|what kind|tell me more)\b/.test(t)) { expression = 'curious'; gesture = 'tilt' }
-    else if (/\b(great|excellent|congratulations|wonderful|happy|glad|success|approved|good news)\b/.test(t)) { expression = 'smile'; gesture = 'nod' }
-    else if (/\b(yes|correct|exactly|absolutely|of course|certainly)\b/.test(t)) gesture = 'nod'
-    else if (/\b(no|not|never|incorrect)\b/.test(t)) gesture = 'shake'
-
+    const { expression, gesture } = this.classify(text)
     this.execute({ type: 'SET_EXPRESSION', expression })
-    this.execute({ type: 'LOOK_AT', x: 0, y: 0 }) // return gaze to the person while speaking
+    this.execute({ type: 'LOOK_AT', x: 0, y: 0 }) // hold the person's gaze while speaking
     if (gesture) this.execute({ type: 'GESTURE', kind: gesture })
   }
 }
