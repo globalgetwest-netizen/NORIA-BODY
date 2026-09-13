@@ -23,6 +23,32 @@ export function cleanForSpeech(t) {
     .replace(/\s+/g, ' ').trim()
 }
 
+// Expand things TTS reads awkwardly, so speech sounds natural.
+function normalizeSpeech(t) {
+  return String(t || '')
+    .replace(/\be\.g\.\s*/gi, 'for example ')
+    .replace(/\bi\.e\.\s*/gi, 'that is ')
+    .replace(/\betc\.?/gi, 'etcetera')
+    .replace(/\bvs\.?\b/gi, 'versus')
+    .replace(/\s*&\s*/g, ' and ')
+    .replace(/(\d)\s*%/g, '$1 percent')
+    .replace(/\bSkyGlobe\b/g, 'Sky Globe')
+    .replace(/\s+/g, ' ').trim()
+}
+
+// Group sentences into ~natural phrases (~220 chars) so intonation flows.
+function phraseChunks(text) {
+  const sents = String(text).match(/[^.!?]+[.!?]*/g) || [text]
+  const out = []; let cur = ''
+  for (const s of sents) {
+    const t = s.trim(); if (!t) continue
+    if (cur && (cur + ' ' + t).length > 220) { out.push(cur); cur = t }
+    else cur = cur ? cur + ' ' + t : t
+  }
+  if (cur) out.push(cur)
+  return out.length ? out : [String(text)]
+}
+
 let _ttsPromise = null
 async function loadTTS(onProgress = () => {}) {
   if (_ttsPromise) return _ttsPromise
@@ -52,47 +78,54 @@ export class NeuralVoice {
     catch (e) { this.ready = false; console.warn('Neural voice unavailable:', e.message); return false }
   }
 
-  cancel() { this._cancel = true }
+  cancel() { this._cancel = true; for (const s of this._sources || []) { try { s.stop() } catch {} } this._sources = [] }
 
-  async speak(text, { variant = 'F', onStart = () => {}, onLevel = () => {}, onEnd = () => {} } = {}) {
+  async speak(text, { variant = 'F', pace = 'natural', onStart = () => {}, onLevel = () => {}, onEnd = () => {} } = {}) {
     if (!this.ready && !(await this.warmup())) throw new Error('neural voice not ready')
-    this._cancel = false
-    text = cleanForSpeech(text) // never voice emoji/symbols/code
+    this._cancel = false; this._sources = []
+    text = normalizeSpeech(cleanForSpeech(text)) // no emoji/symbols; natural reading
     const ctx = this.ctx || (this.ctx = new (window.AudioContext || window.webkitAudioContext)())
     try { await ctx.resume() } catch {}
     const voice = VOICE_FOR[variant] || 'af_heart'
+    const speed = pace === 'slow' ? 0.9 : pace === 'energetic' ? 1.08 : 1.0
 
     const analyser = ctx.createAnalyser(); analyser.fftSize = 512
     analyser.connect(ctx.destination)
-    const buf = new Uint8Array(analyser.fftSize)
+    const abuf = new Uint8Array(analyser.fftSize)
     let raf = 0
     const tick = () => {
-      analyser.getByteTimeDomainData(buf)
-      let s = 0; for (let i = 0; i < buf.length; i++) { const v = (buf[i] - 128) / 128; s += v * v }
-      onLevel(Math.min(1, Math.sqrt(s / buf.length) * 3.2))
+      analyser.getByteTimeDomainData(abuf)
+      let s = 0; for (let i = 0; i < abuf.length; i++) { const v = (abuf[i] - 128) / 128; s += v * v }
+      onLevel(Math.min(1, Math.sqrt(s / abuf.length) * 3.2))
       raf = requestAnimationFrame(tick)
     }
 
-    // Speak sentence by sentence, generating the NEXT one while the current
-    // plays — so gaps between sentences nearly disappear.
-    const parts = (String(text).match(/[^.!?]+[.!?]*/g) || [String(text)]).map((s) => s.trim()).filter(Boolean)
-    const gen = (p) => this.tts.generate(p, { voice })
-    let started = false
-    let nextP = parts.length ? gen(parts[0]) : null
+    // Group sentences into flowing phrases so intonation carries; play chunks
+    // back-to-back on the audio timeline (gapless), generating ahead.
+    const chunks = phraseChunks(text)
+    const gen = (p) => this.tts.generate(p, { voice, speed })
+    let started = false, playHead = 0
+    let nextP = chunks.length ? gen(chunks[0]) : null
     try {
-      for (let i = 0; i < parts.length; i++) {
+      for (let i = 0; i < chunks.length; i++) {
         if (this._cancel) break
         const raw = await nextP
-        nextP = i + 1 < parts.length ? gen(parts[i + 1]) : null // prefetch next
+        nextP = i + 1 < chunks.length ? gen(chunks[i + 1]) : null // prefetch
         if (this._cancel) break
         const ab = ctx.createBuffer(1, raw.audio.length, raw.sampling_rate)
         ab.getChannelData(0).set(raw.audio)
         const src = ctx.createBufferSource(); src.buffer = ab; src.connect(analyser)
-        if (!started) { started = true; onStart(); tick() }
-        await new Promise((res) => { src.onended = res; src.start() })
+        this._sources.push(src)
+        if (!started) { started = true; playHead = ctx.currentTime + 0.12; onStart(); tick() }
+        const startAt = Math.max(playHead, ctx.currentTime + 0.02)
+        src.start(startAt)
+        playHead = startAt + ab.duration
       }
+      // Wait until the last scheduled audio has finished.
+      const waitMs = Math.max(0, (playHead - ctx.currentTime) * 1000) + 60
+      await new Promise((res) => setTimeout(res, this._cancel ? 0 : waitMs))
     } finally {
-      cancelAnimationFrame(raf); onLevel(0); onEnd()
+      cancelAnimationFrame(raf); onLevel(0); this._sources = []; onEnd()
     }
   }
 }
