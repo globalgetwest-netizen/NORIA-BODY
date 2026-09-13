@@ -23,18 +23,11 @@ export function cleanForSpeech(t) {
     .replace(/\s+/g, ' ').trim()
 }
 
-// Expand things TTS reads awkwardly, so speech sounds natural.
-function normalizeSpeech(t) {
-  return String(t || '')
-    .replace(/\be\.g\.\s*/gi, 'for example ')
-    .replace(/\bi\.e\.\s*/gi, 'that is ')
-    .replace(/\betc\.?/gi, 'etcetera')
-    .replace(/\bvs\.?\b/gi, 'versus')
-    .replace(/\s*&\s*/g, ' and ')
-    .replace(/(\d)\s*%/g, '$1 percent')
-    .replace(/\bSkyGlobe\b/g, 'Sky Globe')
-    .replace(/\s+/g, ' ').trim()
-}
+// Expand things TTS reads awkwardly (money, dates, abbreviations, symbols) into
+// natural spoken English. Shares the normalizer with the browser-voice path so
+// both voices say the same thing the same way.
+import { normalizeSpokenText } from './brain.js'
+function normalizeSpeech(t) { return normalizeSpokenText(t) }
 
 // Group sentences into ~natural phrases (~220 chars) so intonation flows.
 function phraseChunks(text) {

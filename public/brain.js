@@ -25,7 +25,29 @@ function speechify(t) {
 // Expand things a TTS voice reads awkwardly, so speech sounds natural and human
 // rather than like a screen reader. Applied to the browser-voice path.
 function normalizeForSpeech(t) {
+  return normalizeSpokenText(t)
+}
+
+// Shared spoken-text normalizer: turns things a TTS reads awkwardly (money,
+// dates, abbreviations, symbols) into natural spoken English, so Noria sounds
+// human rather than like a screen reader. Chat text is untouched — only speech.
+const _MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
+const _CUR = { '$': 'dollars', '€': 'euros', '£': 'pounds' }
+function _ord(n) {
+  const s = ['th', 'st', 'nd', 'rd'], v = n % 100
+  return n + (s[(v - 20) % 10] || s[v] || s[0])
+}
+export function normalizeSpokenText(t) {
   return String(t || '')
+    // ISO dates 2026-09-13 → "September 13th, 2026"
+    .replace(/\b(\d{4})-(\d{2})-(\d{2})\b/g, (m, y, mo, d) => {
+      const mi = +mo - 1; return _MONTHS[mi] ? `${_MONTHS[mi]} ${_ord(+d)}, ${y}` : m
+    })
+    // Money $1,200.50 → "1200 dollars and 50 cents"; $300 → "300 dollars"
+    .replace(/([$€£])\s?(\d[\d,]*)(?:\.(\d{2}))?/g, (m, sym, whole, cents) => {
+      const unit = _CUR[sym] || ''; const n = whole.replace(/,/g, '')
+      return cents ? `${n} ${unit} and ${cents} cents` : `${n} ${unit}`
+    })
     .replace(/\be\.g\.\s*/gi, 'for example ')
     .replace(/\bi\.e\.\s*/gi, 'that is ')
     .replace(/\betc\.?/gi, 'etcetera')
