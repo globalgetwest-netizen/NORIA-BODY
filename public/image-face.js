@@ -193,10 +193,13 @@ export class ImageFace {
     if (this._fullBody) {
       const fs = Math.min(w / im.naturalWidth, h / im.naturalHeight)
       const fiw = im.naturalWidth * fs, fih = im.naturalHeight * fs
-      const breathe = 1 + Math.sin(this._time * 1.1) * 0.004 * (this.speaking ? 2.2 : 1)
+      // Real voice amplitude (0..1) while she speaks — her body subtly lifts with
+      // her words, so she reads as present and alive, not a static poster.
+      const voice = this.speaking ? (p.mouth || 0) : 0
+      const breathe = 1 + Math.sin(this._time * 1.1) * 0.004 * (this.speaking ? 2.2 : 1) + voice * 0.012
       const sway = Math.sin(this._time * 0.5) * 3 * this.energy
       ctx.save()
-      ctx.translate(w / 2 + sway + (p.yaw || 0) * 12, h / 2 + (p.pitch || 0) * 8)
+      ctx.translate(w / 2 + sway + (p.yaw || 0) * 12, h / 2 + (p.pitch || 0) * 8 - voice * 4)
       ctx.scale(breathe, breathe)
       ctx.drawImage(im, -fiw / 2, -fih / 2, fiw, fih)
       ctx.restore()

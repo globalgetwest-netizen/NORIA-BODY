@@ -22,6 +22,23 @@ function speechify(t) {
     .trim()
 }
 
+// Expand things a TTS voice reads awkwardly, so speech sounds natural and human
+// rather than like a screen reader. Applied to the browser-voice path.
+function normalizeForSpeech(t) {
+  return String(t || '')
+    .replace(/\be\.g\.\s*/gi, 'for example ')
+    .replace(/\bi\.e\.\s*/gi, 'that is ')
+    .replace(/\betc\.?/gi, 'etcetera')
+    .replace(/\bvs\.?\b/gi, 'versus')
+    .replace(/\bapprox\.?\b/gi, 'approximately')
+    .replace(/\s*&\s*/g, ' and ')
+    .replace(/(\d)\s*%/g, '$1 percent')
+    .replace(/\bSkyGlobe\b/g, 'Sky Globe')
+    .replace(/\s+([,.;:!?])/g, '$1')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
 export class Brain {
   constructor() {
     this.history = []
@@ -117,19 +134,22 @@ export class Brain {
     const en = v.filter((x) => /^en(-|_|$)/i.test(x.lang))
     const pool = en.length ? en : v
     const wantF = variant !== 'M'
-    const fNames = /aria|jenny|libby|sonia|michelle|emma|ava|clara|natasha|nicole|samantha|female|zira/i
-    const mNames = /guy|ryan|eric|christopher|brian|liam|male|mark|david/i
+    const fNames = /aria|jenny|libby|sonia|michelle|emma|ava|clara|natasha|nicole|samantha|a(ria|va)|female|zira/i
+    const mNames = /guy|ryan|eric|christopher|brian|liam|andrew|steffan|davis|tony|male|mark|david/i
     const score = (x) => {
       const n = (x.name || '').toLowerCase(); let s = 0
-      if (/natural|neural/.test(n)) s += 120
-      if (/online/.test(n)) s += 50
+      if (/natural/.test(n)) s += 160        // Microsoft "…(Natural)" = the most human
+      if (/neural/.test(n)) s += 120
+      if (/online/.test(n)) s += 60          // Edge online neural voices
       if (/google/.test(n)) s += 35
       if (/microsoft/.test(n)) s += 12
-      if (/desktop/.test(n)) s -= 40        // old robotic SAPI voices
-      if (wantF && fNames.test(n)) s += 25
-      if (!wantF && mNames.test(n)) s += 25
-      if (/en-us/i.test(x.lang)) s += 6
-      if (x.localService === false) s += 8   // network neural voices sound better
+      if (/desktop|david|zira|mark|hazel/.test(n)) s -= 60   // old robotic SAPI voices
+      if (wantF && fNames.test(n)) s += 40
+      if (!wantF && mNames.test(n)) s += 40
+      if (wantF && mNames.test(n)) s -= 45   // never a male voice for Noria-F
+      if (!wantF && fNames.test(n)) s -= 45   // never a female voice for Noria-M
+      if (/en-us/i.test(x.lang)) s += 8
+      if (x.localService === false) s += 10  // network neural voices sound better
       return s
     }
     return [...pool].sort((a, b) => score(b) - score(a))[0]
@@ -138,7 +158,7 @@ export class Brain {
   speak(text, { variant = 'F', emotion = 'warm', pace = '', tone = '', onStart = () => {}, onWord = () => {}, onEnd = () => {} } = {}) {
     const synth = window.speechSynthesis
     if (!synth) { console.warn('[Noria voice] speechSynthesis is not available in this browser.'); onStart(); onEnd(); return }
-    text = speechify(text) // never voice emoji/symbols/markdown
+    text = normalizeForSpeech(speechify(text)) // never voice emoji/symbols/markdown; read naturally
     if (!text) { onStart(); onEnd(); return }
     if (!this.voices || !this.voices.length) this.voices = synth.getVoices() // ensure voices loaded
     try { synth.cancel() } catch {}
