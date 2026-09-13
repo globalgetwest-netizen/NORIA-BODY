@@ -68,6 +68,17 @@ export class Brain {
     return { reply, controls: parsed }
   }
 
+  // Send a 👍/👎 on an answer to the Engine's feedback/review pipeline.
+  async sendFeedback(rating, question, answer) {
+    try {
+      await fetch('/brain/feedback', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rating, question: (question || '').slice(0, 2000), answer: (answer || '').slice(0, 2000) }),
+      })
+      return true
+    } catch { return false }
+  }
+
   _parseControls(raw) {
     if (!raw) return null
     let s = String(raw).trim().replace(/^```(?:json)?/i, '').replace(/```$/, '').trim()

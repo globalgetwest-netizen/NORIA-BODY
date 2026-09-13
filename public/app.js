@@ -7,6 +7,7 @@ import { ImageFace } from './image-face.js'
 import { Embodiment } from './embodiment.js'
 import { Brain } from './brain.js'
 import { noriaSystem } from './persona.js'
+import { initMemory, memoryContext, applyMemoryUpdate, forgetMemory } from './memory.js'
 
 const $ = (id) => document.getElementById(id)
 const canvas = $('face')
@@ -14,6 +15,9 @@ let variant = 'F'
 const face = new ImageFace(canvas, variant)
 const body = new Embodiment(face)
 const brain = new Brain()
+
+// Persistent memory of the returning person (this browser).
+const { m: mem, returning } = initMemory()
 
 // ── Render loop ─────────────────────────────────────────────────────────────
 let last = performance.now()
@@ -42,6 +46,24 @@ function bubble(cls, text) {
 }
 const chip = (s) => ($('statechip').textContent = s)
 
+// 👍/👎 under Noria's answers → the Engine's feedback/review pipeline (learning).
+function addFeedback(el, question, answer) {
+  const bar = document.createElement('div'); bar.className = 'fb'
+  const mk = (label, rating) => {
+    const b = document.createElement('button'); b.type = 'button'; b.textContent = label
+    b.addEventListener('click', () => {
+      brain.sendFeedback(rating, question, answer)
+      bar.querySelectorAll('button').forEach((x) => (x.disabled = true))
+      b.classList.add('on')
+      const t = document.createElement('span'); t.className = 'fbthx'; t.textContent = 'thanks — noted'
+      bar.appendChild(t)
+    })
+    return b
+  }
+  bar.append(mk('👍', 'up'), mk('👎', 'down'))
+  el.appendChild(bar)
+}
+
 // ── Ask flow ──────────────────────────────────────────────────────────────
 let busy = false
 async function ask(query) {
@@ -53,8 +75,11 @@ async function ask(query) {
   const out = bubble('noria', '…')
   let acc = ''
   try {
-    const { reply, controls } = await brain.ask2(query, { system: noriaSystem() })
+    const { reply, controls } = await brain.ask2(query, { system: noriaSystem() + memoryContext(mem) })
     out.textContent = reply
+    addFeedback(out, query, reply) // 👍/👎 → the learning loop
+    // Persist anything durable she chose to remember about this person.
+    if (controls && controls.memory) applyMemoryUpdate(mem, controls.memory)
     // Her silent self-assessment drives the face; detailed face/mouth fields
     // await the Stage-2 photoreal engine but are produced and logged now.
     if (controls) { face.applyControls(controls); if (window.NORIA_DEBUG) console.log('NORIA controls', controls) }
@@ -143,5 +168,19 @@ async function trackFace(video) {
   step()
 }
 
-// Greeting once the brain status is known.
-setTimeout(() => { face.setExpression('smile'); face.gesture('greet') }, 600)
+// Greeting — warmer and personal for a returning person she remembers.
+setTimeout(() => {
+  face.setExpression('smile'); face.gesture('greet')
+  const name = mem && mem.profile && mem.profile.name
+  if (returning) {
+    const g = name
+      ? `Welcome back, ${name}. 👋 Lovely to see you again — how can I help today?`
+      : `Welcome back. 👋 Good to see you again — what can I help you with?`
+    bubble('noria', g)
+    try { brain.speak(g, { variant, onStart: () => face.setSpeaking(true), onWord: () => face.pulseMouth(1), onEnd: () => face.setSpeaking(false) }) } catch {}
+  }
+}, 600)
+
+// "Forget me" — privacy control: wipe what this browser remembers.
+const fm = $('forget')
+if (fm) fm.addEventListener('click', () => { forgetMemory(); bubble('noria', "Done — I've cleared what I remembered on this device."); })

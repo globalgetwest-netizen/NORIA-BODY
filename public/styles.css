@@ -37,3 +37,13 @@ button.icon.on { background: var(--bad); border-color: var(--bad); }
 button:disabled { opacity: .5; cursor: default; }
 .opts { display: flex; gap: 6px; width: 100%; margin-top: 2px; }
 .seg { font-size: 12.5px; color: var(--muted); display: inline-flex; align-items: center; gap: 5px; background: var(--panel); border: 1px solid var(--line); padding: 6px 10px; border-radius: 10px; }
+.forget { cursor: pointer; margin-left: auto; }
+.forget:hover { color: var(--ink); border-color: var(--gold); }
+
+/* Feedback (👍/👎) under Noria's answers */
+.fb { display: flex; align-items: center; gap: 6px; margin-top: 8px; }
+.fb button { background: transparent; border: 1px solid var(--line); border-radius: 8px; padding: 2px 8px; font-size: 13px; cursor: pointer; opacity: .8; }
+.fb button:hover:not(:disabled) { opacity: 1; border-color: var(--gold); }
+.fb button.on { border-color: var(--gold); background: rgba(217,180,91,.15); }
+.fb button:disabled { cursor: default; }
+.fbthx { font-size: 11.5px; color: var(--muted); }

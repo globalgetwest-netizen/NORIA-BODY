@@ -92,6 +92,19 @@ const server = http.createServer(async (req, res) => {
     return
   }
 
+  // Feedback (👍/👎) → the Engine's review pipeline. The learning loop's input.
+  if (pathname === '/brain/feedback' && req.method === 'POST') {
+    const body = await readBody(req)
+    try {
+      const r = await fetch(`${ENGINE}/v1/feedback`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body })
+      const t = await r.text()
+      res.writeHead(r.status, { 'Content-Type': 'application/json' }).end(t)
+    } catch (e) {
+      res.writeHead(502, { 'Content-Type': 'application/json' }).end(JSON.stringify({ error: e.message }))
+    }
+    return
+  }
+
   // Convenience: health passthrough so the UI can show which brain it's wired to.
   if (pathname === '/brain/health') {
     try {
