@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Noria — Face Verification</title>
+  <link rel="stylesheet" href="styles.css" />
+  <style>
+    .wrap { max-width: 620px; margin: 0 auto; padding: 18px; }
+    .card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 18px; margin-bottom: 14px; }
+    .warn { background: rgba(248,113,113,.12); border-color: rgba(248,113,113,.5); color: #ffd7d7; font-size: 13px; }
+    h1 { font-size: 18px; margin: 6px 0 2px; } h2 { font-size: 15px; margin: 0 0 8px; }
+    p, li { color: var(--muted); font-size: 13.5px; line-height: 1.5; }
+    video { width: 100%; max-width: 360px; border-radius: 12px; border: 1px solid var(--line); background: #000; transform: scaleX(-1); display: block; margin: 10px 0; }
+    .row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+    button.primary { background: var(--gold); color: #2a2000; border-color: var(--gold); font-weight: 700; }
+    button.danger { border-color: rgba(248,113,113,.6); color: #ffb4b4; }
+    .msg { margin-top: 10px; font-size: 13.5px; min-height: 20px; }
+    .ok { color: var(--ok); } .bad { color: var(--bad); }
+    pre.result { background: #071522; border: 1px solid var(--line); border-radius: 8px; padding: 10px; font-size: 12.5px; overflow-x: auto; }
+    a.back { color: var(--gold); font-size: 13px; }
+    [hidden] { display: none !important; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card warn">
+      ⚠️ <b>Prototype — not production security.</b> Runs entirely on your device; your face template never leaves this browser and is encrypted here. The liveness check is basic (defeats a still photo, not a video replay). Real anti‑spoofing needs a certified provider. See BIOMETRIC.md.
+    </div>
+
+    <div class="card">
+      <h1>✦ Noria — Face Verification <span class="tag">beta · on‑device</span></h1>
+      <p>Optional. You can always <a class="back" href="/">use Noria without face verification</a>.</p>
+      <div class="msg" id="status">…</div>
+    </div>
+
+    <!-- Consent -->
+    <div class="card" id="consentCard" hidden>
+      <h2>Your consent (required first)</h2>
+      <ul>
+        <li><b>What:</b> a mathematical face template (an embedding), not your photos.</li>
+        <li><b>Why:</b> to unlock <i>your own</i> Noria profile and approved memories — a 1:1 check against only your enrolled template.</li>
+        <li><b>Never:</b> identify strangers, search the internet or any face database, or infer anything about you.</li>
+        <li><b>Where:</b> stored only in this browser, encrypted. It never goes to a server or to Noria's chat.</li>
+        <li><b>Retention & deletion:</b> kept until you delete it — one tap, permanent, any time.</li>
+      </ul>
+      <div class="row">
+        <button class="primary" id="consentBtn">I consent — continue</button>
+        <a class="seg" href="/">No thanks, use Noria normally</a>
+      </div>
+    </div>
+
+    <!-- Actions -->
+    <div class="card" id="actionsCard" hidden>
+      <h2>Face verification</h2>
+      <video id="cam" playsinline muted hidden></video>
+      <div class="msg" id="live"></div>
+      <div class="row">
+        <button class="primary" id="enrollBtn">Enroll my face</button>
+        <button id="verifyBtn">Verify with Face</button>
+        <button class="danger" id="deleteBtn">Delete my face profile</button>
+        <button id="withdrawBtn">Withdraw consent</button>
+      </div>
+      <pre class="result" id="result" hidden></pre>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@vladmandic/face-api/dist/face-api.js"></script>
+  <script type="module" src="verify.js"></script>
+</body>
+</html>
