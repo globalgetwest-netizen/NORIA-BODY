@@ -78,8 +78,11 @@ export class ImageFace {
   lookAt(nx, ny) { this.t.gazeX = clamp(nx, -1, 1); this.t.gazeY = clamp(ny, -1, 1); this.t.yaw = clamp(nx * 0.3, -0.4, 0.4); this.t.pitch = clamp(ny * 0.18, -0.25, 0.25) }
   turnHead(yaw, pitch) { this.t.yaw = clamp(yaw, -0.5, 0.5); this.t.pitch = clamp(pitch, -0.3, 0.3) }
   setListening(on) { this.listening = on }
-  setSpeaking(on) { this.speaking = on; if (!on) this.t.mouth = 0 }
+  setSpeaking(on) { this.speaking = on; if (!on) { this._audioDriven = false; this.t.mouth = 0 } }
   pulseMouth(i = 1) { this._mouthPulse = Math.min(1, this._mouthPulse + 0.5 * i) }
+  // Drive the mouth from real audio amplitude (neural voice) instead of a fake
+  // oscillation — so it moves with her actual speech.
+  audioLevel(v) { this._audioDriven = true; this.t.mouth = clamp(v, 0, 1) }
   // Emotion → how alive she is (energy scales mouth animation + head motion),
   // plus gaze cues. On a real photo we convey feeling through motion + energy,
   // not by distorting the face.
@@ -132,7 +135,7 @@ export class ImageFace {
       this._nextSaccade = 1.6 + Math.random() * 3
     }
 
-    if (this.speaking) {
+    if (this.speaking && !this._audioDriven) {
       const s = this._time
       const base = 0.2 + 0.24 * Math.abs(Math.sin(s * 10.5)) + 0.14 * Math.abs(Math.sin(s * 17 + 1))
       this._mouthPulse = Math.max(0, this._mouthPulse - dt * 3)
