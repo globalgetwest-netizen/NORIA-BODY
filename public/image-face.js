@@ -18,11 +18,13 @@ const CAL = {
   // Calibrated to the real renders (noria-f.png 1254×1254, noria-m.png 1054×1492).
   F: {
     srcs: ['assets/noria-f.png', 'assets/noria-f.jpg', 'assets/noria-f.jpeg', 'assets/noria-f.webp'],
+    full: ['assets/noria-f-full.png', 'assets/noria-f-full.jpg', 'assets/noria-f-full.jpeg', 'assets/noria-f-full.webp'],
     eyes: [[0.40, 0.347], [0.59, 0.347]], eyeR: [0.052, 0.024],
     mouth: [0.49, 0.55], mouthR: [0.075, 0.03],
   },
   M: {
     srcs: ['assets/noria-m.png', 'assets/noria-m.jpg', 'assets/noria-m.jpeg', 'assets/noria-m.webp'],
+    full: ['assets/noria-m-full.png', 'assets/noria-m-full.jpg', 'assets/noria-m-full.jpeg', 'assets/noria-m-full.webp'],
     eyes: [[0.445, 0.342], [0.588, 0.342]], eyeR: [0.05, 0.023],
     mouth: [0.505, 0.525], mouthR: [0.07, 0.03],
   },
@@ -45,15 +47,19 @@ export class ImageFace {
 
   setVariant(v) {
     this.variant = CAL[v] ? v : 'F'; this.cal = CAL[this.variant]
-    this._img = null; this._loadImage(this.cal.srcs.slice())
+    this._img = null; this._fullBody = false
+    this._loadImage((this.cal.full || []).slice(), true) // prefer a full-body render if present
   }
 
-  _loadImage(srcs) {
-    if (!srcs.length) { this._img = 'missing'; return }
+  _loadImage(srcs, isFull) {
+    if (!srcs.length) {
+      if (isFull) { this._loadImage(this.cal.srcs.slice(), false); return } // fall back to head render
+      this._img = 'missing'; return
+    }
     const src = srcs.shift()
     const im = new Image()
-    im.onload = () => { this._img = im; this._sampleSkin(im) }
-    im.onerror = () => this._loadImage(srcs)
+    im.onload = () => { this._img = im; this._fullBody = !!isFull; if (!isFull) this._sampleSkin(im) }
+    im.onerror = () => this._loadImage(srcs, isFull)
     im.src = src
   }
 
@@ -180,6 +186,27 @@ export class ImageFace {
     ctx.clearRect(0, 0, w, h)
     if (this._img === 'missing' || !this._img) { this._placeholder(); return }
     const im = this._img
+
+    // FULL-BODY presence: show the whole standing figure (contain-fit), with
+    // subtle breathing/sway (a bit more alive while speaking). No face overlays
+    // (the face is small at full-body scale). She's a real, present figure.
+    if (this._fullBody) {
+      const fs = Math.min(w / im.naturalWidth, h / im.naturalHeight)
+      const fiw = im.naturalWidth * fs, fih = im.naturalHeight * fs
+      const breathe = 1 + Math.sin(this._time * 1.1) * 0.004 * (this.speaking ? 2.2 : 1)
+      const sway = Math.sin(this._time * 0.5) * 3 * this.energy
+      ctx.save()
+      ctx.translate(w / 2 + sway + (p.yaw || 0) * 12, h / 2 + (p.pitch || 0) * 8)
+      ctx.scale(breathe, breathe)
+      ctx.drawImage(im, -fiw / 2, -fih / 2, fiw, fih)
+      ctx.restore()
+      if (this.listening) {
+        ctx.strokeStyle = `rgba(96,165,250,${0.35 + 0.2 * Math.sin(this._time * 4)})`
+        ctx.lineWidth = 4; ctx.strokeRect(3, 3, w - 6, h - 6)
+      }
+      return
+    }
+
     const scale = Math.max(w / im.naturalWidth, h / im.naturalHeight)
     const iw = im.naturalWidth * scale, ih = im.naturalHeight * scale
     const breathe = 1 + Math.sin(this._time * 1.1) * 0.006
