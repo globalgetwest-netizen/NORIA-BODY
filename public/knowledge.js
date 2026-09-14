@@ -257,6 +257,28 @@ export const KNOWLEDGE = [
     text: 'Milk thistle (silymarin) is traditionally used for liver health, with antioxidant activity and some supportive but not definitive human evidence. Generally well tolerated. It is not a treatment for serious liver disease or a licence to drink alcohol — real liver problems need medical assessment.',
   },
 
+  // ═══════════════ TRADITIONAL & PROPHETIC REMEDIES (respect + honest evidence) ═══════════════
+  {
+    id: 'black-seed-nigella',
+    topics: ['black seed', 'nigella', 'nigella sativa', 'kalonji', 'habbat', 'thymoquinone', 'prophetic medicine', 'black cumin'],
+    text: 'Black seed (Nigella sativa, "habbat al-barakah") is honoured in prophetic and traditional medicine. Modern research on its compound thymoquinone shows anti-inflammatory, antioxidant, and immune-modulating effects in lab and small human studies, with modest signals for blood sugar, blood pressure, and asthma symptoms. It is a valued supportive food and traditional remedy — but not a proven cure for serious disease and not a replacement for treatment. High amounts can lower blood sugar and blood pressure and affect clotting, so take care alongside medicines and before surgery.',
+  },
+  {
+    id: 'dates-fruit',
+    topics: ['dates', 'date fruit', 'ajwa', 'palm', 'break fast', 'iftar'],
+    text: 'Dates are a nutritious food (fibre, potassium, natural sugars, antioxidants), valued across traditions and scripture and a gentle way to restore energy when breaking a fast. Because they are high in natural sugar, people with diabetes should count them in their carbohydrate intake and eat them in moderation.',
+  },
+  {
+    id: 'olive-oil',
+    topics: ['olive oil', 'olive', 'mediterranean diet', 'healthy fat'],
+    text: 'Olive oil, honoured in many faith traditions, is a healthy fat rich in monounsaturated fats and antioxidants (polyphenols) and is central to the Mediterranean dietary pattern, which is linked with better heart health. It is a good everyday food — nourishing, not a cure for disease.',
+  },
+  {
+    id: 'fasting',
+    topics: ['fasting', 'fast', 'intermittent fasting', 'ramadan', 'abstain food'],
+    text: 'Fasting is practised in many faiths and also studied scientifically (intermittent fasting), with some metabolic and self-discipline benefits for many people. It is generally safe for healthy adults, but those with diabetes (especially on insulin or sulfonylureas), pregnancy, kidney disease, eating disorders, or on certain medicines should seek medical advice to fast safely and adjust treatment.',
+  },
+
   // ═══════════════ CANCER ═══════════════
   {
     id: 'cancer-treatment-overview',
