@@ -61,6 +61,38 @@ export function normalizeSpokenText(t) {
     .trim()
 }
 
+// Detect the language of text (script + common-word heuristic) so speech reads
+// WORDS in the right language instead of spelling out letters. LANG_BCP maps the
+// short code to a speech-synthesis locale.
+export const LANG_BCP = { en: 'en-US', fr: 'fr-FR', es: 'es-ES', pt: 'pt-BR', de: 'de-DE', it: 'it-IT', ar: 'ar-SA', zh: 'zh-CN', ja: 'ja-JP', ko: 'ko-KR', ru: 'ru-RU', hi: 'hi-IN', tr: 'tr-TR', nl: 'nl-NL' }
+export function detectLang(text) {
+  const s = String(text || '')
+  if (/[؀-ۿ]/.test(s)) return 'ar'
+  if (/[一-鿿]/.test(s)) return 'zh'
+  if (/[぀-ヿ]/.test(s)) return 'ja'
+  if (/[가-힯]/.test(s)) return 'ko'
+  if (/[Ѐ-ӿ]/.test(s)) return 'ru'
+  if (/[ऀ-ॿ]/.test(s)) return 'hi'
+  const l = ' ' + s.toLowerCase() + ' '
+  // Unambiguous letters/punctuation first
+  if (/[¿¡ñ]/.test(l)) return 'es'
+  if (/[œ]|ç/.test(l)) return 'fr'
+  if (/ß/.test(l)) return 'de'
+  if (/[ãõ]/.test(l)) return 'pt'
+  if (/[ğş]/.test(l) || /\b(merhaba|teşekkür|evet|için)\b/.test(l)) return 'tr'
+  // Common-word signals
+  if (/\b(le|la|les|des|une|est|vous|bonjour|merci|avec|pour|pas|je|tu|nous|oui)\b/.test(l)) return 'fr'
+  if (/\b(el|los|una|está|gracias|hola|pero|porque|usted|con|cómo|qué|muy)\b/.test(l)) return 'es'
+  if (/\b(você|obrigado|não|isso|uma|com)\b/.test(l)) return 'pt'
+  if (/\b(und|der|die|das|ist|nicht|danke|hallo|mit|ich|guten|wie|geht)\b/.test(l)) return 'de'
+  if (/\b(ciao|grazie|perché|sono|questo|come|che)\b/.test(l)) return 'it'
+  // Accented-letter fallback
+  if (/[àâéèêëîïôûùüÿ]/.test(l)) return 'fr'
+  if (/[áíóú]/.test(l)) return 'es'
+  if (/[äöü]/.test(l)) return 'de'
+  return 'en'
+}
+
 export class Brain {
   constructor() {
     this.history = []
@@ -150,11 +182,16 @@ export class Brain {
   // ── Speech out ──────────────────────────────────────────────────────────
   // Pick the MOST NATURAL voice the device offers — strongly prefer modern
   // neural/"Natural"/online voices over the old robotic "Desktop" ones.
-  pickVoice(variant) {
+  pickVoice(variant, lang = 'en') {
     const v = this.voices
     if (!v.length) return null
-    const en = v.filter((x) => /^en(-|_|$)/i.test(x.lang))
-    const pool = en.length ? en : v
+    const base = (lang || 'en').slice(0, 2).toLowerCase()
+    // Only choose from voices that actually speak this language — forcing an
+    // English voice onto foreign text is what makes it spell letters. If the
+    // device has no voice for the language, return null and let the engine pick
+    // via utterance.lang.
+    const pool = v.filter((x) => (x.lang || '').slice(0, 2).toLowerCase() === base)
+    if (!pool.length) return null
     const wantF = variant !== 'M'
     const fNames = /aria|jenny|libby|sonia|michelle|emma|ava|clara|natasha|nicole|samantha|a(ria|va)|female|zira/i
     const mNames = /guy|ryan|eric|christopher|brian|liam|andrew|steffan|davis|tony|male|mark|david/i
@@ -183,6 +220,8 @@ export class Brain {
     text = normalizeForSpeech(speechify(text)) // never voice emoji/symbols/markdown; read naturally
     if (!text) { onStart(); onEnd(); return }
     if (!this.voices || !this.voices.length) this.voices = synth.getVoices() // ensure voices loaded
+    const lang = detectLang(text)                 // read words in the right language, not letter-by-letter
+    const uLang = LANG_BCP[lang] || 'en-US'
     try { synth.cancel() } catch {}
     const TONE = { calm: -0.05, warm: 0.05, curious: 0.08, playful: 0.12, focused: 0, supportive: -0.03, concerned: -0.08 }
     const PACE = { slow: 0.9, natural: 1.0, energetic: 1.1 }
@@ -207,8 +246,9 @@ export class Brain {
     const speakPart = () => {
       if (idx >= parts.length) { stop(); onEnd(); return }
       const u = new SpeechSynthesisUtterance(parts[idx++].trim())
-      const voice = this.pickVoice(variant)
+      const voice = this.pickVoice(variant, lang)
       if (voice) u.voice = voice
+      u.lang = (voice && voice.lang) || uLang    // correct locale → reads words, not letters
       u.rate = pr.r; u.pitch = (variant === 'M' ? 0.9 : 1.05) + pr.p; u.volume = 1
       let advanced = false, wd = null
       const next = () => { if (advanced) return; advanced = true; if (wd) clearTimeout(wd); speakPart() }
