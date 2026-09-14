@@ -43,6 +43,37 @@ button:disabled { opacity: .5; cursor: default; }
 .forget { cursor: pointer; margin-left: auto; }
 .forget:hover { color: var(--ink); border-color: var(--gold); }
 
+/* ── Presence mode: life-size, immersive Noria (like a video call) ─────────── */
+.caption, .presence-bar { display: none; }
+.app.presence { max-width: none; padding: 0; }
+.app.presence .topbar, .app.presence .transcript, .app.presence .controls { display: none; }
+.app.presence .stage { position: static; }
+.app.presence .face-wrap {
+  position: fixed; inset: 0; width: 100vw; height: 100vh; height: 100dvh;
+  max-width: none; aspect-ratio: auto; border: 0; border-radius: 0; z-index: 400;
+  background: radial-gradient(70% 70% at 50% 30%, #16324c 0%, #06111d 75%);
+}
+.app.presence .statechip { top: 16px; left: 16px; bottom: auto; z-index: 420; }
+.app.presence .caption {
+  display: block; position: fixed; left: 50%; transform: translateX(-50%); bottom: 92px;
+  z-index: 420; max-width: min(880px, 92vw); text-align: center;
+  font-size: clamp(16px, 2.4vw, 23px); line-height: 1.4; color: #fff;
+  text-shadow: 0 2px 14px rgba(0,0,0,.85); background: rgba(6,16,26,.34);
+  padding: 10px 18px; border-radius: 14px; -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px);
+}
+.app.presence .caption:empty { display: none; }
+.app.presence .presence-bar {
+  display: flex; gap: 12px; position: fixed; left: 50%; transform: translateX(-50%);
+  bottom: 22px; z-index: 420;
+}
+.presence-bar .pbtn {
+  background: rgba(10,22,34,.72); border: 1px solid var(--line); color: var(--ink);
+  border-radius: 100px; padding: 12px 24px; font-size: 15px; font-weight: 600;
+  -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
+}
+.presence-bar .pbtn.primary { background: var(--gold); color: #2a2000; border-color: var(--gold); }
+.presence-bar .pbtn.on { background: var(--bad); border-color: var(--bad); color: #fff; }
+
 /* Feedback (👍/👎) under Noria's answers */
 .fb { display: flex; align-items: center; gap: 6px; margin-top: 8px; }
 .fb button { background: transparent; border: 1px solid var(--line); border-radius: 8px; padding: 2px 8px; font-size: 13px; cursor: pointer; opacity: .8; }
