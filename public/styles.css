@@ -126,6 +126,13 @@ body {
   align-self: flex-start; color: #dfe8f5; border-bottom-left-radius: 5px;
   background: var(--surface); border: 1px solid var(--border);
 }
+.bubble.noria.thinking { padding: 13px 16px; }
+.typing { display: inline-flex; align-items: center; gap: 5px; height: 8px; }
+.typing i { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); opacity: .5; animation: typingdot 1.2s infinite ease-in-out; }
+.typing i:nth-child(2) { animation-delay: .16s; }
+.typing i:nth-child(3) { animation-delay: .32s; }
+@keyframes typingdot { 0%, 62%, 100% { transform: translateY(0); opacity: .4; } 30% { transform: translateY(-5px); opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .typing i { animation: none; opacity: .7; } }
 .bubble code { background: rgba(255, 255, 255, .1); padding: 1px 6px; border-radius: 6px; font-family: ui-monospace, "SF Mono", monospace; font-size: 13px; }
 .bubble pre.code {
   background: #05090f; border: 1px solid var(--border); border-radius: 12px;
