@@ -195,7 +195,8 @@ export class ImageFace {
   draw() {
     const { ctx, w, h, p } = this
     ctx.clearRect(0, 0, w, h)
-    if (this._img === 'missing' || !this._img) { this._placeholder(); return }
+    if (this._img === 'missing') { this._loadingScreen(true); return }
+    if (!this._img) { this._loadingScreen(false); return }
     const im = this._img
 
     // FULL-BODY presence: show the whole standing figure (contain-fit), with
@@ -264,13 +265,19 @@ export class ImageFace {
     }
   }
 
-  _placeholder() {
+  // Friendly loading / retry screen (never a blank canvas or a dev message).
+  // While she loads (e.g. free-tier cold start) a soft brand star pulses so she
+  // reads as "getting ready", not missing.
+  _loadingScreen(failed) {
     const { ctx, w, h } = this
-    ctx.fillStyle = 'rgba(255,255,255,0.06)'; ctx.fillRect(0, 0, w, h)
-    ctx.fillStyle = '#9fb4c9'; ctx.textAlign = 'center'
-    ctx.font = '600 15px system-ui'
-    ctx.fillText(`Add Noria-${this.variant} image at:`, w / 2, h / 2 - 12)
-    ctx.font = '13px ui-monospace, monospace'
-    ctx.fillText(`public/assets/noria-${this.variant.toLowerCase()}.png`, w / 2, h / 2 + 12)
+    ctx.clearRect(0, 0, w, h)
+    const pulse = 0.55 + 0.45 * Math.sin(this._time * 2.2)
+    ctx.save(); ctx.textAlign = 'center'
+    ctx.globalAlpha = failed ? 0.9 : (0.45 + 0.4 * pulse)
+    ctx.fillStyle = '#d9b45b'; ctx.font = '600 38px system-ui'
+    ctx.fillText('✦', w / 2, h / 2 - 8)
+    ctx.globalAlpha = 0.9; ctx.fillStyle = '#9fb4c9'; ctx.font = '600 15px system-ui'
+    ctx.fillText(failed ? 'Noria could not load — please refresh' : 'Noria is waking up…', w / 2, h / 2 + 28)
+    ctx.restore()
   }
 }
