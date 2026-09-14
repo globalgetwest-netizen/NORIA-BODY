@@ -19,10 +19,13 @@
         <div class="statechip" id="statechip">idle</div>
       </div>
       <video id="cam" playsinline muted hidden></video>
+      <!-- AR: the room camera, shown behind the transparent Noria cutout -->
+      <video id="arbg" playsinline muted></video>
       <!-- Presence mode: life-size Noria with spoken captions + a minimal bar -->
       <div class="caption" id="caption"></div>
       <div class="presence-bar" id="presenceBar">
         <button id="pTalk" class="pbtn primary" type="button">🎙 Talk to me</button>
+        <button id="pAR" class="pbtn" type="button">📷 In your room</button>
         <button id="pExit" class="pbtn" type="button">✕ Exit</button>
       </div>
     </main>
@@ -39,6 +42,7 @@
         <label class="seg"><input type="radio" name="variant" value="M" /> Noria-M</label>
         <label class="seg" title="Noria's gaze follows your cursor / face"><input type="checkbox" id="vision" /> Vision</label>
         <button id="presence" class="seg" type="button" title="Full-screen presence — life-size Noria">⛶ Presence</button>
+        <button id="ar" class="seg" type="button" title="Place Noria in your real room (uses your camera)">📷 In your room</button>
         <button id="testvoice" class="seg" type="button" title="Play a quick voice test">🔊 Test voice</button>
         <a id="facelink" class="seg" href="/verify.html" title="Optional on-device face verification (beta)">🔒 Face verify</a>
         <button id="forget" class="seg forget" type="button" title="Clear what Noria remembers on this device">Forget me</button>

@@ -45,6 +45,13 @@ button:disabled { opacity: .5; cursor: default; }
 
 /* ── Presence mode: life-size, immersive Noria (like a video call) ─────────── */
 .caption, .presence-bar { display: none; }
+/* AR: the room camera fills the screen BEHIND the transparent Noria cutout. */
+#arbg { display: none; }
+.app.ar #arbg {
+  display: block; position: fixed; inset: 0; width: 100vw; height: 100vh; height: 100dvh;
+  object-fit: cover; z-index: 390;
+}
+.app.ar .face-wrap { background: transparent !important; } /* let the room camera show behind Noria */
 .app.presence { max-width: none; padding: 0; }
 .app.presence .topbar, .app.presence .transcript, .app.presence .controls { display: none; }
 .app.presence .stage { position: static; }
