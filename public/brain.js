@@ -188,7 +188,20 @@ export class Brain {
     const PACE = { slow: 0.9, natural: 1.0, energetic: 1.1 }
     const EMO = { joy: { r: 1.08, p: 0.12 }, warm: { r: 1.0, p: 0.05 }, neutral: { r: 1.0, p: 0 }, concern: { r: 0.92, p: -0.06 } }
     const pr = { r: PACE[pace] ?? (EMO[emotion] || EMO.warm).r, p: (tone in TONE) ? TONE[tone] : (EMO[emotion] || EMO.warm).p }
-    const parts = text.replace(/\s+/g, ' ').match(/[^.!?]+[.!?]*/g) || [text]
+    // Split into sentences, then break any long sentence into <=180-char pieces
+    // at a comma/space — Chrome silently cuts speech after ~15s, so short chunks
+    // keep her from dropping out mid-sentence.
+    const sentences = text.replace(/\s+/g, ' ').match(/[^.!?]+[.!?]*/g) || [text]
+    const parts = []
+    for (const s of sentences) {
+      let t = s.trim(); if (!t) continue
+      while (t.length > 180) {
+        let cut = t.lastIndexOf(',', 180); if (cut < 80) cut = t.lastIndexOf(' ', 180); if (cut < 80) cut = 180
+        parts.push(t.slice(0, cut + 1).trim()); t = t.slice(cut + 1).trim()
+      }
+      if (t) parts.push(t)
+    }
+    if (!parts.length) parts.push(text)
     let started = false, idx = 0, keepAlive = null
     const stop = () => { if (keepAlive) { clearInterval(keepAlive); keepAlive = null } }
     const speakPart = () => {
@@ -197,11 +210,19 @@ export class Brain {
       const voice = this.pickVoice(variant)
       if (voice) u.voice = voice
       u.rate = pr.r; u.pitch = (variant === 'M' ? 0.9 : 1.05) + pr.p; u.volume = 1
-      u.onstart = () => { if (!started) { started = true; console.log('[Noria voice] speaking with:', (voice && voice.name) || 'default voice'); onStart() } }
+      let advanced = false, wd = null
+      const next = () => { if (advanced) return; advanced = true; if (wd) clearTimeout(wd); speakPart() }
+      u.onstart = () => { if (wd) { clearTimeout(wd); wd = null }; if (!started) { started = true; console.log('[Noria voice] speaking with:', (voice && voice.name) || 'default voice'); onStart() } }
       u.onboundary = () => onWord()
-      u.onend = () => speakPart()
-      u.onerror = (e) => { console.warn('[Noria voice] utterance error:', e && e.error); speakPart() }
-      try { synth.speak(u) } catch (e) { console.warn('[Noria voice] speak() threw:', e); speakPart() }
+      u.onend = () => next()
+      u.onerror = (e) => { console.warn('[Noria voice] utterance error:', e && e.error); next() }
+      try {
+        synth.speak(u)
+        // Watchdog: if this piece never STARTS within ~3.5s, the speech engine is
+        // wedged (a known Chrome bug after cancel/resume). Reset it and move on so
+        // she doesn't go silent for the rest of the reply.
+        wd = setTimeout(() => { try { synth.cancel(); synth.resume() } catch {} next() }, 3500)
+      } catch (e) { console.warn('[Noria voice] speak() threw:', e); next() }
     }
     // Chrome bugs: synth can be silently "paused", and long speech stalls ~15s.
     // resume() now + a keep-alive resume, and start just after cancel settles.

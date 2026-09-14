@@ -96,29 +96,34 @@ export class NeuralVoice {
     // Group sentences into flowing phrases so intonation carries; play chunks
     // back-to-back on the audio timeline (gapless), generating ahead.
     const chunks = phraseChunks(text)
-    const gen = (p) => this.tts.generate(p, { voice, speed })
+    // Per-chunk generation is failure-tolerant: a chunk that fails resolves to
+    // null and is skipped, so ONE bad/slow sentence never aborts the whole reply.
+    const gen = (p) => this.tts.generate(p, { voice, speed }).catch(() => null)
     let started = false, playHead = 0
     let nextP = chunks.length ? gen(chunks[0]) : null
     try {
       for (let i = 0; i < chunks.length; i++) {
         if (this._cancel) break
         const raw = await nextP
-        nextP = i + 1 < chunks.length ? gen(chunks[i + 1]) : null // prefetch
+        nextP = i + 1 < chunks.length ? gen(chunks[i + 1]) : null // prefetch next
         if (this._cancel) break
+        if (!raw || !raw.audio || !raw.audio.length) continue // skip a failed chunk, keep going
         const ab = ctx.createBuffer(1, raw.audio.length, raw.sampling_rate)
         ab.getChannelData(0).set(raw.audio)
         const src = ctx.createBufferSource(); src.buffer = ab; src.connect(analyser)
         this._sources.push(src)
         if (!started) { started = true; playHead = ctx.currentTime + 0.12; onStart(); tick() }
-        const startAt = Math.max(playHead, ctx.currentTime + 0.02)
-        src.start(startAt)
+        const startAt = Math.max(playHead, ctx.currentTime + 0.02) // never schedule in the past → no overlap
+        try { src.start(startAt) } catch { continue }
         playHead = startAt + ab.duration
       }
-      // Wait until the last scheduled audio has finished.
+      // Nothing generated at all → let the caller fall back to the browser voice.
+      if (!started) throw new Error('neural voice produced no audio')
       const waitMs = Math.max(0, (playHead - ctx.currentTime) * 1000) + 60
       await new Promise((res) => setTimeout(res, this._cancel ? 0 : waitMs))
     } finally {
-      cancelAnimationFrame(raf); onLevel(0); this._sources = []; onEnd()
+      cancelAnimationFrame(raf); onLevel(0); this._sources = []
+      if (started) onEnd() // only signal "done" if we actually spoke; else the caller's catch handles fallback
     }
   }
 }
