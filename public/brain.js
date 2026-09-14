@@ -55,7 +55,14 @@ export function normalizeSpokenText(t) {
     .replace(/\bapprox\.?\b/gi, 'approximately')
     .replace(/\s*&\s*/g, ' and ')
     .replace(/(\d)\s*%/g, '$1 percent')
+    // Brand names: read as words, never spelled letter-by-letter (all-caps and
+    // joined forms are what TTS engines spell out).
+    .replace(/\bSKY\s*GLOBE\s*GROUP\b/gi, 'Sky Globe Group')
+    .replace(/\bSKY\s*GLOBE\b/gi, 'Sky Globe')
     .replace(/\bSkyGlobe\b/g, 'Sky Globe')
+    .replace(/\bNORIA\b/g, 'Noria')
+    .replace(/\bTERRA\b/g, 'Terra')
+    .replace(/\bYUNEX\b/g, 'Yunex')
     .replace(/\s+([,.;:!?])/g, '$1')
     .replace(/\s+/g, ' ')
     .trim()
