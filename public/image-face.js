@@ -17,12 +17,15 @@ const CAL = {
   // srcs: tried in order until one loads. eyes/mouth are normalized [x,y]; r are [rx,ry].
   // Calibrated to the real renders (noria-f.png 1254×1254, noria-m.png 1054×1492).
   F: {
+    // cutout = full body on a TRANSPARENT background (stands on any scene / AR).
+    cutout: ['assets/noria-f-cutout.png', 'assets/noria-f-cutout.webp'],
     srcs: ['assets/noria-f.png', 'assets/noria-f.jpg', 'assets/noria-f.jpeg', 'assets/noria-f.webp'],
     full: ['assets/noria-f-full.png', 'assets/noria-f-full.jpg', 'assets/noria-f-full.jpeg', 'assets/noria-f-full.webp'],
     eyes: [[0.40, 0.347], [0.59, 0.347]], eyeR: [0.052, 0.024],
     mouth: [0.49, 0.55], mouthR: [0.075, 0.03],
   },
   M: {
+    cutout: ['assets/noria-m-cutout.png', 'assets/noria-m-cutout.webp'],
     srcs: ['assets/noria-m.png', 'assets/noria-m.jpg', 'assets/noria-m.jpeg', 'assets/noria-m.webp'],
     full: ['assets/noria-m-full.png', 'assets/noria-m-full.jpg', 'assets/noria-m-full.jpeg', 'assets/noria-m-full.webp'],
     eyes: [[0.445, 0.342], [0.588, 0.342]], eyeR: [0.05, 0.023],
@@ -47,19 +50,27 @@ export class ImageFace {
 
   setVariant(v) {
     this.variant = CAL[v] ? v : 'F'; this.cal = CAL[this.variant]
-    this._img = null; this._fullBody = false
-    this._loadImage((this.cal.full || []).slice(), true) // prefer a full-body render if present
+    this._img = null; this._fullBody = false; this._cutout = false
+    // Prefer the transparent CUTOUT (any background), then the full render with
+    // its scene, then the head crop — whichever loads first wins.
+    this._loadImage((this.cal.cutout || []).slice(), 'cutout')
   }
 
-  _loadImage(srcs, isFull) {
+  _loadImage(srcs, kind) {
     if (!srcs.length) {
-      if (isFull) { this._loadImage(this.cal.srcs.slice(), false); return } // fall back to head render
+      if (kind === 'cutout') { this._loadImage((this.cal.full || []).slice(), 'full'); return }
+      if (kind === 'full') { this._loadImage(this.cal.srcs.slice(), 'head'); return }
       this._img = 'missing'; return
     }
     const src = srcs.shift()
     const im = new Image()
-    im.onload = () => { this._img = im; this._fullBody = !!isFull; if (!isFull) this._sampleSkin(im) }
-    im.onerror = () => this._loadImage(srcs, isFull)
+    im.onload = () => {
+      this._img = im
+      this._fullBody = (kind === 'cutout' || kind === 'full')
+      this._cutout = (kind === 'cutout')
+      if (kind === 'head') this._sampleSkin(im)
+    }
+    im.onerror = () => this._loadImage(srcs, kind)
     im.src = src
   }
 
