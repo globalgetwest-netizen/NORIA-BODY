@@ -16,6 +16,8 @@
  * one. Anything added here immediately grounds Noria's answers.
  */
 
+import { FDA_NOTES } from './knowledge-fda.js'
+
 export const KNOWLEDGE = [
   // ═══════════════ GENERAL PRINCIPLES & SAFETY ═══════════════
   {
@@ -322,7 +324,8 @@ export function retrieveKnowledge(query, max = 3) {
   const q = ' ' + String(query || '').toLowerCase().replace(/[^a-z0-9\s-]/g, ' ').replace(/\s+/g, ' ') + ' '
   if (q.trim().length < 3) return ''
   const scored = []
-  for (const k of KNOWLEDGE) {
+  const CORPUS = KNOWLEDGE.concat(FDA_NOTES) // curated notes + sourced FDA drug labels
+  for (const k of CORPUS) {
     let s = 0
     for (const t of k.topics) {
       const term = ' ' + t.toLowerCase() + ' '
