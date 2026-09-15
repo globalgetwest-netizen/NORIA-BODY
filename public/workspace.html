@@ -60,6 +60,7 @@
 
   .main{display:flex;flex-direction:column;min-height:0;background:var(--paper)}
   .stream{flex:1;overflow-y:auto;scroll-behavior:smooth}
+  .stream.is-empty{display:flex;flex-direction:column;justify-content:center}
   .thread{max-width:720px;margin:0 auto;padding:28px 24px 8px}
   .msg{display:flex;gap:13px;padding:14px 0;animation:enter var(--t-panel) var(--ease) both}
   @keyframes enter{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
@@ -143,7 +144,7 @@
     <label class="search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg><input placeholder="Search conversations" aria-label="Search conversations"></label>
     <div class="right">
       <button class="icobtn" id="voiceToggle" title="Voice off" aria-label="Toggle voice"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 5 6 9H3v6h3l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/></svg></button>
-      <a class="seebtn" href="/" title="See Noria"><img src="assets/noria-f-avatar.png" alt=""><span>See Noria</span></a>
+      <a class="seebtn" href="/index.html" title="See Noria"><img src="assets/noria-f-avatar.png" alt=""><span>See Noria</span></a>
       <button class="icobtn" id="newTop" aria-label="New conversation"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg></button>
     </div>
   </div>
@@ -157,7 +158,7 @@
   </aside>
 
   <main class="main">
-    <div class="stream" id="stream">
+    <div class="stream is-empty" id="stream">
       <div class="thread" id="thread">
         <div class="empty" id="empty">
           <div class="halo"><img src="assets/noria-f-avatar.png" alt=""></div>
