@@ -56,9 +56,15 @@ body {
   filter: drop-shadow(0 0 10px rgba(228, 195, 123, .5));
   font-size: 1.05rem;
 }
-.brand { gap: 8px; }
-.brand-logo { width: 26px; height: 26px; object-fit: contain; flex: none; }
+.brand { gap: 9px; min-width: 0; }
+.brand-logo { width: 24px; height: 24px; flex: none; display: block; }
 .brand span { font-weight: 600; font-size: 1.12rem; letter-spacing: -.02em; }
+.status { flex: none; white-space: nowrap; }
+@media (max-width: 480px) {
+  .app { padding: 16px 14px 22px; }
+  .brand span { font-size: 1.04rem; }
+  .status { font-size: .68rem; padding: 5px 10px; }
+}
 
 /* ── Voice: subtle listening dock — Noria's face stays visible (Gemini-style) ── */
 .listening {
