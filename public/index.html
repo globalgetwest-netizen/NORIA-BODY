@@ -17,6 +17,11 @@
       <div class="face-wrap">
         <canvas id="face"></canvas>
         <div class="statechip" id="statechip">idle</div>
+        <div class="listening" id="listening">
+          <div class="mic-orb"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></div>
+          <div class="live-transcript" id="liveTranscript"></div>
+          <div class="listen-hint">Listening… tap to stop</div>
+        </div>
       </div>
       <video id="cam" playsinline muted hidden></video>
       <!-- AR: the room camera, shown behind the transparent Noria cutout -->
