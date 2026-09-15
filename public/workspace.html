@@ -43,7 +43,7 @@
   .shell{display:grid;grid-template-columns:270px 1fr 300px;grid-template-rows:calc(56px + env(safe-area-inset-top)) 1fr;height:100dvh;overflow:hidden}
 
   .top{grid-column:1/-1;display:flex;align-items:center;gap:14px;padding:0 max(16px,env(safe-area-inset-left)) 0 max(16px,env(safe-area-inset-right));padding-top:env(safe-area-inset-top);background:var(--paper);border-bottom:1px solid var(--line);z-index:5}
-  .top .mark{display:flex;align-items:center;gap:9px;font-weight:700;font-size:1.06rem;letter-spacing:-.01em;width:238px}
+  .top .mark{display:flex;align-items:center;gap:9px;font-weight:700;font-size:1.06rem;letter-spacing:-.01em;width:238px;min-width:0}
   .top .mark img{width:22px;height:22px;object-fit:contain}
   .top .search{flex:1;display:flex;align-items:center;gap:9px;max-width:420px;background:var(--sunk);border:1px solid var(--line);border-radius:10px;padding:8px 12px;color:var(--muted);transition:border-color var(--t-fast)}
   .top .search:focus-within{border-color:var(--accent-line)}
@@ -67,7 +67,7 @@
   .convo:hover{background:var(--paper-2)}
   .convo.on{background:var(--accent-soft);border-color:var(--accent-line);color:var(--ink);font-weight:500}
 
-  .main{display:flex;flex-direction:column;min-height:0;background:var(--paper)}
+  .main{display:flex;flex-direction:column;min-height:0;min-width:0;background:var(--paper)}
   .stream{flex:1;overflow-y:auto;scroll-behavior:smooth}
   .stream.is-empty{display:flex;flex-direction:column;justify-content:center}
   .thread{max-width:720px;margin:0 auto;padding:28px 24px 8px}
@@ -114,7 +114,7 @@
   .stream{overscroll-behavior:contain;-webkit-overflow-scrolling:touch}
   .composer .box{max-width:720px;margin:0 auto;background:var(--raise);border:1px solid var(--line-2);border-radius:16px;box-shadow:var(--shadow);padding:8px 8px 8px 8px;display:flex;align-items:flex-end;gap:8px;transition:border-color var(--t-fast)}
   .composer .box:focus-within{border-color:var(--accent-line)}
-  .composer textarea{flex:1;border:0;background:transparent;resize:none;font:inherit;font-size:1rem;line-height:1.5;color:var(--ink);outline:none;max-height:180px;padding:8px 4px}
+  .composer textarea{flex:1;min-width:0;border:0;background:transparent;resize:none;font:inherit;font-size:1rem;line-height:1.5;color:var(--ink);outline:none;max-height:180px;padding:8px 4px}
   .composer textarea::placeholder{color:var(--faint)}
   .toolbtn{flex:none;width:36px;height:36px;border-radius:10px;border:1px solid transparent;background:transparent;color:var(--muted);cursor:pointer;display:flex;align-items:center;justify-content:center;transition:background var(--t-fast),color var(--t-fast)}
   .toolbtn:hover{background:var(--paper-2);color:var(--ink)} .toolbtn:active{transform:translateY(1px)} .toolbtn svg{width:18px;height:18px}
@@ -122,6 +122,9 @@
   .sendbtn:hover{background:var(--accent-2)} .sendbtn:active{transform:translateY(1px)} .sendbtn:disabled{opacity:.4;cursor:default} .sendbtn svg{width:17px;height:17px}
   .stopbtn{display:none;align-items:center;gap:7px;height:40px;padding:0 15px;border-radius:11px;border:1px solid var(--line-2);background:var(--raise);color:var(--ink);font-weight:600;font-size:.88rem;cursor:pointer}
   .stopbtn:hover{background:var(--paper-2)} .stopbtn .sq{width:9px;height:9px;border-radius:2px;background:var(--danger)}
+  .toolbtn.rec{color:var(--danger);background:color-mix(in srgb,var(--danger) 13%,transparent)}
+  .toolbtn.rec svg{animation:micpulse 1.15s ease-in-out infinite}
+  @keyframes micpulse{0%,100%{opacity:1}50%{opacity:.4}}
   .composer .status{max-width:720px;margin:8px auto 0;font-size:.78rem;color:var(--muted);display:flex;align-items:center;gap:8px;min-height:16px}
   .dots{display:inline-flex;gap:4px;align-items:center}
   .dots i{width:5px;height:5px;border-radius:50%;background:var(--accent);animation:dotp 1.2s ease-in-out infinite}
@@ -169,6 +172,16 @@
     .panel-btn{display:inline-flex} .top .search{display:none} .seebtn span{display:none}
     .thread,.composer .box,.composer .status,.composer .attach{max-width:none}
   }
+  @media (max-width:400px){
+    .top{gap:8px;padding-left:max(12px,env(safe-area-inset-left));padding-right:max(12px,env(safe-area-inset-right))}
+    .top .right{gap:6px}
+    .icobtn{width:36px;height:36px}
+    .seebtn{padding:0 9px}
+  }
+  @media (max-width:360px){
+    .top{gap:6px}
+    .icobtn{width:34px;height:34px} .seebtn{padding:0 7px}
+  }
 </style>
 </head>
 <body>
@@ -208,6 +221,7 @@
         <input type="file" id="file" hidden accept=".txt,.md,.markdown,.csv,.tsv,.json,.log,.xml,.yml,.yaml,.js,.ts,.jsx,.tsx,.py,.java,.c,.cpp,.cs,.go,.rb,.php,.sh,.html,.css,.sql,.pdf,image/*,text/*">
         <button class="toolbtn" id="plus" title="Upload a file or photo" aria-label="Upload a file or photo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg></button>
         <textarea id="input" rows="1" placeholder="Ask Noria anything&hellip;" aria-label="Message Noria"></textarea>
+        <button class="toolbtn" id="micBtn" title="Speak to Noria" aria-label="Voice input"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2.5" width="6" height="11" rx="3"/><path d="M5 10.5a7 7 0 0 0 14 0"/><path d="M12 17.5v3.5"/></svg></button>
         <button class="stopbtn" id="stop"><span class="sq"></span> Stop</button>
         <button class="sendbtn" id="send" aria-label="Send" disabled><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button>
       </div>
