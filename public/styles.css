@@ -56,6 +56,7 @@ body {
   filter: drop-shadow(0 0 10px rgba(228, 195, 123, .5));
   font-size: 1.05rem;
 }
+.brand-logo { width: 24px; height: 24px; object-fit: contain; flex: none; }
 .tag {
   font-weight: 500; font-size: .64rem; letter-spacing: .14em; text-transform: uppercase;
   color: var(--gold); background: rgba(228, 195, 123, .1);
