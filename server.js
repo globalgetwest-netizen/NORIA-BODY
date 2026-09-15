@@ -28,6 +28,49 @@ function readBody(req) {
   })
 }
 
+// ── Live web search (free, no API key) ────────────────────────────────────────
+// Grounds Noria on current information, the way Gemini searches. Server-side so
+// there's no CORS and no key. DuckDuckGo HTML results, with an Instant-Answer
+// fallback. The Engine is never involved — this is the Body's own capability.
+const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36'
+function stripTags(s) {
+  return String(s).replace(/<[^>]+>/g, ' ')
+    .replace(/&amp;/g, '&').replace(/&#x27;/g, "'").replace(/&#39;/g, "'")
+    .replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&nbsp;/g, ' ')
+    .replace(/\s+/g, ' ').trim()
+}
+function decodeDDG(u) {
+  try {
+    if (u.includes('uddg=')) {
+      const uddg = new URL(u.startsWith('//') ? 'https:' + u : u).searchParams.get('uddg')
+      if (uddg) return decodeURIComponent(uddg)
+    }
+  } catch {}
+  return u.startsWith('//') ? 'https:' + u : u
+}
+async function webSearch(q) {
+  const results = []
+  try {
+    const r = await fetch('https://html.duckduckgo.com/html/?q=' + encodeURIComponent(q), { headers: { 'User-Agent': UA, 'Accept-Language': 'en-US,en;q=0.9' } })
+    const html = await r.text()
+    const re = /class="result__a"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>[\s\S]*?class="result__snippet"[^>]*>([\s\S]*?)<\/a>/g
+    let m
+    while ((m = re.exec(html)) && results.length < 6) {
+      const url = decodeDDG(m[1]), title = stripTags(m[2]), snippet = stripTags(m[3])
+      if (title && snippet) results.push({ url, title, snippet })
+    }
+  } catch {}
+  if (!results.length) {
+    try {
+      const r = await fetch('https://api.duckduckgo.com/?format=json&no_html=1&skip_disambig=1&q=' + encodeURIComponent(q), { headers: { 'User-Agent': UA } })
+      const j = await r.json()
+      if (j.AbstractText) results.push({ title: j.Heading || q, snippet: j.AbstractText, url: j.AbstractURL || '' })
+      ;(j.RelatedTopics || []).forEach((t) => { if (t.Text && results.length < 6) results.push({ title: (t.Text || '').split(' - ')[0].slice(0, 90), snippet: t.Text, url: t.FirstURL || '' }) })
+    } catch {}
+  }
+  return results
+}
+
 async function serveStatic(req, res) {
   let p = decodeURIComponent(new URL(req.url, 'http://x').pathname)
   if (p === '/') p = '/index.html'
@@ -101,6 +144,19 @@ const server = http.createServer(async (req, res) => {
       res.writeHead(r.status, { 'Content-Type': 'application/json' }).end(t)
     } catch (e) {
       res.writeHead(502, { 'Content-Type': 'application/json' }).end(JSON.stringify({ error: e.message }))
+    }
+    return
+  }
+
+  // Live web search — the Body's own grounding capability (free, no key).
+  if (pathname === '/search' && req.method === 'GET') {
+    const q = (new URL(req.url, 'http://x').searchParams.get('q') || '').trim()
+    if (!q) { res.writeHead(400, { 'Content-Type': 'application/json' }).end(JSON.stringify({ error: 'no query' })); return }
+    try {
+      const results = await webSearch(q)
+      res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ query: q, results }))
+    } catch (e) {
+      res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ query: q, results: [], error: e.message }))
     }
     return
   }
