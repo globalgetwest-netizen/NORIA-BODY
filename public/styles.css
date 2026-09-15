@@ -56,7 +56,9 @@ body {
   filter: drop-shadow(0 0 10px rgba(228, 195, 123, .5));
   font-size: 1.05rem;
 }
-.brand-logo { width: 24px; height: 24px; object-fit: contain; flex: none; }
+.brand { gap: 8px; }
+.brand-logo { width: 26px; height: 26px; object-fit: contain; flex: none; }
+.brand span { font-weight: 600; font-size: 1.12rem; letter-spacing: -.02em; }
 
 /* ── Voice: subtle listening dock — Noria's face stays visible (Gemini-style) ── */
 .listening {
@@ -168,19 +170,50 @@ body {
 }
 
 /* ── Controls ───────────────────────────────────────────────────────────────── */
-.controls {
-  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+.controls { display: flex; flex-direction: column; gap: 10px; }
+/* Gemini-style rounded composer pill */
+.composer {
+  display: flex; align-items: center; gap: 4px;
   background: var(--surface); border: 1px solid var(--border);
-  border-radius: 18px; padding: 12px;
+  border-radius: 999px; padding: 6px 7px 6px 20px;
   -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
+  transition: border-color .18s, box-shadow .18s;
 }
-.controls input[type=text] {
-  flex: 1; min-width: 180px; color: var(--ink); font-size: 15px; font-family: inherit;
-  background: rgba(0, 0, 0, .25); border: 1px solid var(--border);
-  border-radius: 12px; padding: 12px 15px; transition: border-color .18s, box-shadow .18s;
+.composer:focus-within { border-color: rgba(228, 195, 123, .5); box-shadow: 0 0 0 3px rgba(228, 195, 123, .1); }
+.composer input[type=text] {
+  flex: 1; min-width: 0; color: var(--ink); font-size: 15.5px; font-family: inherit;
+  background: transparent; border: none; padding: 11px 4px;
 }
-.controls input[type=text]::placeholder { color: var(--faint); }
-.controls input[type=text]:focus { outline: none; border-color: rgba(228, 195, 123, .55); box-shadow: 0 0 0 3px rgba(228, 195, 123, .12); }
+.composer input[type=text]:focus { outline: none; }
+.composer input[type=text]::placeholder { color: var(--faint); }
+/* clean round icon buttons inside the composer (mic + live voice) */
+.cbtn {
+  flex: none; width: 40px; height: 40px; padding: 0; border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: transparent; border: none; color: var(--muted);
+  transition: background .16s, color .16s;
+}
+.cbtn:hover { background: rgba(255, 255, 255, .08); color: var(--ink); }
+.cbtn:active { transform: translateY(1px); }
+.cbtn svg { width: 21px; height: 21px; }
+#mic.on { color: #ff8f8f; background: rgba(255, 107, 107, .14); }
+#talk .ico-stop { display: none; }
+#talk.on { color: #ff8f8f; background: rgba(255, 107, 107, .14); }
+#talk.on .ico-wave { display: none; }
+#talk.on .ico-stop { display: inline; }
+/* circular gradient send */
+.send {
+  flex: none; width: 40px; height: 40px; padding: 0; border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center;
+  color: #1a1405; border: none;
+  background: linear-gradient(135deg, var(--gold), var(--gold-2));
+  box-shadow: 0 6px 16px rgba(228, 195, 123, .28);
+  transition: opacity .16s, transform .12s;
+}
+.send:hover { opacity: .92; background: linear-gradient(135deg, var(--gold), var(--gold-2)); }
+.send:active { transform: translateY(1px); }
+.send svg { width: 20px; height: 20px; }
+.seg svg { width: 15px; height: 15px; flex: none; }
 
 button {
   cursor: pointer; font-family: inherit; font-size: 14.5px; color: var(--ink);
