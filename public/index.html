@@ -63,8 +63,10 @@
         </button>
       </div>
       <div class="opts">
-        <label class="seg"><input type="radio" name="variant" value="F" checked /> Noria F</label>
-        <label class="seg"><input type="radio" name="variant" value="M" /> Noria M</label>
+        <div class="variant-toggle" id="variantToggle" role="tablist" aria-label="Choose Noria">
+          <button class="vseg on" data-v="F" type="button" role="tab" aria-selected="true">Noria F</button>
+          <button class="vseg" data-v="M" type="button" role="tab" aria-selected="false">Noria M</button>
+        </div>
         <label class="seg" title="Noria's gaze follows your cursor / face"><input type="checkbox" id="vision" /> Vision</label>
         <button id="presence" class="seg" type="button" title="Full-screen presence — life-size Noria"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg> Presence</button>
         <button id="ar" class="seg" type="button" title="Place Noria in your real room (uses your camera)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8.5A1.5 1.5 0 0 1 5.5 7h1.7l1-1.6A1 1 0 0 1 10 5h4a1 1 0 0 1 .85.4l1 1.6h1.65A1.5 1.5 0 0 1 20 8.5v9A1.5 1.5 0 0 1 18.5 19h-13A1.5 1.5 0 0 1 4 17.5z"/><circle cx="12" cy="12.5" r="3"/></svg> In your room</button>

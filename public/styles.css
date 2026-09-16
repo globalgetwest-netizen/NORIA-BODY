@@ -226,6 +226,11 @@ body {
 .send:active { transform: translateY(1px); }
 .send svg { width: 20px; height: 20px; }
 .seg svg { width: 15px; height: 15px; flex: none; }
+/* Noria F / M — clear segmented choice */
+.variant-toggle { display: inline-flex; background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px; padding: 3px; gap: 2px; }
+.vseg { border: 0; background: transparent; color: var(--muted); font-family: inherit; font-size: .78rem; font-weight: 600; padding: 7px 14px; border-radius: 8px; cursor: pointer; transition: background .16s, color .16s; }
+.vseg.on { background: linear-gradient(135deg, var(--gold), var(--gold-2)); color: #1a1405; box-shadow: 0 2px 8px rgba(228, 195, 123, .25); }
+.vseg:not(.on):hover { color: var(--ink); }
 
 button {
   cursor: pointer; font-family: inherit; font-size: 14.5px; color: var(--ink);
