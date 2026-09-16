@@ -1,6 +1,6 @@
 /* Noria PWA service worker — network-first (always fresh online), cache
  * fallback for offline. The engine (/brain/*) is never cached. */
-const CACHE = 'noria-v1'
+const CACHE = 'noria-v2'
 
 self.addEventListener('install', () => self.skipWaiting())
 self.addEventListener('activate', (e) => e.waitUntil((async () => {

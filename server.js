@@ -78,7 +78,14 @@ async function serveStatic(req, res) {
   if (!full.startsWith(PUBLIC)) { res.writeHead(403).end('Forbidden'); return }
   try {
     const buf = await readFile(full)
-    res.writeHead(200, { 'Content-Type': MIME[extname(full)] || 'application/octet-stream' })
+    const ext = extname(full)
+    // HTML/JS/CSS/JSON must always revalidate so updates reach users immediately;
+    // images/fonts/audio can be cached a while (their URLs change when replaced).
+    const longCache = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.ico', '.woff', '.woff2', '.mp3', '.wav', '.ogg'].includes(ext)
+    res.writeHead(200, {
+      'Content-Type': MIME[ext] || 'application/octet-stream',
+      'Cache-Control': longCache ? 'public, max-age=604800' : 'no-cache',
+    })
     res.end(buf)
   } catch {
     res.writeHead(404, { 'Content-Type': 'text/plain' }).end('Not found')
