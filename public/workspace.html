@@ -37,6 +37,7 @@
   html,body{height:100%;overflow:hidden;overscroll-behavior:none}
   body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--ui);font-size:15px;line-height:1.6;letter-spacing:-.006em;-webkit-font-smoothing:antialiased;-webkit-tap-highlight-color:transparent}
   button{font-family:inherit}
+  [hidden]{display:none!important}
   ::selection{background:var(--accent-soft)}
   @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
   .shell{display:grid;grid-template-columns:270px 1fr 300px;grid-template-rows:calc(56px + env(safe-area-inset-top)) 1fr;height:100dvh;overflow:hidden}
@@ -306,6 +307,6 @@
     <div class="pm-msg" id="proMsg" aria-live="polite"></div>
   </div>
 </div>
-<script type="module" src="workspace.js?v=10"></script>
+<script type="module" src="workspace.js?v=11"></script>
 </body>
 </html>
