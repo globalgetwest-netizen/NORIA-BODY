@@ -202,6 +202,11 @@
   .guide-fields input,.guide-fields textarea{width:100%;border:1px solid var(--line-2);border-radius:10px;padding:10px 12px;font:inherit;font-size:.9rem;background:var(--sunk);color:var(--ink)}
   .guide-fields textarea{resize:vertical;min-height:64px}
   .guide-fields input:focus,.guide-fields textarea:focus{outline:none;border-color:var(--accent-line)}
+  .sidefoot-btn{margin:8px 12px 12px;height:40px;border-radius:11px;border:1px solid var(--line-2);background:var(--raise);color:var(--ink-2);font-weight:600;font-size:.85rem;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;transition:background var(--t-fast),border-color var(--t-fast),color var(--t-fast)}
+  .sidefoot-btn:hover{background:var(--paper-2);border-color:var(--accent-line);color:var(--ink)} .sidefoot-btn svg{width:16px;height:16px;color:var(--accent-2)}
+  .pm-secondary{display:block;width:100%;height:44px;margin-top:10px;border-radius:12px;border:1px solid var(--line-2);background:var(--raise);color:var(--ink);font-weight:600;font-size:.92rem;cursor:pointer;transition:background var(--t-fast),border-color var(--t-fast)}
+  .pm-secondary:hover{background:var(--paper-2);border-color:var(--accent-line)}
+  .pm-fine{margin:14px 0 0;font-size:.76rem;color:var(--faint);line-height:1.5}
   @media (max-width:400px){ .probtn{padding:0 11px;font-size:.78rem} }
   .panel-btn{display:none}
   .backdrop{display:none}
@@ -244,6 +249,7 @@
   <aside class="side" id="side">
     <button class="newbtn" id="newSide"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 5v14M5 12h14"/></svg> New conversation</button>
     <div class="convos" id="convos"></div>
+    <button class="sidefoot-btn" id="syncBtn" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 0 1-15 6.7L3 16M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M21 3v5h-5M3 21v-5h5"/></svg> Sync across devices</button>
   </aside>
 
   <main class="main">
@@ -307,6 +313,21 @@
     <div class="pm-or">or unlock with a code</div>
     <div class="pm-code"><input id="proCode" placeholder="NORIA-XXXXXXXX-XXXXXX" autocomplete="off" spellcheck="false" /><button id="proUnlock" type="button">Unlock</button></div>
     <div class="pm-msg" id="proMsg" aria-live="polite"></div>
+  </div>
+</div>
+<div class="promodal-wrap" id="syncModal" hidden>
+  <div class="promodal" role="dialog" aria-modal="true" aria-label="Sync across devices">
+    <button class="pm-close" id="syncClose" type="button" aria-label="Close"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+    <div class="pm-star"><svg width="30" height="30" viewBox="0 0 24 24" aria-hidden="true"><path fill="url(#pmstar)" d="M12 0c.7 6.3 5.7 11.3 12 12-6.3.7-11.3 5.7-12 12-.7-6.3-5.7-11.3-12-12C6.3 11.3 11.3 6.3 12 0Z"/></svg></div>
+    <h2 class="pm-title">Sync across devices</h2>
+    <p class="pm-sub">Your history &amp; memory, encrypted with a secret phrase only you know. Not even we can read it.</p>
+    <div class="guide-fields">
+      <div><label for="syncPass">Your secret sync phrase</label><input id="syncPass" type="password" placeholder="Choose a strong phrase" autocomplete="off" spellcheck="false"></div>
+    </div>
+    <button class="pm-cta" id="syncBackup" type="button">Back up this device</button>
+    <button class="pm-secondary" id="syncRestore" type="button">Restore from another device</button>
+    <div class="pm-msg" id="syncMsg" aria-live="polite"></div>
+    <p class="pm-fine">Use the same phrase on another device to bring everything across. If you forget the phrase, the backup can’t be recovered.</p>
   </div>
 </div>
 <div class="promodal-wrap" id="guideModal" hidden>
