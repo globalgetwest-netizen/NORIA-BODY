@@ -93,8 +93,6 @@
   .fb button{display:inline-flex;align-items:center;justify-content:center;width:34px;height:30px;background:transparent;border:1px solid var(--line);border-radius:8px;cursor:pointer;color:var(--muted);opacity:.85;transition:color var(--t-fast),border-color var(--t-fast),background var(--t-fast)}
   .fb button svg{width:16px;height:16px}
   .fb button:hover:not(:disabled){opacity:1;color:var(--ink);border-color:var(--accent-line)} .fb button.on{border-color:var(--accent-line);background:var(--accent-soft);color:var(--accent-2);opacity:1} .fb button:disabled{cursor:default}
-  .fb .pdfbtn{width:auto;gap:6px;padding:0 11px;font-size:.76rem;font-weight:600}
-  .fb .pdfbtn svg{width:14px;height:14px}
   .msg .ufiles{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
   .msg .uf{display:inline-flex;align-items:center;gap:6px;font-size:.8rem;color:var(--ink-2);background:var(--paper-2);border:1px solid var(--line);border-radius:8px;padding:5px 9px}
   .msg .uf svg{width:13px;height:13px;color:var(--accent-2);flex:none}
@@ -166,47 +164,6 @@
   .ctx .forget{margin-top:10px;width:100%;height:34px;border-radius:9px;border:1px solid var(--line-2);background:var(--raise);color:var(--muted);font-weight:600;font-size:.8rem;cursor:pointer;transition:color var(--t-fast),border-color var(--t-fast)}
   .ctx .forget:hover{color:var(--danger);border-color:var(--danger)}
 
-  /* Noria Pro */
-  .probtn{height:34px;padding:0 14px;border-radius:9px;border:1px solid var(--accent-line);background:linear-gradient(135deg,#B0812A,#8C651C);color:#fff;font-weight:600;font-size:.82rem;cursor:pointer;white-space:nowrap;flex:none;transition:opacity var(--t-fast)}
-  .probtn:hover{opacity:.92}
-  .probtn.is-pro{background:var(--accent-soft);color:var(--accent-2);cursor:default}
-  .promodal-wrap{position:fixed;inset:0;z-index:60;display:flex;align-items:center;justify-content:center;padding:20px;background:rgba(20,17,12,.5);-webkit-backdrop-filter:blur(4px);backdrop-filter:blur(4px)}
-  .promodal{position:relative;width:100%;max-width:420px;background:var(--raise);border:1px solid var(--line);border-radius:20px;padding:30px 26px 26px;box-shadow:var(--shadow);text-align:center;max-height:90vh;overflow-y:auto}
-  .pm-close{position:absolute;top:14px;right:14px;width:34px;height:34px;border-radius:9px;border:1px solid var(--line);background:var(--sunk);color:var(--muted);cursor:pointer;display:inline-flex;align-items:center;justify-content:center}
-  .pm-close svg{width:16px;height:16px}
-  .pm-star{margin-bottom:10px}
-  .pm-title{margin:0;font-size:1.5rem;font-weight:700;letter-spacing:-.02em;color:var(--ink)}
-  .pm-sub{margin:6px 0 18px;color:var(--muted);font-size:.9rem}
-  .pm-benefits{list-style:none;margin:0 0 20px;padding:0;text-align:left;display:flex;flex-direction:column;gap:10px}
-  .pm-benefits li{position:relative;padding-left:26px;font-size:.9rem;color:var(--ink-2);line-height:1.4}
-  .pm-benefits li::before{content:"";position:absolute;left:0;top:2px;width:16px;height:16px;border-radius:50%;background:var(--accent-soft);border:1px solid var(--accent-line)}
-  .pm-benefits li::after{content:"";position:absolute;left:5px;top:5px;width:5px;height:8px;border:solid var(--accent-2);border-width:0 2px 2px 0;transform:rotate(45deg)}
-  .pm-cta{display:block;width:100%;height:46px;line-height:46px;border-radius:12px;background:linear-gradient(135deg,#B0812A,#8C651C);color:#fff;font-weight:700;font-size:.95rem;text-decoration:none;transition:opacity var(--t-fast)}
-  .pm-cta:hover{opacity:.93}
-  .pm-or{margin:16px 0 10px;color:var(--faint);font-size:.74rem;text-transform:uppercase;letter-spacing:.08em}
-  .pm-code{display:flex;gap:8px}
-  .pm-code input{flex:1;min-width:0;border:1px solid var(--line-2);border-radius:10px;padding:11px 12px;font:inherit;font-size:.85rem;background:var(--sunk);color:var(--ink);text-transform:uppercase}
-  .pm-code input:focus{outline:none;border-color:var(--accent-line)}
-  .pm-code button{flex:none;padding:0 16px;border-radius:10px;border:0;background:var(--ink);color:var(--paper);font-weight:600;cursor:pointer}
-  .pm-msg{margin-top:10px;font-size:.82rem;min-height:1.1em}
-  .pm-msg.ok{color:var(--ok)} .pm-msg.err{color:var(--danger)}
-  .inline-up{color:var(--accent-2);font-weight:600;cursor:pointer;text-decoration:underline}
-  .guides{display:flex;flex-wrap:wrap;gap:9px;justify-content:center;margin-top:22px;max-width:520px;margin-inline:auto}
-  .guide-chip{display:inline-flex;align-items:center;gap:8px;padding:9px 14px;border-radius:11px;border:1px solid var(--line-2);background:var(--raise);color:var(--ink-2);font-size:.86rem;font-weight:500;cursor:pointer;transition:border-color var(--t-fast),background var(--t-fast),color var(--t-fast)}
-  .guide-chip:hover{border-color:var(--accent-line);background:var(--paper-2);color:var(--ink)}
-  .guide-chip svg{width:16px;height:16px;color:var(--accent-2);flex:none}
-  .guide-fields{text-align:left;display:flex;flex-direction:column;gap:12px;margin-bottom:18px}
-  .guide-fields label{display:block;font-size:.82rem;font-weight:600;color:var(--ink-2);margin-bottom:5px}
-  .guide-fields .req{color:var(--danger)}
-  .guide-fields input,.guide-fields textarea{width:100%;border:1px solid var(--line-2);border-radius:10px;padding:10px 12px;font:inherit;font-size:.9rem;background:var(--sunk);color:var(--ink)}
-  .guide-fields textarea{resize:vertical;min-height:64px}
-  .guide-fields input:focus,.guide-fields textarea:focus{outline:none;border-color:var(--accent-line)}
-  .sidefoot-btn{margin:8px 12px 12px;height:40px;border-radius:11px;border:1px solid var(--line-2);background:var(--raise);color:var(--ink-2);font-weight:600;font-size:.85rem;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;transition:background var(--t-fast),border-color var(--t-fast),color var(--t-fast)}
-  .sidefoot-btn:hover{background:var(--paper-2);border-color:var(--accent-line);color:var(--ink)} .sidefoot-btn svg{width:16px;height:16px;color:var(--accent-2)}
-  .pm-secondary{display:block;width:100%;height:44px;margin-top:10px;border-radius:12px;border:1px solid var(--line-2);background:var(--raise);color:var(--ink);font-weight:600;font-size:.92rem;cursor:pointer;transition:background var(--t-fast),border-color var(--t-fast)}
-  .pm-secondary:hover{background:var(--paper-2);border-color:var(--accent-line)}
-  .pm-fine{margin:14px 0 0;font-size:.76rem;color:var(--faint);line-height:1.5}
-  @media (max-width:400px){ .probtn{padding:0 11px;font-size:.78rem} }
   .panel-btn{display:none}
   .backdrop{display:none}
   @media (max-width:1040px){ .shell{grid-template-columns:250px 1fr} .ctx{display:none} .top .mark{width:auto} }
@@ -238,7 +195,6 @@
     <div class="mark"><svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><defs><linearGradient id="nstar2" x1="3" y1="21" x2="21" y2="3" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#1f6ff0"/><stop offset=".5" stop-color="#7d5ccf"/><stop offset="1" stop-color="#f5920b"/></linearGradient></defs><path fill="url(#nstar2)" d="M12 0c.7 6.3 5.7 11.3 12 12-6.3.7-11.3 5.7-12 12-.7-6.3-5.7-11.3-12-12C6.3 11.3 11.3 6.3 12 0Z"/></svg> Noria</div>
     <label class="search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg><input id="search" placeholder="Search conversations" aria-label="Search conversations"></label>
     <div class="right">
-      <button class="probtn" id="proBtn" type="button">Upgrade</button>
       <button class="icobtn" id="voiceToggle" title="Voice off" aria-label="Toggle voice"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 5 6 9H3v6h3l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/></svg></button>
       <a class="seebtn" href="/index.html" title="See Noria"><img src="assets/noria-f-avatar.png" alt=""><span>See Noria</span></a>
       <button class="icobtn" id="newTop" aria-label="New conversation"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg></button>
@@ -248,7 +204,6 @@
   <aside class="side" id="side">
     <button class="newbtn" id="newSide"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 5v14M5 12h14"/></svg> New conversation</button>
     <div class="convos" id="convos"></div>
-    <button class="sidefoot-btn" id="syncBtn" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 0 1-15 6.7L3 16M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M21 3v5h-5M3 21v-5h5"/></svg> Sync across devices</button>
   </aside>
 
   <main class="main">
@@ -258,7 +213,6 @@
           <div class="halo"><img src="assets/noria-f-avatar.png" alt=""></div>
           <h1>A calm place to think clearly.</h1>
           <div class="disclosure">Ask Noria anything. She&rsquo;s an AI assistant &mdash; not a human, and never a substitute for a professional.</div>
-          <div class="guides" id="guides"></div>
         </div>
       </div>
     </div>
@@ -294,52 +248,6 @@
 
   <div class="backdrop" id="backdrop"></div>
 </div>
-
-<div class="promodal-wrap" id="proModal" hidden>
-  <div class="promodal" role="dialog" aria-modal="true" aria-label="Noria Pro">
-    <button class="pm-close" id="proClose" type="button" aria-label="Close"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
-    <div class="pm-star"><svg width="34" height="34" viewBox="0 0 24 24" aria-hidden="true"><defs><linearGradient id="pmstar" x1="3" y1="21" x2="21" y2="3" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#1f6ff0"/><stop offset=".5" stop-color="#7d5ccf"/><stop offset="1" stop-color="#f5920b"/></linearGradient></defs><path fill="url(#pmstar)" d="M12 0c.7 6.3 5.7 11.3 12 12-6.3.7-11.3 5.7-12 12-.7-6.3-5.7-11.3-12-12C6.3 11.3 11.3 6.3 12 0Z"/></svg></div>
-    <h2 class="pm-title">Noria Pro</h2>
-    <p class="pm-sub">Noria's full power — for the work that matters.</p>
-    <ul class="pm-benefits">
-      <li>Unlimited image generation &amp; photo understanding</li>
-      <li>Priority speed — always warm, always first</li>
-      <li>Longer memory &amp; conversation history</li>
-      <li>Guided documents: visa preparation, business &amp; travel plans, career &amp; more</li>
-      <li>Premium, professional PDF exports</li>
-    </ul>
-    <a class="pm-cta" id="proSubscribe" href="https://skyglobegroup.com/noria-pro" target="_blank" rel="noopener">Subscribe to Pro</a>
-    <div class="pm-or">or unlock with a code</div>
-    <div class="pm-code"><input id="proCode" placeholder="NORIA-XXXXXXXX-XXXXXX" autocomplete="off" spellcheck="false" /><button id="proUnlock" type="button">Unlock</button></div>
-    <div class="pm-msg" id="proMsg" aria-live="polite"></div>
-  </div>
-</div>
-<div class="promodal-wrap" id="syncModal" hidden>
-  <div class="promodal" role="dialog" aria-modal="true" aria-label="Sync across devices">
-    <button class="pm-close" id="syncClose" type="button" aria-label="Close"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
-    <div class="pm-star"><svg width="30" height="30" viewBox="0 0 24 24" aria-hidden="true"><path fill="url(#pmstar)" d="M12 0c.7 6.3 5.7 11.3 12 12-6.3.7-11.3 5.7-12 12-.7-6.3-5.7-11.3-12-12C6.3 11.3 11.3 6.3 12 0Z"/></svg></div>
-    <h2 class="pm-title">Sync across devices</h2>
-    <p class="pm-sub">Your history &amp; memory, encrypted with a secret phrase only you know. Not even we can read it.</p>
-    <div class="guide-fields">
-      <div><label for="syncPass">Your secret sync phrase</label><input id="syncPass" type="password" placeholder="Choose a strong phrase" autocomplete="off" spellcheck="false"></div>
-    </div>
-    <button class="pm-cta" id="syncBackup" type="button">Back up this device</button>
-    <button class="pm-secondary" id="syncRestore" type="button">Restore from another device</button>
-    <div class="pm-msg" id="syncMsg" aria-live="polite"></div>
-    <p class="pm-fine">Use the same phrase on another device to bring everything across. If you forget the phrase, the backup can’t be recovered.</p>
-  </div>
-</div>
-<div class="promodal-wrap" id="guideModal" hidden>
-  <div class="promodal guide-modal" role="dialog" aria-modal="true" aria-label="Guided document">
-    <button class="pm-close" id="guideClose" type="button" aria-label="Close"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
-    <div class="pm-star"><svg width="30" height="30" viewBox="0 0 24 24" aria-hidden="true"><path fill="url(#pmstar)" d="M12 0c.7 6.3 5.7 11.3 12 12-6.3.7-11.3 5.7-12 12-.7-6.3-5.7-11.3-12-12C6.3 11.3 11.3 6.3 12 0Z"/></svg></div>
-    <h2 class="pm-title" id="guideTitle">Guided document</h2>
-    <p class="pm-sub" id="guideDesc"></p>
-    <div class="guide-fields" id="guideFields"></div>
-    <button class="pm-cta" id="guideCreate" type="button">Create document</button>
-    <div class="pm-msg" id="guideMsg"></div>
-  </div>
-</div>
-<script type="module" src="workspace.js?v=8"></script>
+<script type="module" src="workspace.js?v=9"></script>
 </body>
 </html>
