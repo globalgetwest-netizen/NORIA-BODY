@@ -57,6 +57,12 @@ body {
   font-size: 1.05rem;
 }
 .brand { gap: 9px; min-width: 0; }
+.backchat { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; border-radius: 8px; color: var(--muted); border: 1px solid var(--border); background: var(--surface); text-decoration: none; flex: none; transition: color .16s, border-color .16s; }
+.backchat:hover { color: var(--ink); border-color: rgba(228, 195, 123, .5); }
+.backchat svg { width: 18px; height: 18px; }
+.pclose { display: none; }
+.app.presence .pclose { display: flex; position: fixed; top: calc(16px + env(safe-area-inset-top)); right: calc(16px + env(safe-area-inset-right)); z-index: 430; width: 44px; height: 44px; align-items: center; justify-content: center; border-radius: 50%; background: rgba(10, 12, 18, .55); border: 1px solid rgba(255, 255, 255, .28); color: #fff; -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); cursor: pointer; }
+.app.presence .pclose svg { width: 22px; height: 22px; }
 .brand-logo { width: 24px; height: 24px; flex: none; display: block; }
 .brand span { font-weight: 600; font-size: 1.12rem; letter-spacing: -.02em; }
 .status { flex: none; white-space: nowrap; }

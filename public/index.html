@@ -9,7 +9,7 @@
 <body>
   <div class="app">
     <header class="topbar">
-      <div class="brand"><svg class="brand-logo" width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><defs><linearGradient id="nstar" x1="3" y1="21" x2="21" y2="3" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#1f6ff0"/><stop offset=".5" stop-color="#7d5ccf"/><stop offset="1" stop-color="#f5920b"/></linearGradient></defs><path fill="url(#nstar)" d="M12 0c.7 6.3 5.7 11.3 12 12-6.3.7-11.3 5.7-12 12-.7-6.3-5.7-11.3-12-12C6.3 11.3 11.3 6.3 12 0Z"/></svg> <span>Noria</span></div>
+      <div class="brand"><a class="backchat" href="/workspace.html" title="Back to chat" aria-label="Back to chat"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg></a><svg class="brand-logo" width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><defs><linearGradient id="nstar" x1="3" y1="21" x2="21" y2="3" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#1f6ff0"/><stop offset=".5" stop-color="#7d5ccf"/><stop offset="1" stop-color="#f5920b"/></linearGradient></defs><path fill="url(#nstar)" d="M12 0c.7 6.3 5.7 11.3 12 12-6.3.7-11.3 5.7-12 12-.7-6.3-5.7-11.3-12-12C6.3 11.3 11.3 6.3 12 0Z"/></svg> <span>Noria</span></div>
       <div class="status" id="status">connecting to brain…</div>
     </header>
 
@@ -35,6 +35,8 @@
         <button id="pAR" class="pbtn" type="button">In your room</button>
         <button id="pExit" class="pbtn" type="button">Exit</button>
       </div>
+      <!-- Always-visible escape from Presence / AR (in case the bottom bar is covered) -->
+      <button id="pClose" class="pclose" type="button" aria-label="Exit"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
     </main>
 
     <section class="transcript" id="transcript" aria-live="polite"></section>
