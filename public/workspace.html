@@ -252,16 +252,19 @@
   .pm-codebox input{flex:1;min-width:0;border:1px solid var(--line-2);border-radius:10px;padding:10px 12px;font:inherit;font-size:.85rem;background:var(--sunk);color:var(--ink);text-transform:uppercase}
   .pm-codebox input:focus{outline:none;border-color:var(--accent-line)}
   .pm-codebox button{flex:none;padding:0 16px;border-radius:10px;border:0;background:var(--ink);color:var(--paper);font-weight:600;cursor:pointer}
-  .guides{display:flex;flex-wrap:wrap;gap:9px;justify-content:center;margin-top:22px;max-width:520px;margin-inline:auto}
-  .guide-chip{display:inline-flex;align-items:center;gap:8px;padding:9px 14px;border-radius:11px;border:1px solid var(--line-2);background:var(--raise);color:var(--ink-2);font-size:.86rem;font-weight:500;cursor:pointer;transition:border-color var(--t-fast),background var(--t-fast),color var(--t-fast)}
+  .guides{display:flex;flex-direction:column;gap:20px;margin-top:24px;max-width:580px;margin-inline:auto;text-align:left}
+  .guide-cat-title{font-size:.72rem;font-weight:700;letter-spacing:.09em;text-transform:uppercase;color:var(--accent-2);margin:0 0 10px 2px}
+  .guide-cat-chips{display:flex;flex-wrap:wrap;gap:9px}
+  .guide-chip{display:inline-flex;align-items:center;gap:8px;padding:10px 14px;border-radius:11px;border:1px solid var(--line-2);background:var(--raise);color:var(--ink-2);font-size:.86rem;font-weight:500;cursor:pointer;text-align:left;line-height:1.25;white-space:normal;max-width:100%;transition:border-color var(--t-fast),background var(--t-fast),color var(--t-fast)}
   .guide-chip:hover{border-color:var(--accent-line);background:var(--paper-2);color:var(--ink)}
   .guide-chip svg{width:16px;height:16px;color:var(--accent-2);flex:none}
   .guide-fields{text-align:left;display:flex;flex-direction:column;gap:12px;margin-bottom:18px}
   .guide-fields label{display:block;font-size:.82rem;font-weight:600;color:var(--ink-2);margin-bottom:5px}
   .guide-fields .req{color:var(--danger)}
-  .guide-fields input,.guide-fields textarea{width:100%;border:1px solid var(--line-2);border-radius:10px;padding:10px 12px;font:inherit;font-size:.9rem;background:var(--sunk);color:var(--ink)}
+  .guide-fields input,.guide-fields textarea,.guide-fields select{width:100%;border:1px solid var(--line-2);border-radius:10px;padding:10px 12px;font:inherit;font-size:.9rem;background:var(--sunk);color:var(--ink)}
   .guide-fields textarea{resize:vertical;min-height:64px}
-  .guide-fields input:focus,.guide-fields textarea:focus{outline:none;border-color:var(--accent-line)}
+  .guide-fields select{cursor:pointer;appearance:none;-webkit-appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8' fill='none' stroke='%237A7264' stroke-width='2'%3E%3Cpath d='M1 1l5 5 5-5'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 12px center;padding-right:34px}
+  .guide-fields input:focus,.guide-fields textarea:focus,.guide-fields select:focus{outline:none;border-color:var(--accent-line)}
   @media (max-width:400px){ .probtn{padding:0 12px;font-size:.78rem} .promodal{padding:28px 20px 20px} .pm-title{font-size:1.5rem} .pm-amt{font-size:2.2rem} }
 </style>
 </head>
@@ -385,6 +388,6 @@
     <button id="canvasPdf" type="button" class="primary">PDF</button>
   </div>
 </aside>
-<script type="module" src="workspace.js?v=21"></script>
+<script type="module" src="workspace.js?v=22"></script>
 </body>
 </html>

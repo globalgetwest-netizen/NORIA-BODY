@@ -885,42 +885,14 @@ const YEAR = new Date().getFullYear()
 const ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">'
 
 const GUIDES = [
-  { id: 'visa', title: 'Visa preparation', icon: ICON + '<rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 8h8M8 12h8M8 16h5"/></svg>',
-    desc: 'Current requirements, a checklist of your own genuine documents, and a cover letter you can adapt.',
-    fields: [{ k: 'nationality', label: 'Your nationality', ph: 'e.g. Kenyan' }, { k: 'destination', label: 'Destination country', ph: 'e.g. Canada' }, { k: 'type', label: 'Visa type', ph: 'e.g. study / work / visit' }, { k: 'purpose', label: 'Purpose of the trip (optional)', ph: 'brief and honest', long: true, optional: true }],
-    prompt: (v) => `Prepare a visa preparation guide for a ${v.nationality} national applying for a ${v.type} visa to ${v.destination}${v.purpose ? `. Purpose of the trip: ${v.purpose}` : ''}.`,
-    web: (v) => `${v.type} visa ${v.destination} requirements ${YEAR}`,
-    system: () => 'Produce a VISA PREPARATION GUIDE with markdown headings: # Visa Preparation Guide, ## Overview, ## Eligibility & Key Requirements, ## Document Checklist (only the genuine documents the applicant gathers — valid passport, their own bank statements, employment or enrolment letter, proof of real ties to home), ## Demonstrating a Strong, Honest Application, ## Common Refusal Reasons & How to Avoid Them, ## Sample Cover Letter. Never fabricate documents, invitations or ties, or suggest doing so — only guide the applicant\'s own genuine case. Name the official embassy or immigration website as the source of truth for exact current fees and forms. Never guarantee approval. End with a short honest disclaimer.' },
-  { id: 'business', title: 'Business plan', icon: ICON + '<path d="M4 20V10M10 20V4M16 20v-8M2 20h20"/></svg>',
-    desc: 'A structured, realistic business plan grounded in current market data.',
-    fields: [{ k: 'name', label: 'Business name', ph: 'e.g. Sunrise Cafe' }, { k: 'what', label: 'What the business does', ph: 'one line', long: true }, { k: 'where', label: 'Location / market (optional)', ph: 'e.g. Accra, Ghana', optional: true }],
+  { id: 'business', cat: 'strategy', title: 'Executive Venture Modeling', icon: ICON + '<path d="M4 20V10M10 20V4M16 20v-8M2 20h20"/></svg>',
+    desc: 'A rigorous venture model and business plan grounded in current market data.',
+    fields: [{ k: 'name', label: 'Venture name', ph: 'e.g. Sunrise Cafe' }, { k: 'what', label: 'What the venture does', ph: 'one line', long: true }, { k: 'where', label: 'Market / location (optional)', ph: 'e.g. Accra, Ghana', optional: true }],
     prompt: (v) => `Write a business plan for "${v.name}"${v.where ? ` based in ${v.where}` : ''}. What it does: ${v.what}.`,
     web: (v) => `${v.what} business ${v.where || ''} market ${YEAR}`.trim(),
     system: (v) => 'Produce a realistic BUSINESS PLAN with markdown headings: # ' + v.name + ' — Business Plan, ## Executive Summary, ## Problem & Solution, ## Products/Services, ## Target Market, ## Competition & Advantage, ## Marketing & Sales, ## Operations, ## Team, ## Financial Plan (label all figures as illustrative estimates to validate; use local currency and realistic local costs when a location is given), ## Milestones, ## Risks & Mitigations. Do not present invented statistics as fact.' },
-  { id: 'cv', title: 'CV / Résumé', icon: ICON + '<circle cx="12" cy="8" r="3.2"/><path d="M5 20a7 7 0 0 1 14 0"/></svg>',
-    desc: 'A polished, ATS-friendly CV from your real details.',
-    fields: [{ k: 'name', label: 'Full name', ph: 'e.g. Amina Bello' }, { k: 'role', label: 'Target role / field', ph: 'e.g. Registered Nurse' }, { k: 'details', label: 'Your experience, skills & education', ph: 'roles, years, skills, schools — paste what you have', long: true }],
-    prompt: (v) => `Write a polished, ATS-friendly CV for ${v.name}, targeting a ${v.role} role. Real details to use: ${v.details}`,
-    system: (v) => 'Produce a polished, ATS-friendly CV using ONLY the real details provided (never invent employers, dates, titles or qualifications). Markdown: # ' + v.name + ', then a one-line professional headline, ## Professional Summary, ## Key Skills, ## Experience (strong action verbs; quantify only where numbers were given), ## Education, ## Additional. Keep it to one to two pages of content and use standard section names ATS parsers recognise.' },
-  { id: 'cover', title: 'Cover letter', icon: ICON + '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/></svg>',
-    desc: 'A tailored, sincere cover letter.',
-    fields: [{ k: 'name', label: 'Your name', ph: 'e.g. Amina Bello' }, { k: 'role', label: 'Role / position', ph: 'e.g. Marketing Manager at Acme' }, { k: 'background', label: 'Your relevant background', ph: 'key experience & why you fit', long: true }],
-    prompt: (v) => `Write a cover letter for ${v.name} applying for: ${v.role}. Base it only on: ${v.background}`,
-    system: () => 'Produce a warm, professional, genuine cover letter based only on the details provided — 3 to 4 tight paragraphs, specific and sincere, no clichés or fabricated achievements. Markdown: the applicant\'s name as a # heading, the letter body, then a professional sign-off.' },
-  { id: 'travel', title: 'Travel plan', icon: ICON + '<path d="M2 12l20-8-8 20-2-8-8-4z"/></svg>',
-    desc: 'A practical day-by-day itinerary with current, realistic detail.',
-    fields: [{ k: 'destination', label: 'Destination', ph: 'e.g. Nairobi' }, { k: 'days', label: 'How many days', ph: 'e.g. 5' }, { k: 'focus', label: 'Interests / budget (optional)', ph: 'e.g. culture, mid-range', optional: true }],
-    prompt: (v) => `Create a ${v.days}-day travel itinerary for ${v.destination}${v.focus ? ` (${v.focus})` : ''}.`,
-    web: (v) => `${v.destination} travel guide ${YEAR} attractions cost`,
-    system: (v) => `Produce a practical day-by-day itinerary. Markdown: # ${v.destination} — ${v.days}-Day Itinerary, ## Overview & Best Time to Go, then ## Day 1 through ## Day ${v.days} (each with morning / afternoon / evening), ## Getting Around, ## Where to Stay, ## Budget (local currency ranges), ## Practical Notes. Opening hours and prices change — say they must be confirmed and never present them as fixed fact.` },
-  { id: 'career', title: 'Career roadmap', icon: ICON + '<path d="M6 3v11a3 3 0 0 0 3 3h6"/><path d="M15 14l3 3-3 3"/></svg>',
-    desc: 'A phased, current plan to reach your goal — local and remote.',
-    fields: [{ k: 'goal', label: 'Your goal', ph: 'e.g. become a data analyst' }, { k: 'now', label: 'Where you are now', ph: 'current skills / situation', long: true }, { k: 'location', label: 'Your city / country (optional)', ph: 'e.g. Kumasi, Ghana', optional: true }, { k: 'time', label: 'Timeframe (optional)', ph: 'e.g. 12 months', optional: true }],
-    prompt: (v) => `Build a career roadmap to reach: ${v.goal}${v.time ? ` within ${v.time}` : ''}. Starting point: ${v.now}.${v.location ? ` Location: ${v.location}.` : ''}`,
-    web: (v) => `${v.goal} skills tools salary ${YEAR} ${v.location || ''}`.trim(),
-    system: () => 'Produce a step-by-step CAREER ROADMAP. Markdown: # Career Roadmap, ## Where You Are & Where You\'re Going, ## Skills to Build (name current, in-demand tools), ## Step-by-Step Plan (phased, concrete actions with free or low-cost current resources), ## Portfolio / Proof to Build, ## Finding Opportunities (real current channels, both local and remote), ## Milestones. Frame timelines and salary ranges as estimates to verify, never guarantees.' },
-  { id: 'roadmap', title: 'Tech / Dev roadmap', icon: ICON + '<path d="M8 6l-5 6 5 6M16 6l5 6-5 6"/></svg>',
-    desc: 'A modern, job-ready developer roadmap: current stack, real projects, code, and pacing.',
+  { id: 'roadmap', cat: 'strategy', title: 'System Architecture & Tech Stack Design', icon: ICON + '<path d="M8 6l-5 6 5 6M16 6l5 6-5 6"/></svg>',
+    desc: 'A modern, job-ready engineering roadmap: current stack, real projects, code, and pacing.',
     fields: [{ k: 'goal', label: 'Your goal', ph: 'e.g. become a job-ready full-stack developer' }, { k: 'start', label: 'Your current level', ph: 'e.g. complete beginner / knows basic HTML', long: true }, { k: 'stack', label: 'Preferred language / stack (optional)', ph: 'e.g. JavaScript, or unsure', optional: true }, { k: 'location', label: 'Your city / country (optional)', ph: 'e.g. Kumasi, Ghana', optional: true }, { k: 'time', label: 'Timeframe (optional)', ph: 'e.g. 12 months', optional: true }],
     prompt: (v) => `Build a developer roadmap to: ${v.goal}. Current level: ${v.start}.${v.stack ? ` Preferred stack: ${v.stack}.` : ''}${v.time ? ` Timeframe: ${v.time}.` : ''}${v.location ? ` Location: ${v.location}.` : ''}`,
     web: (v) => `${v.goal} developer roadmap ${YEAR} tools hiring ${v.location || ''}`.trim(),
@@ -931,13 +903,49 @@ const GUIDES = [
       '(4) TECHNICAL DEPTH & VALIDATION — include short fenced code snippets, a professional repository layout (README, .gitignore, LICENSE, tests), early testing (Jest or PyTest), and system-design basics (HTTP methods, status codes, schema design); end with clear interview-readiness criteria. ' +
       '(5) HYPER-LOCAL — when a location is given, reference real local tech hubs and communities, realistic local salary ranges alongside international or remote rates, and locally relevant project ideas (e.g. mobile-money API integrations where applicable). ' +
       'Markdown headings: # Developer Roadmap, ## Overview, ## Your Stack (and why), ## Phase-by-Phase Plan, ## Modern Tooling & AI Workflow, ## Projects to Build, ## Repository & Testing Standards, ## Local & Remote Opportunities, ## Interview Readiness.' },
+  { id: 'profile', cat: 'career', title: 'Executive Profile & CV Optimization', icon: ICON + '<circle cx="12" cy="8" r="3.2"/><path d="M5 20a7 7 0 0 1 14 0"/></svg>',
+    desc: 'A polished executive CV and/or a tailored cover letter, built from your real experience.',
+    fields: [{ k: 'name', label: 'Full name', ph: 'e.g. Amina Bello' }, { k: 'role', label: 'Target role / field', ph: 'e.g. Operations Director' }, { k: 'doctype', label: 'What to create', type: 'select', options: ['CV / Résumé', 'Cover letter', 'Both'] }, { k: 'details', label: 'Your experience, skills & education', ph: 'roles, years, skills, schools — paste what you have', long: true }],
+    prompt: (v) => { const w = v.doctype === 'Both' ? 'a CV and a matching cover letter' : v.doctype === 'Cover letter' ? 'a cover letter' : 'a CV'; return `Create ${w} for ${v.name}, targeting a ${v.role} role. Real details to use: ${v.details}` },
+    system: (v) => { const cv = 'For the CV use markdown: # ' + v.name + ', a one-line professional headline, ## Professional Summary, ## Key Skills, ## Experience (strong action verbs; quantify only where numbers were given), ## Education, ## Additional; keep it ATS-friendly and one to two pages.'; const cl = 'For the cover letter: 3 to 4 tight, sincere paragraphs, specific, with no cliches or fabricated achievements; put the applicant name as a # heading, then the body, then a professional sign-off.'; const base = 'Act as an elite executive career strategist. Use ONLY the real details provided (never invent employers, dates, titles or qualifications). '; if (v.doctype === 'Both') return base + cv + ' Then add a "# Cover Letter" section. ' + cl; if (v.doctype === 'Cover letter') return base + cl; return base + cv } },
+  { id: 'career', cat: 'career', title: 'Strategic Career & Leadership Roadmap', icon: ICON + '<path d="M6 3v11a3 3 0 0 0 3 3h6"/><path d="M15 14l3 3-3 3"/></svg>',
+    desc: 'A phased plan to advance and step into leadership — current, local and remote.',
+    fields: [{ k: 'goal', label: 'Your goal', ph: 'e.g. become a data analyst' }, { k: 'now', label: 'Where you are now', ph: 'current skills / situation', long: true }, { k: 'location', label: 'Your city / country (optional)', ph: 'e.g. Kumasi, Ghana', optional: true }, { k: 'time', label: 'Timeframe (optional)', ph: 'e.g. 12 months', optional: true }],
+    prompt: (v) => `Build a career roadmap to reach: ${v.goal}${v.time ? ` within ${v.time}` : ''}. Starting point: ${v.now}.${v.location ? ` Location: ${v.location}.` : ''}`,
+    web: (v) => `${v.goal} skills tools salary ${YEAR} ${v.location || ''}`.trim(),
+    system: () => 'Produce a step-by-step CAREER ROADMAP. Markdown: # Career Roadmap, ## Where You Are & Where You\'re Going, ## Skills to Build (name current, in-demand tools), ## Step-by-Step Plan (phased, concrete actions with free or low-cost current resources), ## Portfolio / Proof to Build, ## Finding Opportunities (real current channels, both local and remote), ## Milestones. Frame timelines and salary ranges as estimates to verify, never guarantees.' },
+  { id: 'visa', cat: 'mobility', title: 'Immigration & Relocation Strategy', icon: ICON + '<rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 8h8M8 12h8M8 16h5"/></svg>',
+    desc: 'Current requirements, a checklist of your own genuine documents, and a cover letter you can adapt.',
+    fields: [{ k: 'nationality', label: 'Your nationality', ph: 'e.g. Kenyan' }, { k: 'destination', label: 'Destination country', ph: 'e.g. Canada' }, { k: 'type', label: 'Visa type', ph: 'e.g. study / work / visit' }, { k: 'purpose', label: 'Purpose of the trip (optional)', ph: 'brief and honest', long: true, optional: true }],
+    prompt: (v) => `Prepare a visa preparation guide for a ${v.nationality} national applying for a ${v.type} visa to ${v.destination}${v.purpose ? `. Purpose of the trip: ${v.purpose}` : ''}.`,
+    web: (v) => `${v.type} visa ${v.destination} requirements ${YEAR}`,
+    system: () => 'Produce a VISA PREPARATION GUIDE with markdown headings: # Visa Preparation Guide, ## Overview, ## Eligibility & Key Requirements, ## Document Checklist (only the genuine documents the applicant gathers — valid passport, their own bank statements, employment or enrolment letter, proof of real ties to home), ## Demonstrating a Strong, Honest Application, ## Common Refusal Reasons & How to Avoid Them, ## Sample Cover Letter. Never fabricate documents, invitations or ties, or suggest doing so — only guide the applicant\'s own genuine case. Name the official embassy or immigration website as the source of truth for exact current fees and forms. Never guarantee approval. End with a short honest disclaimer.' },
+  { id: 'travel', cat: 'mobility', title: 'Itinerary & Operational Logistics', icon: ICON + '<path d="M2 12l20-8-8 20-2-8-8-4z"/></svg>',
+    desc: 'A practical day-by-day itinerary with current, realistic detail.',
+    fields: [{ k: 'destination', label: 'Destination', ph: 'e.g. Nairobi' }, { k: 'days', label: 'How many days', ph: 'e.g. 5' }, { k: 'focus', label: 'Interests / budget (optional)', ph: 'e.g. culture, mid-range', optional: true }],
+    prompt: (v) => `Create a ${v.days}-day travel itinerary for ${v.destination}${v.focus ? ` (${v.focus})` : ''}.`,
+    web: (v) => `${v.destination} travel guide ${YEAR} attractions cost`,
+    system: (v) => `Produce a practical day-by-day itinerary. Markdown: # ${v.destination} — ${v.days}-Day Itinerary, ## Overview & Best Time to Go, then ## Day 1 through ## Day ${v.days} (each with morning / afternoon / evening), ## Getting Around, ## Where to Stay, ## Budget (local currency ranges), ## Practical Notes. Opening hours and prices change — say they must be confirmed and never present them as fixed fact.` },
 ]
 const guidesEl = $('guides'), guideModal = $('guideModal')
 let activeGuide = null
+const GUIDE_CATS = [
+  { id: 'strategy', title: 'Executive & Venture Strategy' },
+  { id: 'career', title: 'Career & Professional Mastery' },
+  { id: 'mobility', title: 'Global Mobility & Logistics' },
+]
 function renderGuides() {
   if (!guidesEl) return
   guidesEl.innerHTML = ''
-  GUIDES.forEach((g) => { const b = document.createElement('button'); b.type = 'button'; b.className = 'guide-chip'; b.innerHTML = g.icon + '<span>' + g.title + '</span>'; b.addEventListener('click', () => openGuide(g.id)); guidesEl.appendChild(b) })
+  GUIDE_CATS.forEach((cat) => {
+    const items = GUIDES.filter((g) => g.cat === cat.id)
+    if (!items.length) return
+    const sec = document.createElement('div'); sec.className = 'guide-cat'
+    const h = document.createElement('div'); h.className = 'guide-cat-title'; h.textContent = cat.title
+    const row = document.createElement('div'); row.className = 'guide-cat-chips'
+    items.forEach((g) => { const b = document.createElement('button'); b.type = 'button'; b.className = 'guide-chip'; b.innerHTML = g.icon + '<span>' + g.title + '</span>'; b.addEventListener('click', () => openGuide(g.id)); row.appendChild(b) })
+    sec.append(h, row); guidesEl.appendChild(sec)
+  })
 }
 function openGuide(id) {
   const g = GUIDES.find((x) => x.id === id); if (!g) return
@@ -948,8 +956,10 @@ function openGuide(id) {
   g.fields.forEach((f) => {
     const wrap = document.createElement('div')
     const lab = document.createElement('label'); lab.htmlFor = 'gf_' + f.k; lab.innerHTML = esc(f.label) + (f.optional ? '' : ' <span class="req">*</span>')
-    const inp = f.long ? document.createElement('textarea') : document.createElement('input')
-    inp.id = 'gf_' + f.k; inp.placeholder = f.ph || ''; inp.dataset.k = f.k; inp.dataset.optional = f.optional ? '1' : ''
+    let inp
+    if (f.type === 'select') { inp = document.createElement('select'); (f.options || []).forEach((o) => { const op = document.createElement('option'); op.value = o; op.textContent = o; inp.appendChild(op) }) }
+    else { inp = f.long ? document.createElement('textarea') : document.createElement('input'); inp.placeholder = f.ph || '' }
+    inp.id = 'gf_' + f.k; inp.dataset.k = f.k; inp.dataset.optional = f.optional ? '1' : ''
     wrap.append(lab, inp); gf.appendChild(wrap)
   })
   $('guideMsg').textContent = ''; $('guideMsg').className = 'pm-msg'; guideModal.hidden = false
@@ -960,7 +970,7 @@ guideModal && guideModal.addEventListener('click', (e) => { if (e.target === gui
 $('guideCreate') && $('guideCreate').addEventListener('click', () => {
   if (!activeGuide) return
   const v = {}; let missing = false
-  $('guideFields').querySelectorAll('input,textarea').forEach((inp) => { v[inp.dataset.k] = inp.value.trim(); if (!inp.value.trim() && inp.dataset.optional !== '1') missing = true })
+  $('guideFields').querySelectorAll('input,textarea,select').forEach((inp) => { v[inp.dataset.k] = inp.value.trim(); if (!inp.value.trim() && inp.dataset.optional !== '1') missing = true })
   if (missing) { $('guideMsg').textContent = 'Please fill in the required fields.'; $('guideMsg').className = 'pm-msg err'; return }
   const summary = activeGuide.fields.map((f) => (v[f.k] || '').slice(0, 40)).filter(Boolean).slice(0, 3).join(' · ')
   closeGuide()
