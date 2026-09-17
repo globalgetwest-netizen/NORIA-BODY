@@ -115,19 +115,59 @@ function unlockAudio() {
   try { const u = new SpeechSynthesisUtterance(' '); u.volume = 0; window.speechSynthesis.speak(u) } catch {}
 }
 window.addEventListener('pointerdown', unlockAudio, { once: true })
-function stopSpeaking() { try { ttsAudio.pause() } catch {} brain.stopSpeaking() }
+let speakGen = 0
+function stopSpeaking() { speakGen++; try { ttsAudio.pause() } catch {} brain.stopSpeaking() }
+// Split cleaned text into <=maxLen chunks at sentence/line boundaries. The trailing
+// remainder is always included (force-flush) so the last words are never dropped.
+function chunkForSpeech(t, maxLen = 1400) {
+  const parts = t.match(/\s*[^.!?;\n]+[.!?;\n]*|\n+/g) || [t]
+  const chunks = []; let cur = ''
+  for (let s of parts) {
+    while (s.length > maxLen) { if (cur) { chunks.push(cur); cur = '' } chunks.push(s.slice(0, maxLen)); s = s.slice(maxLen) }
+    if ((cur + s).length > maxLen && cur) { chunks.push(cur); cur = '' }
+    cur += s
+  }
+  if (cur.trim()) chunks.push(cur)
+  return chunks.map((c) => c.trim()).filter(Boolean)
+}
+async function ttsBlob(text) {
+  const r = await fetch(TTS_URL + '?text=' + encodeURIComponent(text))
+  if (!r.ok) throw new Error('tts ' + r.status)
+  return await r.blob()
+}
+function playBlob(blob) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(blob)
+    ttsAudio.onended = () => { URL.revokeObjectURL(url); resolve() }
+    ttsAudio.onerror = () => { URL.revokeObjectURL(url); reject(new Error('audio')) }
+    try { ttsAudio.pause() } catch {}
+    ttsAudio.src = url
+    ttsAudio.play().catch(reject)
+  })
+}
+// Speak the FULL text (no truncation), same neural voice, played chunk-by-chunk in
+// order with the next chunk prefetched so there are no gaps and nothing is skipped.
 async function speakNeural(text) {
   const t = toSpeech(text) // strip markdown/symbols/emoji so the voice never reads them
   if (!t) return
+  const gen = ++speakGen
   brain.stopSpeaking()
+  const chunks = chunkForSpeech(t)
+  if (!chunks.length) return
+  let i = 0
   try {
-    const r = await fetch(TTS_URL + '?text=' + encodeURIComponent(t.slice(0, 1800)))
-    if (!r.ok) throw new Error('tts ' + r.status)
-    const url = URL.createObjectURL(await r.blob())
-    try { ttsAudio.pause() } catch {}
-    ttsAudio.src = url; ttsAudio.onended = () => URL.revokeObjectURL(url)
-    await ttsAudio.play()
-  } catch (e) { brain.speak(t, {}) } // fall back to the browser voice — never silent
+    let nextP = ttsBlob(chunks[0])
+    for (; i < chunks.length; i++) {
+      const blob = await nextP
+      if (gen !== speakGen) return // a newer speak() or stopSpeaking() superseded this one
+      if (i + 1 < chunks.length) nextP = ttsBlob(chunks[i + 1]) // prefetch while this plays
+      await playBlob(blob)
+      if (gen !== speakGen) return
+    }
+  } catch (e) {
+    // Never go silent: read whatever hasn't been spoken yet with the browser voice.
+    if (gen === speakGen) { try { ttsAudio.pause() } catch {} brain.speak(chunks.slice(i).join(' '), {}) }
+  }
 }
 if (vt) vt.addEventListener('click', () => {
   voiceOn = !voiceOn; vt.classList.toggle('on', voiceOn); vt.title = voiceOn ? 'Voice on' : 'Voice off'
@@ -744,10 +784,16 @@ const DOC_RULES = '\n\nFORMAT RULES (critical — a finished, ready-to-use docum
 // the whole line is dropped — and any section left with no body is removed too.
 const PH_RE = /\[[^\]\n]{1,100}\]|\((?:add|insert|list|repeat|include|fill in|e\.g\.[^)]*optional)\b[^)]*\)/i
 function cleanDocText(t) {
+  // Pre-pass: remove conversational meta-announcements and broken structural tags
+  // (artifacts) so the document opens directly on its own content.
+  let s0 = String(t || '')
+  s0 = s0.replace(/<\/?(step|section|document|response|answer|output|thinking|tool_call|tool_result)[^>]*>/gi, '')
+  s0 = s0.replace(/^\s*(sure|certainly|of course|absolutely|great|no problem)[!,.:][^\n]*\n+/i, '')
+  s0 = s0.replace(/^\s*(here(?:'s| is| are)|below (?:is|are)|i(?:'ve| have) (?:created|drafted|prepared|put together|written))[^\n]*:\s*\n+/i, '')
   const strip = (l) => l.replace(/\s*\[[^\]\n]{1,100}\]/g, '').replace(/\s*\((?:add|insert|list|repeat|include|fill in|e\.g\.[^)]*optional)\b[^)]*\)/gi, '').replace(/\*\*\s*\*\*/g, '').replace(/[ \t]{2,}/g, ' ').replace(/ +([,.;:])/g, '$1').trim()
   const isComplete = (s) => { const core = s.replace(/^[-*]\s+/, '').replace(/[.!?:]$/, '').trim(); return /[.!?:]$/.test(s) && core.split(/\s+/).length >= 4 && !/\b(to|of|across|the|a|an|for|with|and|or|in|on|at|by|from|as|is|are|was|were)$/i.test(core) }
   const kept = []
-  for (const raw of String(t || '').split('\n')) {
+  for (const raw of s0.split('\n')) {
     const line = raw.replace(/\s+$/, '')
     if (/^\s*#{1,6}\s/.test(line)) { kept.push(line); continue } // headings pass through
     if (PH_RE.test(line)) { const s = strip(line); if (s && isComplete(s)) kept.push(s); continue } // keep only if still complete
