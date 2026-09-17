@@ -130,10 +130,19 @@ function chunkForSpeech(t, maxLen = 1400) {
   if (cur.trim()) chunks.push(cur)
   return chunks.map((c) => c.trim()).filter(Boolean)
 }
+// Chunks are fetched one at a time (single 1-chunk prefetch), so we never open
+// parallel connections. This adds a short backoff-retry purely as defence against
+// a transient 429 (rate) or network hiccup on a middle chunk, so a long document
+// never drops to the browser voice over one blip.
 async function ttsBlob(text) {
-  const r = await fetch(TTS_URL + '?text=' + encodeURIComponent(text))
-  if (!r.ok) throw new Error('tts ' + r.status)
-  return await r.blob()
+  for (let attempt = 0; ; attempt++) {
+    let r
+    try { r = await fetch(TTS_URL + '?text=' + encodeURIComponent(text)) }
+    catch (e) { if (attempt >= 2) throw e; await new Promise((res) => setTimeout(res, 400 + attempt * 500)); continue }
+    if (r.ok) return await r.blob()
+    if (r.status === 429 && attempt < 2) { await new Promise((res) => setTimeout(res, 600 + attempt * 700)); continue }
+    throw new Error('tts ' + r.status)
+  }
 }
 function playBlob(blob) {
   return new Promise((resolve, reject) => {
@@ -501,6 +510,14 @@ function addFeedback(msg, q, a) {
     exportPdf(deriveTitle(q, text), text)
   })
   bar.append(pd)
+  // Open in the document side-panel — only for document-like answers (a heading or a table).
+  const docText = String(a || '')
+  if (/^#{1,3}\s/m.test(docText) || /^\s*\|.*\|\s*$/m.test(docText)) {
+    const OPEN = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-4M14 3h7v7M21 3l-9 9"/></svg>'
+    const op = document.createElement('button'); op.type = 'button'; op.className = 'pdfbtn openbtn'; op.title = 'Open in document view'; op.setAttribute('aria-label', 'Open document'); op.innerHTML = OPEN + '<span>Open</span>'
+    op.addEventListener('click', () => openCanvas(deriveTitle(q, docText), docText))
+    bar.append(op)
+  }
   msg.querySelector('.body').appendChild(bar)
 }
 
@@ -581,6 +598,48 @@ async function exportPdf(title, md) {
     note('')
   } catch (e) { note('Could not create the PDF — please try again.') }
 }
+
+// ── Canvas / document side-panel (isolate long docs; 1-click Copy / MD / Word / PDF) ──
+const canvasEl = $('canvas'), canvasBackdrop = $('canvasBackdrop')
+let curCanvasMd = '', curCanvasTitle = 'Document'
+function openCanvas(title, md) {
+  curCanvasMd = md || ''; curCanvasTitle = title || 'Document'
+  $('canvasTitle').textContent = curCanvasTitle
+  renderMd($('canvasDoc'), curCanvasMd)
+  $('canvasDoc').scrollTop = 0
+  canvasBackdrop.hidden = false; canvasEl.hidden = false
+  requestAnimationFrame(() => { canvasBackdrop.classList.add('show'); canvasEl.classList.add('show') })
+}
+function closeCanvas() {
+  canvasEl.classList.remove('show'); canvasBackdrop.classList.remove('show')
+  setTimeout(() => { canvasEl.hidden = true; canvasBackdrop.hidden = true }, 260)
+}
+function downloadBlob(blob, name) {
+  const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = name; a.rel = 'noopener'
+  document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 15000)
+}
+function mdToHtmlDoc(title, md) {
+  const tmp = document.createElement('div'); renderMd(tmp, md)
+  return '<!DOCTYPE html><html><head><meta charset="utf-8"><title>' + esc(title) +
+    '</title><style>body{font-family:Calibri,Arial,sans-serif;font-size:11pt;color:#222;line-height:1.5}h1{font-size:20pt;color:#0B1F3A}h2{font-size:14pt;color:#12325A}h3{font-size:12pt;color:#B0812A}table{border-collapse:collapse;width:100%}th,td{border:1px solid #cccccc;padding:5px 8px;text-align:left}th{background:#F3EEDD}</style></head><body>' + tmp.innerHTML + '</body></html>'
+}
+const canvasFlash = (btn, label) => { const o = btn.dataset.label || btn.textContent; btn.dataset.label = o; btn.textContent = label; btn.classList.add('ok'); setTimeout(() => { btn.textContent = o; btn.classList.remove('ok') }, 1400) }
+canvasBackdrop && canvasBackdrop.addEventListener('click', closeCanvas)
+$('canvasClose') && $('canvasClose').addEventListener('click', closeCanvas)
+$('canvasCopy') && $('canvasCopy').addEventListener('click', async () => {
+  try { await navigator.clipboard.writeText(curCanvasMd) } catch { const ta = document.createElement('textarea'); ta.value = curCanvasMd; document.body.appendChild(ta); ta.select(); try { document.execCommand('copy') } catch {} ta.remove() }
+  canvasFlash($('canvasCopy'), 'Copied')
+})
+$('canvasMd') && $('canvasMd').addEventListener('click', () => { downloadBlob(new Blob([curCanvasMd], { type: 'text/markdown' }), slug(curCanvasTitle) + '.md'); canvasFlash($('canvasMd'), 'Saved') })
+$('canvasPdf') && $('canvasPdf').addEventListener('click', () => exportPdf(curCanvasTitle, curCanvasMd))
+$('canvasDocx') && $('canvasDocx').addEventListener('click', async () => {
+  const btn = $('canvasDocx')
+  try {
+    await lazyScript('https://cdn.jsdelivr.net/npm/html-docx-js/dist/html-docx.js')
+    const blob = window.htmlDocx.asBlob(mdToHtmlDoc(curCanvasTitle, curCanvasMd))
+    downloadBlob(blob, slug(curCanvasTitle) + '.docx'); canvasFlash(btn, 'Saved')
+  } catch (e) { canvasFlash(btn, 'Failed') }
+})
 
 // ── Consent-based memory ──────────────────────────────────────────────────────
 function suggestMemory(text) {
@@ -743,7 +802,7 @@ function closePro() { if (proModal) proModal.hidden = true }
 proBtn && proBtn.addEventListener('click', openPro)
 $('proClose') && $('proClose').addEventListener('click', closePro)
 proModal && proModal.addEventListener('click', (e) => { if (e.target === proModal) closePro() })
-document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeAllModals() })
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { closeAllModals(); if (canvasEl && !canvasEl.hidden) closeCanvas() } })
 $('segMonthly') && $('segMonthly').addEventListener('click', () => setBilling('monthly'))
 $('segAnnual') && $('segAnnual').addEventListener('click', () => setBilling('annual'))
 $('proSubscribe') && $('proSubscribe').addEventListener('click', () => startCheckout(billing))
