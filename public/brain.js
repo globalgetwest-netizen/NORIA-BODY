@@ -68,6 +68,11 @@ export function normalizeSpokenText(t) {
     .trim()
 }
 
+// Clean chat/markdown text into natural speech (strip code/markdown/links/symbols/
+// emoji, then naturalize money/dates/abbreviations/brands). Apply this to ANY text
+// before sending it to a TTS voice, so symbols like ** and # are never read aloud.
+export function toSpeech(t) { return normalizeSpokenText(speechify(t)) }
+
 // Detect the language of text (script + common-word heuristic) so speech reads
 // WORDS in the right language instead of spelling out letters. LANG_BCP maps the
 // short code to a speech-synthesis locale.
