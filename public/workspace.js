@@ -205,8 +205,11 @@ micBtn && micBtn.addEventListener('click', () => {
 // ── Composer ──────────────────────────────────────────────────────────────────
 function syncSend() { send.disabled = busy || (!input.value.trim() && attachments.length === 0) }
 function grow() { input.style.height = 'auto'; input.style.height = Math.min(input.scrollHeight, 180) + 'px'; syncSend() }
-input.addEventListener('input', grow)
-input.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); respond(input.value) } })
+input.addEventListener('input', () => { grow(); cmdOnInput() })
+input.addEventListener('keydown', (e) => {
+  if (cmdOpen && cmdHandleKey(e)) return // command palette gets arrows / enter / escape first
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); respond(input.value) }
+})
 send.addEventListener('click', () => respond(input.value))
 stop.addEventListener('click', () => { cancelled = true; stopSpeaking() })
 
@@ -976,7 +979,49 @@ $('guideCreate') && $('guideCreate').addEventListener('click', () => {
   closeGuide()
   respond(activeGuide.prompt(v), { display: activeGuide.title + (summary ? ': ' + summary : ''), doc: true, system: (activeGuide.system ? activeGuide.system(v) : '') + MODERN_STANDARD + DOC_RULES, web: activeGuide.web ? activeGuide.web(v) : '', noWeb: !activeGuide.web })
 })
-renderGuides()
+// ── Command palette (/) — the elite engines, summoned; the canvas stays pristine ──
+const CMD_KEYS = { business: 'venture', roadmap: 'architecture', profile: 'profile', career: 'career', visa: 'mobility', travel: 'logistics' }
+const cmdPalette = $('cmdPalette'), cmdList = $('cmdList'), cmdBackdrop = $('cmdBackdrop'), cmdBtn = $('cmdBtn')
+let cmdOpen = false, cmdItems = [], cmdSel = -1
+function cmdMatches(g, q) { return !q || (CMD_KEYS[g.id] || g.id).includes(q) || g.title.toLowerCase().includes(q) }
+function renderCmd(q) {
+  if (!cmdList) return
+  q = (q || '').toLowerCase().trim()
+  cmdList.innerHTML = ''; cmdItems = []; cmdSel = -1
+  GUIDE_CATS.forEach((cat) => {
+    const items = GUIDES.filter((g) => g.cat === cat.id && cmdMatches(g, q))
+    if (!items.length) return
+    const lab = document.createElement('div'); lab.className = 'cmd-cat'; lab.textContent = cat.title; cmdList.appendChild(lab)
+    items.forEach((g) => {
+      const b = document.createElement('button'); b.type = 'button'; b.className = 'cmd-item'; b.setAttribute('role', 'menuitem')
+      b.innerHTML = '<span class="cmd-ico">' + g.icon + '</span><span class="cmd-cmd">/' + (CMD_KEYS[g.id] || g.id) + '</span><span class="cmd-name">' + esc(g.title) + '</span>'
+      b.addEventListener('click', () => selectCmd(g.id))
+      b.addEventListener('mousemove', () => { const i = cmdItems.findIndex((x) => x.el === b); if (i >= 0 && i !== cmdSel) { cmdSel = i; highlightCmd() } })
+      cmdList.appendChild(b); cmdItems.push({ id: g.id, el: b })
+    })
+  })
+  if (cmdItems.length) { cmdSel = 0; highlightCmd() }
+}
+function highlightCmd() { cmdItems.forEach((it, i) => it.el.classList.toggle('on', i === cmdSel)); if (cmdItems[cmdSel]) cmdItems[cmdSel].el.scrollIntoView({ block: 'nearest' }) }
+function openCmd(q) { if (!cmdPalette) return; renderCmd(q); cmdOpen = true; cmdBackdrop.hidden = false; cmdPalette.hidden = false; requestAnimationFrame(() => cmdPalette.classList.add('show')) }
+function closeCmd() { if (!cmdPalette) return; cmdOpen = false; cmdPalette.classList.remove('show'); setTimeout(() => { cmdPalette.hidden = true; cmdBackdrop.hidden = true }, 180) }
+function selectCmd(id) { closeCmd(); if (input.value.startsWith('/')) { input.value = ''; grow() } openGuide(id) }
+// Typing "/" as the first character summons the palette and filters live.
+function cmdOnInput() {
+  const val = input.value
+  if (val.startsWith('/')) { const q = val.slice(1); if (!cmdOpen) openCmd(q); else renderCmd(q) }
+  else if (cmdOpen) closeCmd()
+}
+function cmdHandleKey(e) {
+  if (e.key === 'ArrowDown') { e.preventDefault(); if (cmdItems.length) { cmdSel = (cmdSel + 1) % cmdItems.length; highlightCmd() } return true }
+  if (e.key === 'ArrowUp') { e.preventDefault(); if (cmdItems.length) { cmdSel = (cmdSel - 1 + cmdItems.length) % cmdItems.length; highlightCmd() } return true }
+  if (e.key === 'Enter') { e.preventDefault(); if (cmdItems[cmdSel]) selectCmd(cmdItems[cmdSel].id); return true }
+  if (e.key === 'Escape') { e.preventDefault(); closeCmd(); return true }
+  return false
+}
+cmdBtn && cmdBtn.addEventListener('click', () => { if (cmdOpen) { closeCmd() } else { openCmd(input.value.startsWith('/') ? input.value.slice(1) : ''); input.focus() } })
+cmdBackdrop && cmdBackdrop.addEventListener('click', closeCmd)
+renderCmd('')
 
 // Service worker retired: do NOT register one, and clean up any existing one
 // (the old worker caused hang / stale-code issues). The app loads from the network.

@@ -146,7 +146,22 @@
   .empty h1{font-weight:600;font-size:1.7rem;letter-spacing:-.025em;margin:0}
   .disclosure{margin-top:16px;font-size:.82rem;color:var(--faint);max-width:44ch;margin-inline:auto;line-height:1.5}
 
-  .composer{padding:14px 24px calc(20px + env(safe-area-inset-bottom));background:linear-gradient(180deg,transparent,var(--paper) 32%)}
+  .composer{padding:14px 24px calc(20px + env(safe-area-inset-bottom));background:linear-gradient(180deg,transparent,var(--paper) 32%);position:relative}
+  .cmdtrigger svg{width:18px;height:18px}
+  .cmd-backdrop{position:fixed;inset:0;z-index:39;background:transparent}
+  .cmdpalette{position:absolute;left:24px;right:24px;bottom:calc(100% - 6px);margin:0 auto;max-width:600px;max-height:min(56vh,400px);overflow-y:auto;-webkit-overflow-scrolling:touch;background:var(--raise);border:1px solid var(--line-2);border-radius:16px;box-shadow:0 24px 60px rgba(20,17,12,.20);z-index:41;opacity:0;transform:translateY(10px);transition:opacity .17s ease,transform .17s ease;pointer-events:none}
+  @supports ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){ .cmdpalette{background:color-mix(in srgb,var(--raise) 78%,transparent);-webkit-backdrop-filter:blur(18px) saturate(1.5);backdrop-filter:blur(18px) saturate(1.5)} }
+  .cmdpalette.show{opacity:1;transform:translateY(0);pointer-events:auto}
+  .cmd-hint{position:sticky;top:0;padding:10px 14px;font-size:.72rem;color:var(--faint);border-bottom:1px solid var(--line);background:inherit}
+  .cmd-hint span{font-family:ui-monospace,monospace;color:var(--muted)}
+  .cmd-list{padding:6px}
+  .cmd-cat{font-size:.64rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--faint);padding:11px 10px 4px}
+  .cmd-item{display:flex;align-items:center;gap:11px;width:100%;padding:9px 10px;border:0;background:transparent;cursor:pointer;text-align:left;color:var(--ink);border-radius:10px;font:inherit}
+  .cmd-item:hover,.cmd-item.on{background:var(--accent-soft)}
+  .cmd-ico{display:inline-flex;flex:none;color:var(--accent-2)} .cmd-ico svg{width:18px;height:18px}
+  .cmd-cmd{flex:none;font-family:ui-monospace,monospace;font-size:.78rem;color:var(--accent-2);min-width:92px}
+  .cmd-name{flex:1;min-width:0;font-size:.9rem;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  @media (max-width:520px){ .cmdpalette{left:12px;right:12px} .cmd-cmd{min-width:74px;font-size:.72rem} }
   .stream{overscroll-behavior:contain;-webkit-overflow-scrolling:touch}
   .composer .box{max-width:720px;margin:0 auto;background:var(--raise);border:1px solid var(--line-2);border-radius:16px;box-shadow:var(--shadow);padding:8px 8px 8px 8px;display:flex;align-items:flex-end;gap:8px;transition:border-color var(--t-fast)}
   .composer .box:focus-within{border-color:var(--accent-line)}
@@ -294,16 +309,21 @@
           <div class="halo"><img src="assets/noria-f-avatar.png" alt=""></div>
           <h1>A calm place to think clearly.</h1>
           <div class="disclosure">Ask Noria anything. She&rsquo;s an AI assistant &mdash; not a human, and never a substitute for a professional.</div>
-          <div class="guides" id="guides"></div>
         </div>
       </div>
     </div>
     <div class="composer">
       <div class="attach" id="attach" hidden></div>
+      <div class="cmd-backdrop" id="cmdBackdrop" hidden></div>
+      <div class="cmdpalette" id="cmdPalette" hidden role="menu" aria-label="Commands">
+        <div class="cmd-hint">Type to filter &middot; <span>&uarr;&darr;</span> to move &middot; <span>&crarr;</span> to open</div>
+        <div class="cmd-list" id="cmdList"></div>
+      </div>
       <div class="box">
         <input type="file" id="file" hidden accept=".txt,.md,.markdown,.csv,.tsv,.json,.log,.xml,.yml,.yaml,.js,.ts,.jsx,.tsx,.py,.java,.c,.cpp,.cs,.go,.rb,.php,.sh,.html,.css,.sql,.pdf,image/*,text/*">
         <button class="toolbtn" id="plus" title="Upload a file or photo" aria-label="Upload a file or photo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg></button>
         <textarea id="input" rows="1" placeholder="Ask Noria anything&hellip;" aria-label="Message Noria"></textarea>
+        <button class="toolbtn cmdtrigger" id="cmdBtn" title="Commands (press /)" aria-label="Open commands"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.6 5.1L19 9.6l-4.3 3.2L16 18l-4-3-4 3 1.3-5.2L5 9.6l5.4-1.5z"/></svg></button>
         <button class="toolbtn" id="micBtn" title="Speak to Noria" aria-label="Voice input"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2.5" width="6" height="11" rx="3"/><path d="M5 10.5a7 7 0 0 0 14 0"/><path d="M12 17.5v3.5"/></svg></button>
         <button class="stopbtn" id="stop"><span class="sq"></span> Stop</button>
         <button class="sendbtn" id="send" aria-label="Send" disabled><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button>
@@ -388,6 +408,6 @@
     <button id="canvasPdf" type="button" class="primary">PDF</button>
   </div>
 </aside>
-<script type="module" src="workspace.js?v=22"></script>
+<script type="module" src="workspace.js?v=23"></script>
 </body>
 </html>
