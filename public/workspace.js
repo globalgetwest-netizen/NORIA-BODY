@@ -702,8 +702,9 @@ function openConversation(id) {
   if (empty) empty.style.display = 'none'
   stream.classList.remove('is-empty')
   brain.history = []
+  let lastUserText = ''
   c.messages.forEach((m) => {
-    if (m.role === 'user') { addUser(m.text, (m.files || []).map((n) => ({ name: n }))); brain.history.push({ role: 'user', content: m.text }) }
+    if (m.role === 'user') { addUser(m.text, (m.files || []).map((n) => ({ name: n }))); lastUserText = m.text; brain.history.push({ role: 'user', content: m.text }) }
     else if (m.role === 'err') { const el = addNoria(); el.closest('.msg').classList.add('err'); el.textContent = m.text }
     else {
       const el = addNoria()
@@ -716,6 +717,7 @@ function openConversation(id) {
         brain.history.push({ role: 'assistant', content: '[generated an image: ' + (m.cap || '') + ']' })
       } else {
         renderMd(el, m.text)
+        addFeedback(el.closest('.msg'), lastUserText, m.text) // restore Copy / PDF / Open on saved messages
         if (m.sources && m.sources.length) addSources(el.closest('.msg'), m.sources)
         brain.history.push({ role: 'assistant', content: m.text })
       }
