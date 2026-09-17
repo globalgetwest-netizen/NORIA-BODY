@@ -94,6 +94,11 @@
   .msg .text h1:first-child,.msg .text h2:first-child,.msg .text h3:first-child{margin-top:0}
   .msg .text p{margin:.6em 0} .msg .text p:first-child{margin-top:0} .msg .text p:last-child{margin-bottom:0}
   .msg .text ul,.msg .text ol{margin:.5em 0 .7em;padding-left:1.4em} .msg .text li{margin:.22em 0} .msg .text li::marker{color:var(--accent-2)}
+  .msg .text .tablewrap{overflow-x:auto;margin:.7em 0;-webkit-overflow-scrolling:touch}
+  .msg .text table{border-collapse:collapse;width:100%;font-size:.92rem;min-width:min(100%,420px)}
+  .msg .text th,.msg .text td{border:1px solid var(--line);padding:7px 10px;text-align:left;vertical-align:top}
+  .msg .text thead th{background:var(--accent-soft);color:var(--ink);font-weight:700;white-space:nowrap}
+  .msg .text tbody tr:nth-child(even){background:var(--sunk)}
   .caret{display:inline-block;width:2px;height:1.05em;background:var(--accent);vertical-align:-2px;margin-left:1px;animation:blink 1.05s steps(2,start) infinite}
   @keyframes blink{50%{opacity:0}}
   .fb{display:flex;gap:6px;margin-top:10px}
@@ -347,6 +352,6 @@
     <div class="pm-msg" id="guideMsg"></div>
   </div>
 </div>
-<script type="module" src="workspace.js?v=17"></script>
+<script type="module" src="workspace.js?v=18"></script>
 </body>
 </html>

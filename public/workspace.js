@@ -52,8 +52,19 @@ function renderMd(el, text) {
   const flushPara = () => { if (para.length) { html += '<p>' + para.join('<br>') + '</p>'; para = [] } }
   const closeList = () => { if (list) { html += '</' + list + '>'; list = null } }
   const flush = () => { flushPara(); closeList() }
-  for (const raw of src.split('\n')) {
-    const line = raw.replace(/\s+$/, ''); let m
+  const rowCells = (r) => r.replace(/^\s*\|/, '').replace(/\|\s*$/, '').split('|').map((c) => c.trim())
+  const lines = src.split('\n')
+  for (let li = 0; li < lines.length; li++) {
+    const line = lines[li].replace(/\s+$/, ''); let m
+    // GFM table: a "| … |" header row followed by a "| --- | --- |" separator.
+    if (/^\s*\|.*\|\s*$/.test(line) && li + 1 < lines.length && /-/.test(lines[li + 1]) && /^\s*\|?[\s:|-]+\|[\s:|-]*$/.test(lines[li + 1])) {
+      flush()
+      const headers = rowCells(line); li++
+      let body = ''
+      while (li + 1 < lines.length && /^\s*\|.*\|\s*$/.test(lines[li + 1])) { li++; const cells = rowCells(lines[li]); body += '<tr>' + headers.map((_, k) => '<td>' + mdInlineHtml(cells[k] || '') + '</td>').join('') + '</tr>' }
+      html += '<div class="tablewrap"><table><thead><tr>' + headers.map((h) => '<th>' + mdInlineHtml(h) + '</th>').join('') + '</tr></thead><tbody>' + body + '</tbody></table></div>'
+      continue
+    }
     if ((m = line.match(cbRe))) { flush(); html += '<pre class="code">' + esc(blocks[+m[1]]) + '</pre>'; continue }
     if (!line.trim()) { flush(); continue }
     if ((m = line.match(/^\s*#{3,}\s+(.*)/))) { flush(); html += '<h3>' + mdInlineHtml(m[1]) + '</h3>'; continue }
@@ -468,8 +479,19 @@ function mdInline(t) {
 function mdToPdf(md) {
   const out = []; let buf = null, type = null
   const flush = () => { if (buf) { out.push({ [type]: buf, margin: [0, 2, 0, 9] }); buf = null; type = null } }
-  for (const raw of String(md).split('\n')) {
-    const line = raw.replace(/\s+$/, ''); let m
+  const rowCells = (r) => r.replace(/^\s*\|/, '').replace(/\|\s*$/, '').split('|').map((c) => c.trim())
+  const lines = String(md).split('\n')
+  for (let li = 0; li < lines.length; li++) {
+    const line = lines[li].replace(/\s+$/, ''); let m
+    // GFM table → a real pdfmake table (so exported PDFs never show raw "| … |").
+    if (/^\s*\|.*\|\s*$/.test(line) && li + 1 < lines.length && /-/.test(lines[li + 1]) && /^\s*\|?[\s:|-]+\|[\s:|-]*$/.test(lines[li + 1])) {
+      flush()
+      const headers = rowCells(line); li++
+      const body = [headers.map((h) => ({ text: mdInline(h), bold: true, color: '#0B1F3A', fillColor: '#F3EEDD' }))]
+      while (li + 1 < lines.length && /^\s*\|.*\|\s*$/.test(lines[li + 1])) { li++; const cells = rowCells(lines[li]); body.push(headers.map((_, k) => ({ text: mdInline(cells[k] || ''), color: '#232323' }))) }
+      out.push({ table: { headerRows: 1, widths: headers.map(() => '*'), body }, layout: { hLineWidth: () => 0.5, vLineWidth: () => 0.5, hLineColor: () => '#E3D6B5', vLineColor: () => '#E3D6B5', paddingLeft: () => 6, paddingRight: () => 6, paddingTop: () => 4, paddingBottom: () => 4 }, fontSize: 9.5, margin: [0, 4, 0, 11] })
+      continue
+    }
     if (!line.trim()) { flush(); continue }
     if ((m = line.match(/^#{3,}\s+(.*)/))) { flush(); out.push({ text: mdInline(m[1]), style: 'h3' }); continue }
     if ((m = line.match(/^##\s+(.*)/))) { flush(); out.push({ text: mdInline(m[1]), style: 'h2' }); continue }
@@ -714,7 +736,7 @@ renderProBadge(); setBilling('monthly')
 // ── Guided documents (Pro) — premium, structured, exportable to PDF ───────────
 // Appended to every guided-document prompt: a finished document has NO fill-in
 // blanks. This is what turns a bracket-filled skeleton into a clean, submittable doc.
-const DOC_RULES = '\n\nFORMAT RULES (critical — a finished, ready-to-use document): Do NOT use fill-in-the-blank placeholders anywhere in the body. Never write square-bracket placeholders like [Company] or [Degree], and never write parenthetical instructions like (insert...), (add...), (list any...), or (repeat for each...). Write only complete, natural sentences using the real details given. If a whole section cannot be completed from those details, leave that section out entirely — do not pad it. If, and only if, essential information is genuinely missing, end the document with a single short "## To complete before you send this" section that lists what to add, in plain words. Keep the document clean, consistent, and professional throughout.'
+const DOC_RULES = '\n\nFORMAT RULES (critical — a finished, ready-to-use document): Do NOT use fill-in-the-blank placeholders anywhere in the body. Never write square-bracket placeholders like [Company] or [Degree], and never write parenthetical instructions like (insert...), (add...), (list any...), or (repeat for each...). Write only complete, natural sentences using the real details given. If a whole section cannot be completed from those details, leave that section out entirely — do not pad it. If, and only if, essential information is genuinely missing, end the document with a single short "## To complete before you send this" section that lists what to add, in plain words. Keep the document clean, consistent, and professional throughout. Begin immediately with the document itself (its title) — no conversational preamble, meta-commentary or sign-off such as "Here is..." or "I hope this helps". Never assume, default to, or invent a country, city, nationality or currency: use only a location the user actually provided; if none is given, keep the document country-neutral and do not name a default country. Where structured data suits the content (comparisons, figures, timelines, itemised deliverables), present it as a clean Markdown table rather than a wall of text.'
 
 // Safety net: guarantee a guided document is clean even if the model still emits
 // placeholder scaffolding. Line-aware so it never leaves broken fragments: a line
@@ -758,13 +780,13 @@ const ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-
 const GUIDES = [
   { id: 'visa', title: 'Visa preparation', icon: ICON + '<rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 8h8M8 12h8M8 16h5"/></svg>',
     desc: 'Current requirements, a checklist of your own genuine documents, and a cover letter you can adapt.',
-    fields: [{ k: 'nationality', label: 'Your nationality', ph: 'e.g. Nigerian' }, { k: 'destination', label: 'Destination country', ph: 'e.g. Canada' }, { k: 'type', label: 'Visa type', ph: 'e.g. study / work / visit' }, { k: 'purpose', label: 'Purpose of the trip (optional)', ph: 'brief and honest', long: true, optional: true }],
+    fields: [{ k: 'nationality', label: 'Your nationality', ph: 'e.g. Kenyan' }, { k: 'destination', label: 'Destination country', ph: 'e.g. Canada' }, { k: 'type', label: 'Visa type', ph: 'e.g. study / work / visit' }, { k: 'purpose', label: 'Purpose of the trip (optional)', ph: 'brief and honest', long: true, optional: true }],
     prompt: (v) => `Prepare a visa preparation guide for a ${v.nationality} national applying for a ${v.type} visa to ${v.destination}${v.purpose ? `. Purpose of the trip: ${v.purpose}` : ''}.`,
     web: (v) => `${v.type} visa ${v.destination} requirements ${YEAR}`,
     system: () => 'Produce a VISA PREPARATION GUIDE with markdown headings: # Visa Preparation Guide, ## Overview, ## Eligibility & Key Requirements, ## Document Checklist (only the genuine documents the applicant gathers — valid passport, their own bank statements, employment or enrolment letter, proof of real ties to home), ## Demonstrating a Strong, Honest Application, ## Common Refusal Reasons & How to Avoid Them, ## Sample Cover Letter. Never fabricate documents, invitations or ties, or suggest doing so — only guide the applicant\'s own genuine case. Name the official embassy or immigration website as the source of truth for exact current fees and forms. Never guarantee approval. End with a short honest disclaimer.' },
   { id: 'business', title: 'Business plan', icon: ICON + '<path d="M4 20V10M10 20V4M16 20v-8M2 20h20"/></svg>',
     desc: 'A structured, realistic business plan grounded in current market data.',
-    fields: [{ k: 'name', label: 'Business name', ph: 'e.g. Sunrise Cafe' }, { k: 'what', label: 'What the business does', ph: 'one line', long: true }, { k: 'where', label: 'Location / market (optional)', ph: 'e.g. Lagos, Nigeria', optional: true }],
+    fields: [{ k: 'name', label: 'Business name', ph: 'e.g. Sunrise Cafe' }, { k: 'what', label: 'What the business does', ph: 'one line', long: true }, { k: 'where', label: 'Location / market (optional)', ph: 'e.g. Accra, Ghana', optional: true }],
     prompt: (v) => `Write a business plan for "${v.name}"${v.where ? ` based in ${v.where}` : ''}. What it does: ${v.what}.`,
     web: (v) => `${v.what} business ${v.where || ''} market ${YEAR}`.trim(),
     system: (v) => 'Produce a realistic BUSINESS PLAN with markdown headings: # ' + v.name + ' — Business Plan, ## Executive Summary, ## Problem & Solution, ## Products/Services, ## Target Market, ## Competition & Advantage, ## Marketing & Sales, ## Operations, ## Team, ## Financial Plan (label all figures as illustrative estimates to validate; use local currency and realistic local costs when a location is given), ## Milestones, ## Risks & Mitigations. Do not present invented statistics as fact.' },
