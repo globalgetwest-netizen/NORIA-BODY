@@ -753,6 +753,7 @@ const MODERN_STANDARD = '\n\n[MODERN STANDARD — match or exceed today\'s best 
   '- REALISM: Give honest, phased, achievable timelines; frame estimates and salaries as ranges to verify, never guarantees.\n'
 
 const YEAR = new Date().getFullYear()
+const ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">'
 
 const GUIDES = [
   { id: 'visa', title: 'Visa preparation', icon: ICON + '<rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 8h8M8 12h8M8 16h5"/></svg>',
