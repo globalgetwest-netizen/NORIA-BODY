@@ -222,6 +222,16 @@
   .pm-codebox input{flex:1;min-width:0;border:1px solid var(--line-2);border-radius:10px;padding:10px 12px;font:inherit;font-size:.85rem;background:var(--sunk);color:var(--ink);text-transform:uppercase}
   .pm-codebox input:focus{outline:none;border-color:var(--accent-line)}
   .pm-codebox button{flex:none;padding:0 16px;border-radius:10px;border:0;background:var(--ink);color:var(--paper);font-weight:600;cursor:pointer}
+  .guides{display:flex;flex-wrap:wrap;gap:9px;justify-content:center;margin-top:22px;max-width:520px;margin-inline:auto}
+  .guide-chip{display:inline-flex;align-items:center;gap:8px;padding:9px 14px;border-radius:11px;border:1px solid var(--line-2);background:var(--raise);color:var(--ink-2);font-size:.86rem;font-weight:500;cursor:pointer;transition:border-color var(--t-fast),background var(--t-fast),color var(--t-fast)}
+  .guide-chip:hover{border-color:var(--accent-line);background:var(--paper-2);color:var(--ink)}
+  .guide-chip svg{width:16px;height:16px;color:var(--accent-2);flex:none}
+  .guide-fields{text-align:left;display:flex;flex-direction:column;gap:12px;margin-bottom:18px}
+  .guide-fields label{display:block;font-size:.82rem;font-weight:600;color:var(--ink-2);margin-bottom:5px}
+  .guide-fields .req{color:var(--danger)}
+  .guide-fields input,.guide-fields textarea{width:100%;border:1px solid var(--line-2);border-radius:10px;padding:10px 12px;font:inherit;font-size:.9rem;background:var(--sunk);color:var(--ink)}
+  .guide-fields textarea{resize:vertical;min-height:64px}
+  .guide-fields input:focus,.guide-fields textarea:focus{outline:none;border-color:var(--accent-line)}
   @media (max-width:400px){ .probtn{padding:0 12px;font-size:.78rem} .promodal{padding:28px 20px 20px} .pm-title{font-size:1.5rem} .pm-amt{font-size:2.2rem} }
 </style>
 </head>
@@ -251,6 +261,7 @@
           <div class="halo"><img src="assets/noria-f-avatar.png" alt=""></div>
           <h1>A calm place to think clearly.</h1>
           <div class="disclosure">Ask Noria anything. She&rsquo;s an AI assistant &mdash; not a human, and never a substitute for a professional.</div>
+          <div class="guides" id="guides"></div>
         </div>
       </div>
     </div>
@@ -319,6 +330,17 @@
     <div class="pm-msg" id="proMsg" aria-live="polite"></div>
   </div>
 </div>
-<script type="module" src="workspace.js?v=11"></script>
+<div class="promodal-wrap" id="guideModal" hidden>
+  <div class="promodal guide-modal" role="dialog" aria-modal="true" aria-label="Guided document">
+    <button class="pm-close" id="guideClose" type="button" aria-label="Close"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+    <div class="pm-star"><svg width="30" height="30" viewBox="0 0 24 24" aria-hidden="true"><path fill="url(#pmstar)" d="M12 0c.7 6.3 5.7 11.3 12 12-6.3.7-11.3 5.7-12 12-.7-6.3-5.7-11.3-12-12C6.3 11.3 11.3 6.3 12 0Z"/></svg></div>
+    <h2 class="pm-title" id="guideTitle">Guided document</h2>
+    <p class="pm-sub" id="guideDesc"></p>
+    <div class="guide-fields" id="guideFields"></div>
+    <button class="pm-cta" id="guideCreate" type="button">Create document</button>
+    <div class="pm-msg" id="guideMsg"></div>
+  </div>
+</div>
+<script type="module" src="workspace.js?v=12"></script>
 </body>
 </html>
