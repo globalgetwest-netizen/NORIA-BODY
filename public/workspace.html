@@ -215,6 +215,12 @@
   .pm-cta:hover{opacity:.94} .pm-cta:active{transform:translateY(1px)}
   .pm-trust{margin-top:13px;font-size:.78rem;color:var(--faint)} .pm-trust a{color:var(--accent-2);font-weight:600;text-decoration:none} .pm-trust a:hover{text-decoration:underline}
   .pm-msg{margin-top:10px;font-size:.82rem;min-height:1em} .pm-msg.ok{color:var(--ok)} .pm-msg.err{color:var(--danger)}
+  .pm-codelink{margin-top:12px;background:none;border:0;color:var(--muted);font:inherit;font-size:.8rem;text-decoration:underline;cursor:pointer}
+  .pm-codelink:hover{color:var(--ink)}
+  .pm-codebox{display:flex;gap:8px;margin-top:12px}
+  .pm-codebox input{flex:1;min-width:0;border:1px solid var(--line-2);border-radius:10px;padding:10px 12px;font:inherit;font-size:.85rem;background:var(--sunk);color:var(--ink);text-transform:uppercase}
+  .pm-codebox input:focus{outline:none;border-color:var(--accent-line)}
+  .pm-codebox button{flex:none;padding:0 16px;border-radius:10px;border:0;background:var(--ink);color:var(--paper);font-weight:600;cursor:pointer}
   @media (max-width:400px){ .probtn{padding:0 12px;font-size:.78rem} .promodal{padding:28px 20px 20px} .pm-title{font-size:1.5rem} .pm-amt{font-size:2.2rem} }
 </style>
 </head>
@@ -304,6 +310,11 @@
 
     <button class="pm-cta" id="proSubscribe" type="button">Upgrade to Noria Pro</button>
     <div class="pm-trust">Secure payment · Cancel anytime</div>
+    <button class="pm-codelink" id="proCodeLink" type="button">Have an access code?</button>
+    <div class="pm-codebox" id="proCodeBox" hidden>
+      <input id="proCode" placeholder="NORIA-XXXXXXXX-XXXXXX" autocomplete="off" spellcheck="false">
+      <button id="proUnlock" type="button">Unlock</button>
+    </div>
     <div class="pm-msg" id="proMsg" aria-live="polite"></div>
   </div>
 </div>
