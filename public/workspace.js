@@ -122,6 +122,35 @@ function renderChart(div) {
     new window.Chart(canvas, spec)
   } catch (_) { try { div.remove() } catch (__) {} }
 }
+// Deterministic chart when the user asked for one: convert the answer's first data
+// table (label column + numeric columns) into a live bar chart. No model reliance.
+async function maybeChartFromTable(el) {
+  try {
+    if (!el || el.querySelector('.noria-chart')) return
+    const table = el.querySelector('.tablewrap table'); if (!table) return
+    const headers = [...table.querySelectorAll('thead th')].map((th) => th.textContent.trim())
+    const rows = [...table.querySelectorAll('tbody tr')].map((tr) => [...tr.querySelectorAll('td')].map((td) => td.textContent.trim()))
+    if (rows.length < 2 || headers.length < 2) return
+    const parseNum = (s) => { const n = parseFloat(String(s).replace(/[^0-9.\-]/g, '')); return isNaN(n) ? null : n }
+    const labels = rows.map((r) => r[0])
+    const palette = ['#B0812A', '#12325A', '#3E9E6D', '#BE5238', '#8C651C', '#6E6656']
+    const datasets = []
+    for (let c = 1; c < headers.length; c++) {
+      const vals = rows.map((r) => parseNum(r[c]))
+      if (vals.filter((v) => v !== null).length >= Math.ceil(rows.length * 0.6)) {
+        const color = palette[datasets.length % palette.length]
+        datasets.push({ label: headers[c] || ('Series ' + c), data: vals.map((v) => (v == null ? 0 : v)), backgroundColor: color, borderColor: color })
+      }
+    }
+    if (!datasets.length) return
+    const div = document.createElement('div'); div.className = 'noria-chart'
+    div.setAttribute('data-spec', JSON.stringify({ type: 'bar', data: { labels, datasets } }))
+    div.innerHTML = '<canvas></canvas>'
+    el.appendChild(div)
+    await lazyScript('https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.5.0/chart.umd.min.js')
+    renderChart(div)
+  } catch (_) {}
+}
 function scrollDown() { stream.scrollTop = stream.scrollHeight }
 
 function addUser(t, files) {
@@ -425,6 +454,9 @@ async function respond(q, opts = {}) {
     const el = addNoria()
     await reveal(el, dsp || spoken || "I'm here.")
     renderMd(el, dsp || spoken || "I'm here.")
+    // If the user asked to see a chart and Noria answered with a data table,
+    // draw the chart from that table (deterministic — no reliance on the model).
+    if (/\b(chart|graph|plot|bar chart|pie chart|line chart|visuali[sz]e)\b/i.test(q)) maybeChartFromTable(el)
     addFeedback(el.closest('.msg'), q, dsp)
     if (sources.length) addSources(el.closest('.msg'), sources)
     convoRecord({ role: 'noria', text: dsp || spoken || "I'm here.", sources: sources.map((s) => ({ url: s.url })) })
