@@ -122,29 +122,41 @@ function renderChart(div) {
     new window.Chart(canvas, spec)
   } catch (_) { try { div.remove() } catch (__) {} }
 }
-// Deterministic chart when the user asked for one: convert the answer's first data
-// table (label column + numeric columns) into a live bar chart. No model reliance.
-async function maybeChartFromTable(el) {
+// Deterministic chart when the user asked for one — no reliance on the model.
+// Source the data from the answer's first table, or if there is none, extract
+// "label number" pairs straight from the user's request. Then draw it with Chart.js.
+const CHART_PALETTE = ['#B0812A', '#12325A', '#3E9E6D', '#BE5238', '#8C651C', '#6E6656']
+async function maybeChartFromTable(el, q) {
   try {
     if (!el || el.querySelector('.noria-chart')) return
-    const table = el.querySelector('.tablewrap table'); if (!table) return
-    const headers = [...table.querySelectorAll('thead th')].map((th) => th.textContent.trim())
-    const rows = [...table.querySelectorAll('tbody tr')].map((tr) => [...tr.querySelectorAll('td')].map((td) => td.textContent.trim()))
-    if (rows.length < 2 || headers.length < 2) return
-    const parseNum = (s) => { const n = parseFloat(String(s).replace(/[^0-9.\-]/g, '')); return isNaN(n) ? null : n }
-    const labels = rows.map((r) => r[0])
-    const palette = ['#B0812A', '#12325A', '#3E9E6D', '#BE5238', '#8C651C', '#6E6656']
-    const datasets = []
-    for (let c = 1; c < headers.length; c++) {
-      const vals = rows.map((r) => parseNum(r[c]))
-      if (vals.filter((v) => v !== null).length >= Math.ceil(rows.length * 0.6)) {
-        const color = palette[datasets.length % palette.length]
-        datasets.push({ label: headers[c] || ('Series ' + c), data: vals.map((v) => (v == null ? 0 : v)), backgroundColor: color, borderColor: color })
+    let labels = [], datasets = []
+    const table = el.querySelector('.tablewrap table')
+    if (table) {
+      const headers = [...table.querySelectorAll('thead th')].map((th) => th.textContent.trim())
+      const rows = [...table.querySelectorAll('tbody tr')].map((tr) => [...tr.querySelectorAll('td')].map((td) => td.textContent.trim()))
+      const parseNum = (s) => { const n = parseFloat(String(s).replace(/[^0-9.\-]/g, '')); return isNaN(n) ? null : n }
+      if (rows.length >= 2 && headers.length >= 2) {
+        labels = rows.map((r) => r[0])
+        for (let c = 1; c < headers.length; c++) {
+          const vals = rows.map((r) => parseNum(r[c]))
+          if (vals.filter((v) => v !== null).length >= Math.ceil(rows.length * 0.6)) {
+            const color = CHART_PALETTE[datasets.length % CHART_PALETTE.length]
+            datasets.push({ label: headers[c] || ('Series ' + c), data: vals.map((v) => (v == null ? 0 : v)), backgroundColor: color, borderColor: color })
+          }
+        }
       }
     }
+    if (!datasets.length && q) {
+      // Pull "Label 12,000" / "Label: 12k" pairs out of the user's request.
+      const pairs = []; let m; const re = /([A-Za-z][A-Za-z0-9]{0,11})\s*[:=]?\s*\$?(\d[\d,]{2,}(?:\.\d+)?)\s*(k|m|bn|b)?\b/gi
+      while ((m = re.exec(q))) { let n = parseFloat(m[2].replace(/,/g, '')); const u = (m[3] || '').toLowerCase(); if (u === 'k') n *= 1e3; else if (u === 'm') n *= 1e6; else if (u === 'b' || u === 'bn') n *= 1e9; if (!isNaN(n)) pairs.push({ label: m[1], value: n }) }
+      if (pairs.length >= 2) { labels = pairs.map((p) => p.label); datasets = [{ label: 'Value', data: pairs.map((p) => p.value), backgroundColor: CHART_PALETTE[0], borderColor: CHART_PALETTE[0] }] }
+    }
     if (!datasets.length) return
+    const type = /\bpie\b|\bdonut\b/i.test(q || '') ? 'doughnut' : (/\bline\b|\btrend\b|over time/i.test(q || '') ? 'line' : 'bar')
+    if (type === 'doughnut' && datasets[0]) datasets[0].backgroundColor = labels.map((_, i) => CHART_PALETTE[i % CHART_PALETTE.length])
     const div = document.createElement('div'); div.className = 'noria-chart'
-    div.setAttribute('data-spec', JSON.stringify({ type: 'bar', data: { labels, datasets } }))
+    div.setAttribute('data-spec', JSON.stringify({ type, data: { labels, datasets } }))
     div.innerHTML = '<canvas></canvas>'
     el.appendChild(div)
     await lazyScript('https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.5.0/chart.umd.min.js')
@@ -456,7 +468,7 @@ async function respond(q, opts = {}) {
     renderMd(el, dsp || spoken || "I'm here.")
     // If the user asked to see a chart and Noria answered with a data table,
     // draw the chart from that table (deterministic — no reliance on the model).
-    if (/\b(chart|graph|plot|bar chart|pie chart|line chart|visuali[sz]e)\b/i.test(q)) maybeChartFromTable(el)
+    if (/\b(chart|graph|plot|bar chart|pie chart|line chart|visuali[sz]e)\b/i.test(q)) maybeChartFromTable(el, q)
     addFeedback(el.closest('.msg'), q, dsp)
     if (sources.length) addSources(el.closest('.msg'), sources)
     convoRecord({ role: 'noria', text: dsp || spoken || "I'm here.", sources: sources.map((s) => ({ url: s.url })) })
