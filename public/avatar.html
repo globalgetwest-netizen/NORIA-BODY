@@ -178,6 +178,18 @@ document.querySelectorAll('.emos button').forEach((b) => b.addEventListener('cli
   else { emo.joy = 0.3; emo.surprise = 0.05; emo.tension = 0.1 }
 }))
 
+// ── Procedural head gestures (nod / tilt) — the brain's response triggers these ─
+let gesture = null
+function triggerGesture(type, s = 1) { gesture = { type, t: 0, dur: type === 'nod' ? 0.75 : 1.0, s } }
+function gestureOffset(dt) {
+  if (!gesture) return { x: 0, z: 0 }
+  gesture.t += dt / gesture.dur; const p = Math.min(gesture.t, 1)
+  const x = gesture.type === 'nod' ? Math.sin(p * Math.PI) * 0.14 * gesture.s : 0
+  const z = gesture.type === 'tilt' ? Math.sin(p * Math.PI) * 0.16 * gesture.s : 0
+  if (gesture.t >= 1) gesture = null
+  return { x, z }
+}
+
 // ── Blink ─────────────────────────────────────────────────────────────────────
 let nextBlink = 2, blinkT = -1
 function updateBlink(t, dt) {
@@ -209,7 +221,7 @@ async function speak(text) {
     const r = await fetch(TTS + '?speaker=' + VOICE + '&text=' + encodeURIComponent(clean.slice(0, 1600)))
     if (!r.ok) throw new Error('tts ' + r.status)
     const url = URL.createObjectURL(await r.blob())
-    audioEl.src = url; speaking = true
+    audioEl.src = url; speaking = true; triggerGesture('nod', 0.45)
     audioEl.onended = () => { speaking = false; jawTarget = 0; URL.revokeObjectURL(url) }
     await audioEl.play()
   } catch (e) { speaking = false }
@@ -233,6 +245,9 @@ async function ask(text) {
     processStimulus(POS.test(reply) ? 0.4 : 0, false)
     replyEl.textContent = reply; replyEl.classList.add('show')
     setStatus('')
+    // Gesture reacts to meaning: a nod when agreeing/affirming, a tilt when curious/asked.
+    if (/\b(yes|absolutely|exactly|right|correct|agree|indeed|of course|certainly|definitely|sure)\b/i.test(reply)) triggerGesture('nod', 1)
+    else if (/\?\s*$/.test(text) || /\b(what|why|how|curious|wonder|imagine|hmm)\b/i.test(text + ' ' + reply)) triggerGesture('tilt', 0.8)
     speak(reply)
   } catch (e) { setStatus('Connection issue — try again.'); }
 }
@@ -279,7 +294,8 @@ const clock = new THREE.Clock()
 function animate() {
   requestAnimationFrame(animate)
   const dt = Math.min(clock.getDelta(), 0.05), t = clock.elapsedTime
-  if (headObj) { headObj.rotation.y = Math.sin(t * 0.5) * 0.05; headObj.rotation.x = Math.sin(t * 0.37) * 0.025 }
+  const gof = gestureOffset(dt)
+  if (headObj) { headObj.rotation.y = Math.sin(t * 0.5) * 0.05; headObj.rotation.x = Math.sin(t * 0.37) * 0.025 + gof.x; headObj.rotation.z = gof.z }
   if (starsObj && starsObj.visible) starsObj.rotation.y += dt * 0.006
   updateBlink(t, dt)
   // lip-sync
