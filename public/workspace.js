@@ -490,7 +490,6 @@ async function respond(q, opts = {}) {
   // embedding model has loaded in the background).
   let memBlock = ''
   try { const mems = await SMem.search(q); if (mems.length) memBlock = '\n\n[MEMORY — things the user told you in earlier conversations (private, on this device). Treat these as true and use them when relevant to answer; do not deny knowing something that is here. Do not list them back verbatim.]\n' + mems.map((m) => '- ' + m.text).join('\n') } catch (_) {}
-  try { window.__lastMemBlock = memBlock } catch (_) {}
 
   const plan = presence.beginTurn({ userText: q }) // emotional state, delivery, memory, check-in
   stop.style.display = 'inline-flex'
