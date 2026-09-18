@@ -98,7 +98,7 @@ async function enhance(el) {
   try {
     const charts = el.querySelectorAll('.noria-chart')
     if (charts.length) {
-      await lazyScript('https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.3/chart.umd.min.js')
+      await lazyScript('https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.5.0/chart.umd.min.js')
       charts.forEach((d) => renderChart(d))
     }
   } catch (_) {}
@@ -358,7 +358,7 @@ function note(t) { status.textContent = t; setTimeout(() => { if (status.textCon
 const DOC_QUALITY = '\n\n[WHEN YOU PRODUCE A DOCUMENT (CV, plan, letter, report, roadmap, guide, proposal, etc.): make it FINISHED and ready to use. Do NOT leave fill-in-the-blank placeholders — never write square-bracket placeholders like [Company] or [Degree], and never write parenthetical instructions like (insert...), (add...), (list...). Use only the real details the user gave; if a section cannot be completed from them, omit it rather than padding it, and if essential information is genuinely missing, end with a single short "## To complete before you send this" list. Begin directly with the document itself (its title) — no "Here is..." or "Sure," preamble and no sign-off like "I hope this helps". Use Markdown headings (##, ###) for structure and, for comparisons, figures or timelines, clean Markdown tables. Never output broken or raw tags.]'
 // The chat renders rich content — tell the model exactly how to emit it so charts,
 // math and code come out live and correct (client-side, KaTeX/Chart.js/highlight.js).
-const RICH_OUTPUT = '\n\n[RICH OUTPUT you can render: (1) CHARTS — to visualise data (comparisons, trends, budgets, breakdowns), emit a fenced block tagged "chart" holding a VALID minimal Chart.js JSON config, e.g. ```chart {"type":"bar","data":{"labels":["Q1","Q2","Q3"],"datasets":[{"label":"Revenue","data":[12,19,15]}]}} ``` — valid JSON only, no comments or trailing commas. Prefer a chart when numbers compare better visually; still give the table too when useful. (2) MATH — write formulas in LaTeX with \\( ... \\) for inline and $$ ... $$ for display. NEVER use a single $ for math — a lone $ means currency (e.g. $45,000). (3) CODE — put code in fenced blocks tagged with the language (```python, ```js). Use these only when they genuinely help.]'
+const RICH_OUTPUT = '\n\n[RICH OUTPUT you can render: (1) CHARTS — to visualise data (comparisons, trends, budgets, breakdowns), emit a fenced block tagged "chart" holding a VALID minimal Chart.js JSON config, e.g. ```chart {"type":"bar","data":{"labels":["Q1","Q2","Q3"],"datasets":[{"label":"Revenue","data":[12,19,15]}]}} ``` — valid JSON only, no comments or trailing commas. If the user asks to "chart", "graph", "plot", "visualise" or "show a chart of" data, you MUST include a ```chart block. Prefer a chart whenever numbers compare better visually; you may also give the table. (2) MATH — write formulas in LaTeX with \\( ... \\) for inline and $$ ... $$ for display. NEVER use a single $ for math — a lone $ means currency (e.g. $45,000). (3) CODE — put code in fenced blocks tagged with the language (```python, ```js). Use these only when they genuinely help.]'
 
 // ── A turn: real engine + presence-shaped delivery ────────────────────────────
 async function respond(q, opts = {}) {
