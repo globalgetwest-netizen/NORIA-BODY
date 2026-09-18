@@ -82,6 +82,10 @@ const canvas = $('c')
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true })
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2))
 renderer.outputColorSpace = THREE.SRGBColorSpace
+// Cinematic foundation: ACES Filmic tone mapping so PBR highlights (gold armour)
+// roll off richly instead of blowing out under bright/cosmic lighting.
+renderer.toneMapping = THREE.ACESFilmicToneMapping
+renderer.toneMappingExposure = 1.1
 const scene = new THREE.Scene()
 const camera = new THREE.PerspectiveCamera(24, innerWidth / innerHeight, 0.1, 20)
 camera.position.set(0, 0.06, 0.42)
