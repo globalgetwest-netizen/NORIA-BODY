@@ -46,7 +46,7 @@ function mdInlineHtml(s) {
 // clean formatted text rather than raw "## ..." and "- ...".
 function renderMd(el, text) {
   const blocks = [], S0 = '\uE000', S1 = '\uE001'
-  const src = String(text).replace(/```(?:\w+)?\n?([\s\S]*?)```/g, (_, c) => { blocks.push(c.replace(/\n$/, '')); return S0 + (blocks.length - 1) + S1 })
+  const src = String(text).replace(/```(\w+)?\n?([\s\S]*?)```/g, (_, lang, c) => { blocks.push({ lang: (lang || '').toLowerCase(), code: c.replace(/\n$/, '') }); return S0 + (blocks.length - 1) + S1 })
   const cbRe = new RegExp('^' + S0 + '(\\d+)' + S1 + '$')
   let html = '', list = null, para = []
   const flushPara = () => { if (para.length) { html += '<p>' + para.join('<br>') + '</p>'; para = [] } }
@@ -65,7 +65,12 @@ function renderMd(el, text) {
       html += '<div class="tablewrap"><table><thead><tr>' + headers.map((h) => '<th>' + mdInlineHtml(h) + '</th>').join('') + '</tr></thead><tbody>' + body + '</tbody></table></div>'
       continue
     }
-    if ((m = line.match(cbRe))) { flush(); html += '<pre class="code">' + esc(blocks[+m[1]]) + '</pre>'; continue }
+    if ((m = line.match(cbRe))) {
+      flush(); const b = blocks[+m[1]]
+      if (b.lang === 'chart') { html += '<div class="noria-chart" data-spec="' + esc(b.code).replace(/"/g, '&quot;') + '"><canvas></canvas></div>' }
+      else { html += '<pre class="code"><code' + (b.lang ? ' class="language-' + esc(b.lang) + '"' : '') + '>' + esc(b.code) + '</code></pre>' }
+      continue
+    }
     if (!line.trim()) { flush(); continue }
     if ((m = line.match(/^\s*#{3,}\s+(.*)/))) { flush(); html += '<h3>' + mdInlineHtml(m[1]) + '</h3>'; continue }
     if ((m = line.match(/^\s*##\s+(.*)/))) { flush(); html += '<h2>' + mdInlineHtml(m[1]) + '</h2>'; continue }
@@ -76,6 +81,46 @@ function renderMd(el, text) {
   }
   flush()
   el.innerHTML = html
+  enhance(el)
+}
+// Progressive enhancement of a rendered message: syntax-highlight code, render
+// ```chart blocks as live charts, and typeset LaTeX math. Each step lazy-loads its
+// library only when needed and is fully guarded so a load hiccup never breaks text.
+async function enhance(el) {
+  try {
+    const codes = el.querySelectorAll('pre.code code[class^="language-"]')
+    if (codes.length) {
+      await lazyStyle('https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css')
+      await lazyScript('https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js')
+      codes.forEach((c) => { try { window.hljs.highlightElement(c) } catch (_) {} })
+    }
+  } catch (_) {}
+  try {
+    const charts = el.querySelectorAll('.noria-chart')
+    if (charts.length) {
+      await lazyScript('https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.3/chart.umd.min.js')
+      charts.forEach((d) => renderChart(d))
+    }
+  } catch (_) {}
+  try {
+    if (/\$\$|\\\(|\\\[/.test(el.textContent || '')) {
+      await lazyStyle('https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.11/katex.min.css')
+      await lazyScript('https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.11/katex.min.js')
+      await lazyScript('https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.11/contrib/auto-render.min.js')
+      if (window.renderMathInElement) window.renderMathInElement(el, { delimiters: [{ left: '$$', right: '$$', display: true }, { left: '\\[', right: '\\]', display: true }, { left: '\\(', right: '\\)', display: false }], throwOnError: false })
+    }
+  } catch (_) {}
+}
+function renderChart(div) {
+  try {
+    if (div.dataset.rendered) return
+    const spec = JSON.parse(div.dataset.spec || '{}')
+    if (!spec || !spec.type || !spec.data) { div.remove(); return }
+    const canvas = div.querySelector('canvas'); if (!canvas) return
+    div.dataset.rendered = '1'
+    spec.options = Object.assign({ responsive: true, maintainAspectRatio: false, plugins: { legend: { labels: { color: getComputedStyle(document.body).getPropertyValue('--ink') || '#222' } } } }, spec.options || {})
+    new window.Chart(canvas, spec)
+  } catch (_) { try { div.remove() } catch (__) {} }
 }
 function scrollDown() { stream.scrollTop = stream.scrollHeight }
 
@@ -222,6 +267,8 @@ fileInput && fileInput.addEventListener('change', () => { handleFiles([...fileIn
 function humanSize(b) { return b < 1024 ? b + ' B' : b < 1048576 ? (b / 1024).toFixed(0) + ' KB' : (b / 1048576).toFixed(1) + ' MB' }
 const _scripts = {}
 function lazyScript(src) { return _scripts[src] || (_scripts[src] = new Promise((res, rej) => { const s = document.createElement('script'); s.src = src; s.onload = res; s.onerror = () => rej(new Error('load ' + src)); document.head.appendChild(s) })) }
+const _styles = {}
+function lazyStyle(href) { return _styles[href] || (_styles[href] = new Promise((res) => { const l = document.createElement('link'); l.rel = 'stylesheet'; l.href = href; l.onload = res; l.onerror = res; document.head.appendChild(l) })) }
 
 const NORIA_AI = 'https://noria-ai.insights-skyglobe.workers.dev'
 async function extractText(file) {
@@ -309,6 +356,9 @@ function note(t) { status.textContent = t; setTimeout(() => { if (status.textCon
 // guide chip or typed in chat) so nothing ever comes out with fill-in-the-blank
 // placeholders. The guide flow adds the fuller DOC_RULES on top of this.
 const DOC_QUALITY = '\n\n[WHEN YOU PRODUCE A DOCUMENT (CV, plan, letter, report, roadmap, guide, proposal, etc.): make it FINISHED and ready to use. Do NOT leave fill-in-the-blank placeholders — never write square-bracket placeholders like [Company] or [Degree], and never write parenthetical instructions like (insert...), (add...), (list...). Use only the real details the user gave; if a section cannot be completed from them, omit it rather than padding it, and if essential information is genuinely missing, end with a single short "## To complete before you send this" list. Begin directly with the document itself (its title) — no "Here is..." or "Sure," preamble and no sign-off like "I hope this helps". Use Markdown headings (##, ###) for structure and, for comparisons, figures or timelines, clean Markdown tables. Never output broken or raw tags.]'
+// The chat renders rich content — tell the model exactly how to emit it so charts,
+// math and code come out live and correct (client-side, KaTeX/Chart.js/highlight.js).
+const RICH_OUTPUT = '\n\n[RICH OUTPUT you can render: (1) CHARTS — to visualise data (comparisons, trends, budgets, breakdowns), emit a fenced block tagged "chart" holding a VALID minimal Chart.js JSON config, e.g. ```chart {"type":"bar","data":{"labels":["Q1","Q2","Q3"],"datasets":[{"label":"Revenue","data":[12,19,15]}]}} ``` — valid JSON only, no comments or trailing commas. Prefer a chart when numbers compare better visually; still give the table too when useful. (2) MATH — write formulas in LaTeX with \\( ... \\) for inline and $$ ... $$ for display. NEVER use a single $ for math — a lone $ means currency (e.g. $45,000). (3) CODE — put code in fenced blocks tagged with the language (```python, ```js). Use these only when they genuinely help.]'
 
 // ── A turn: real engine + presence-shaped delivery ────────────────────────────
 async function respond(q, opts = {}) {
@@ -360,7 +410,7 @@ async function respond(q, opts = {}) {
     const kb = retrieveKnowledge(q)
     const system = noriaSystem() + memoryContext(mem) +
       (kb ? `\n\n[BACKGROUND KNOWLEDGE — vetted reference notes. Prefer these where they apply, and follow all safety rules]\n${kb}` : '') +
-      DOC_QUALITY +
+      DOC_QUALITY + RICH_OUTPUT +
       (opts.system ? '\n\n' + opts.system : '') +
       attBlock + webBlock
     const { display, spoken, controls } = await brain.ask2(q, { system })
