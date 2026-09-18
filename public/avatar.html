@@ -11,6 +11,8 @@
   #stage{position:fixed;inset:0}
   canvas{display:block;width:100%;height:100%}
   .note{position:fixed;top:14px;left:0;right:0;text-align:center;font-size:.8rem;color:#9aa;pointer-events:none}
+  .back{position:fixed;top:12px;left:12px;z-index:5;display:inline-flex;align-items:center;gap:6px;color:#dfe3ea;text-decoration:none;font-size:.85rem;font-weight:600;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);padding:7px 12px;border-radius:11px;backdrop-filter:blur(8px)}
+  .back:hover{background:rgba(255,255,255,.12)}
   .reply{position:fixed;left:50%;transform:translateX(-50%);bottom:118px;max-width:min(640px,92vw);background:rgba(20,22,27,.72);backdrop-filter:blur(10px);border:1px solid rgba(255,255,255,.08);border-radius:14px;padding:12px 16px;font-size:.98rem;line-height:1.5;color:#f2f2f2;opacity:0;transition:opacity .25s}
   .reply.show{opacity:1}
   .bar{position:fixed;left:50%;transform:translateX(-50%);bottom:26px;width:min(640px,92vw);display:flex;gap:8px;background:rgba(20,22,27,.82);backdrop-filter:blur(10px);border:1px solid rgba(255,255,255,.1);border-radius:16px;padding:8px}
@@ -27,6 +29,7 @@
 </head>
 <body>
 <div id="stage"><canvas id="c"></canvas></div>
+<a class="back" href="/" title="Back to chat"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg> Chat</a>
 <div class="note">Noria — 3D preview · placeholder rig (swap in <b>noria_f_rigged.glb</b> to become Noria)</div>
 <div class="loading" id="loading">Loading 3D face…</div>
 <div class="emos">
@@ -78,6 +81,17 @@ const pmrem = new THREE.PMREMGenerator(renderer)
 scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture
 const key = new THREE.DirectionalLight(0xffffff, 1.6); key.position.set(0.4, 0.6, 1); scene.add(key)
 scene.add(new THREE.AmbientLight(0xffffff, 0.4))
+// Dark, modern interior backdrop so the rigged Noria drops into a lit environment
+// that matches her aesthetic (deep navy-charcoal), with a warm gold rim for depth.
+;(function backdrop() {
+  const c = document.createElement('canvas'); c.width = 32; c.height = 512
+  const g = c.getContext('2d'), grd = g.createLinearGradient(0, 0, 0, 512)
+  grd.addColorStop(0, '#1b2334'); grd.addColorStop(0.55, '#12151d'); grd.addColorStop(1, '#080a0e')
+  g.fillStyle = grd; g.fillRect(0, 0, 32, 512)
+  const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace
+  scene.background = tex
+})()
+const rim = new THREE.DirectionalLight(0xc9a24b, 0.75); rim.position.set(-1.2, 0.5, -1.4); scene.add(rim)
 
 function resize() { camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight) }
 addEventListener('resize', resize); resize()
