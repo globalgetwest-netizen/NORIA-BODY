@@ -305,6 +305,11 @@ async function handleFiles(files) {
 }
 function note(t) { status.textContent = t; setTimeout(() => { if (status.textContent === t) status.textContent = '' }, 4500) }
 
+// Always-on document-quality directive (applies to ANY document Noria produces —
+// guide chip or typed in chat) so nothing ever comes out with fill-in-the-blank
+// placeholders. The guide flow adds the fuller DOC_RULES on top of this.
+const DOC_QUALITY = '\n\n[WHEN YOU PRODUCE A DOCUMENT (CV, plan, letter, report, roadmap, guide, proposal, etc.): make it FINISHED and ready to use. Do NOT leave fill-in-the-blank placeholders — never write square-bracket placeholders like [Company] or [Degree], and never write parenthetical instructions like (insert...), (add...), (list...). Use only the real details the user gave; if a section cannot be completed from them, omit it rather than padding it, and if essential information is genuinely missing, end with a single short "## To complete before you send this" list. Begin directly with the document itself (its title) — no "Here is..." or "Sure," preamble and no sign-off like "I hope this helps". Use Markdown headings (##, ###) for structure and, for comparisons, figures or timelines, clean Markdown tables. Never output broken or raw tags.]'
+
 // ── A turn: real engine + presence-shaped delivery ────────────────────────────
 async function respond(q, opts = {}) {
   q = (q || '').trim()
@@ -355,11 +360,14 @@ async function respond(q, opts = {}) {
     const kb = retrieveKnowledge(q)
     const system = noriaSystem() + memoryContext(mem) +
       (kb ? `\n\n[BACKGROUND KNOWLEDGE — vetted reference notes. Prefer these where they apply, and follow all safety rules]\n${kb}` : '') +
+      DOC_QUALITY +
       (opts.system ? '\n\n' + opts.system : '') +
       attBlock + webBlock
     const { display, spoken, controls } = await brain.ask2(q, { system })
-    // Guided documents must come out finished — strip any placeholder scaffolding.
-    const dsp = (opts.doc && display) ? cleanDocText(display) : display
+    // Any document — whether from a guide chip or typed in chat — must come out
+    // finished: strip placeholder scaffolding from any document-like answer.
+    const isDocLike = display && (/^#{1,3}\s/m.test(display) || /^\s*\|.*\|\s*$/m.test(display) || /\[[^\]\n]{1,80}\]|\((?:insert|add|list|your |e\.g\.)/i.test(display))
+    const dsp = ((opts.doc || isDocLike) && display) ? cleanDocText(display) : display
     started = true; clearTimers()
     if (cancelled) { finish(); return }
     // Short entry pause, then reveal the finished answer (never fake typing).
