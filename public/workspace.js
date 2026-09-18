@@ -342,7 +342,7 @@ const SMem = (() => {
         if (!embedder) { load().catch(() => {}); return [] }
         const items = await all(); if (!items.length) return []
         const qv = await embed(query)
-        return items.map((it) => ({ text: it.text, score: cos(qv, it.v) })).filter((x) => x.score > 0.4).sort((a, b) => b.score - a.score).slice(0, k)
+        return items.map((it) => ({ text: it.text, score: cos(qv, it.v) })).filter((x) => x.score > 0.32).sort((a, b) => b.score - a.score).slice(0, k)
       } catch (_) { return [] }
     },
     // Fire-and-forget store (call without await).
