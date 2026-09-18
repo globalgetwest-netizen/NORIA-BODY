@@ -356,6 +356,7 @@ const SMem = (() => {
     },
     count: async () => (await all()).length,
     ready: () => !!embedder,
+    clear: async () => { try { const db = await idb(); await new Promise((res) => { const tx = db.transaction(STORE, 'readwrite'); tx.objectStore(STORE).clear(); tx.oncomplete = res; tx.onerror = res }) } catch (_) {} },
   }
 })()
 try { window.__smem = SMem } catch (_) {}
@@ -488,7 +489,8 @@ async function respond(q, opts = {}) {
   // Recall relevant on-device memories (non-blocking; silently skips until the
   // embedding model has loaded in the background).
   let memBlock = ''
-  try { const mems = await SMem.search(q); if (mems.length) memBlock = '\n\n[THINGS THE USER TOLD YOU EARLIER — from private on-device memory. Recall and use these ONLY if relevant to their message; never list them back verbatim.]\n' + mems.map((m) => '- ' + m.text).join('\n') } catch (_) {}
+  try { const mems = await SMem.search(q); if (mems.length) memBlock = '\n\n[MEMORY — things the user told you in earlier conversations (private, on this device). Treat these as true and use them when relevant to answer; do not deny knowing something that is here. Do not list them back verbatim.]\n' + mems.map((m) => '- ' + m.text).join('\n') } catch (_) {}
+  try { window.__lastMemBlock = memBlock } catch (_) {}
 
   const plan = presence.beginTurn({ userText: q }) // emotional state, delivery, memory, check-in
   stop.style.display = 'inline-flex'
@@ -524,7 +526,7 @@ async function respond(q, opts = {}) {
     addFeedback(el.closest('.msg'), q, dsp)
     if (sources.length) addSources(el.closest('.msg'), sources)
     convoRecord({ role: 'noria', text: dsp || spoken || "I'm here.", sources: sources.map((s) => ({ url: s.url })) })
-    if (!opts.doc) SMem.add(shown) // remember what the user said (device-only, fire-and-forget)
+    if (!opts.doc && !/\?\s*$/.test(shown)) SMem.add(shown) // remember the user's statements (not questions); device-only, fire-and-forget
     if (controls && controls.memory) applyMemoryUpdate(mem, controls.memory)
     const sug = presence.suggestMemory(q)
     if (sug) suggestMemory(sug.value)
