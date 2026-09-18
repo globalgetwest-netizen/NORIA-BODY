@@ -312,6 +312,53 @@ const _styles = {}
 function lazyStyle(href) { return _styles[href] || (_styles[href] = new Promise((res) => { const l = document.createElement('link'); l.rel = 'stylesheet'; l.href = href; l.onload = res; l.onerror = res; document.head.appendChild(l) })) }
 
 const NORIA_AI = 'https://noria-ai.insights-skyglobe.workers.dev'
+
+// ── Semantic memory (device-scoped, private, free) ────────────────────────────
+// Embeddings are computed ON THIS DEVICE (transformers.js / all-MiniLM) and stored
+// in IndexedDB — nothing leaves the browser and it uses zero Cloudflare neurons.
+// Fully guarded and non-blocking: any failure silently no-ops, never touching chat.
+const SMem = (() => {
+  let embedder = null, loading = null
+  const DB = 'noria-smem', STORE = 'mem', MAX = 600
+  function idb() { return new Promise((res, rej) => { const r = indexedDB.open(DB, 1); r.onupgradeneeded = () => { if (!r.result.objectStoreNames.contains(STORE)) r.result.createObjectStore(STORE, { keyPath: 'id' }) }; r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error) }) }
+  async function all() { try { const db = await idb(); return await new Promise((res) => { const q = db.transaction(STORE).objectStore(STORE).getAll(); q.onsuccess = () => res(q.result || []); q.onerror = () => res([]) }) } catch (_) { return [] } }
+  async function put(rec) { try { const db = await idb(); await new Promise((res) => { const tx = db.transaction(STORE, 'readwrite'); tx.objectStore(STORE).put(rec); tx.oncomplete = res; tx.onerror = res }) } catch (_) {} }
+  async function del(id) { try { const db = await idb(); await new Promise((res) => { const tx = db.transaction(STORE, 'readwrite'); tx.objectStore(STORE).delete(id); tx.oncomplete = res; tx.onerror = res }) } catch (_) {} }
+  function load() {
+    if (loading) return loading
+    loading = (async () => {
+      const mod = await import('https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2/+esm')
+      mod.env.allowLocalModels = false; mod.env.useBrowserCache = true
+      embedder = await mod.pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2')
+    })().catch((e) => { loading = null; throw e })
+    return loading
+  }
+  async function embed(text) { await load(); const out = await embedder(text, { pooling: 'mean', normalize: true }); return Array.from(out.data) }
+  function cos(a, b) { let s = 0; const n = Math.min(a.length, b.length); for (let i = 0; i < n; i++) s += a[i] * b[i]; return s } // vectors are normalized
+  return {
+    // Non-blocking recall: if the model isn't loaded yet, kick it off and skip this turn.
+    async search(query, k = 3) {
+      try {
+        if (!embedder) { load().catch(() => {}); return [] }
+        const items = await all(); if (!items.length) return []
+        const qv = await embed(query)
+        return items.map((it) => ({ text: it.text, score: cos(qv, it.v) })).filter((x) => x.score > 0.4).sort((a, b) => b.score - a.score).slice(0, k)
+      } catch (_) { return [] }
+    },
+    // Fire-and-forget store (call without await).
+    async add(text) {
+      try {
+        text = String(text || '').trim(); if (text.length < 12) return
+        const v = await embed(text)
+        await put({ id: Date.now() + '-' + Math.random().toString(36).slice(2, 7), text: text.slice(0, 400), v, ts: Date.now() })
+        const items = await all(); if (items.length > MAX) { items.sort((a, b) => a.ts - b.ts); for (let i = 0; i < items.length - MAX; i++) await del(items[i].id) }
+      } catch (_) {}
+    },
+    count: async () => (await all()).length,
+    ready: () => !!embedder,
+  }
+})()
+try { window.__smem = SMem } catch (_) {}
 async function extractText(file) {
   const name = (file.name || '').toLowerCase(), type = file.type || ''
   if (type.startsWith('image/')) {
@@ -438,6 +485,11 @@ async function respond(q, opts = {}) {
     } catch {}
   }
 
+  // Recall relevant on-device memories (non-blocking; silently skips until the
+  // embedding model has loaded in the background).
+  let memBlock = ''
+  try { const mems = await SMem.search(q); if (mems.length) memBlock = '\n\n[THINGS THE USER TOLD YOU EARLIER — from private on-device memory. Recall and use these ONLY if relevant to their message; never list them back verbatim.]\n' + mems.map((m) => '- ' + m.text).join('\n') } catch (_) {}
+
   const plan = presence.beginTurn({ userText: q }) // emotional state, delivery, memory, check-in
   stop.style.display = 'inline-flex'
   let started = false
@@ -453,7 +505,7 @@ async function respond(q, opts = {}) {
       (kb ? `\n\n[BACKGROUND KNOWLEDGE — vetted reference notes. Prefer these where they apply, and follow all safety rules]\n${kb}` : '') +
       DOC_QUALITY + RICH_OUTPUT +
       (opts.system ? '\n\n' + opts.system : '') +
-      attBlock + webBlock
+      memBlock + attBlock + webBlock
     const { display, spoken, controls } = await brain.ask2(q, { system })
     // Any document — whether from a guide chip or typed in chat — must come out
     // finished: strip placeholder scaffolding from any document-like answer.
@@ -472,6 +524,7 @@ async function respond(q, opts = {}) {
     addFeedback(el.closest('.msg'), q, dsp)
     if (sources.length) addSources(el.closest('.msg'), sources)
     convoRecord({ role: 'noria', text: dsp || spoken || "I'm here.", sources: sources.map((s) => ({ url: s.url })) })
+    if (!opts.doc) SMem.add(shown) // remember what the user said (device-only, fire-and-forget)
     if (controls && controls.memory) applyMemoryUpdate(mem, controls.memory)
     const sug = presence.suggestMemory(q)
     if (sug) suggestMemory(sug.value)
