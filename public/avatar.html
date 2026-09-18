@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Noria 3D (preview)</title>
+<style>
+  :root{ --ink:#1A1712; --paper:#F7F5EF; --raise:#fff; --line:#E7E1D4; --accent:#B0812A; }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:linear-gradient(180deg,#20242c,#0f1115);color:#eee;font-family:-apple-system,Segoe UI,Roboto,sans-serif;overflow:hidden}
+  #stage{position:fixed;inset:0}
+  canvas{display:block;width:100%;height:100%}
+  .note{position:fixed;top:14px;left:0;right:0;text-align:center;font-size:.8rem;color:#9aa;pointer-events:none}
+  .reply{position:fixed;left:50%;transform:translateX(-50%);bottom:118px;max-width:min(640px,92vw);background:rgba(20,22,27,.72);backdrop-filter:blur(10px);border:1px solid rgba(255,255,255,.08);border-radius:14px;padding:12px 16px;font-size:.98rem;line-height:1.5;color:#f2f2f2;opacity:0;transition:opacity .25s}
+  .reply.show{opacity:1}
+  .bar{position:fixed;left:50%;transform:translateX(-50%);bottom:26px;width:min(640px,92vw);display:flex;gap:8px;background:rgba(20,22,27,.82);backdrop-filter:blur(10px);border:1px solid rgba(255,255,255,.1);border-radius:16px;padding:8px}
+  .bar input{flex:1;min-width:0;border:0;background:transparent;color:#fff;font:inherit;font-size:1rem;outline:none;padding:8px 6px}
+  .bar input::placeholder{color:#8a8f98}
+  .bar button{flex:none;width:42px;height:42px;border:0;border-radius:12px;background:var(--accent);color:#fff;cursor:pointer;display:inline-flex;align-items:center;justify-content:center}
+  .bar button.ghost{background:rgba(255,255,255,.08);color:#cfd3da}
+  .bar button svg{width:18px;height:18px}
+  .status{position:fixed;left:50%;transform:translateX(-50%);bottom:78px;font-size:.74rem;color:#8a8f98}
+  .emos{position:fixed;top:12px;right:12px;display:flex;flex-direction:column;gap:6px}
+  .emos button{font-size:.72rem;padding:5px 9px;border-radius:9px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.05);color:#cfd3da;cursor:pointer}
+  .loading{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;color:#9aa;font-size:.9rem}
+</style>
+</head>
+<body>
+<div id="stage"><canvas id="c"></canvas></div>
+<div class="note">Noria — 3D preview · placeholder rig (swap in <b>noria_f_rigged.glb</b> to become Noria)</div>
+<div class="loading" id="loading">Loading 3D face…</div>
+<div class="emos">
+  <button data-emo="joy">😊 Joy</button>
+  <button data-emo="surprise">😮 Surprise</button>
+  <button data-emo="neutral">😐 Neutral</button>
+</div>
+<div class="reply" id="reply"></div>
+<div class="status" id="status"></div>
+<div class="bar">
+  <button class="ghost" id="mic" title="Speak" aria-label="Speak"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2.5" width="6" height="11" rx="3"/><path d="M5 10.5a7 7 0 0 0 14 0"/><path d="M12 17.5v3.5"/></svg></button>
+  <input id="in" placeholder="Say something to Noria…" autocomplete="off">
+  <button id="send" title="Send" aria-label="Send"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button>
+</div>
+
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+}}
+</script>
+
+<script type="module">
+import * as THREE from 'three'
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
+import { KTX2Loader } from 'three/addons/loaders/KTX2Loader.js'
+import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js'
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js'
+
+// ── The ONE thing to change to make this the real Noria: point at her rigged GLB ──
+const NORIA_GLB = 'https://threejs.org/examples/models/gltf/facecap.glb' // placeholder ARKit-rigged face
+const BRAIN = '/brain/ask'
+const TTS = 'https://noria-ai.insights-skyglobe.workers.dev/tts'
+const VOICE = 'hera' // Noria F; 'orion' for Noria M
+
+const $ = (id) => document.getElementById(id)
+const statusEl = $('status'), replyEl = $('reply')
+const setStatus = (t) => { statusEl.textContent = t || '' }
+
+// ── Three.js scene ────────────────────────────────────────────────────────────
+const canvas = $('c')
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true })
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2))
+renderer.outputColorSpace = THREE.SRGBColorSpace
+const scene = new THREE.Scene()
+const camera = new THREE.PerspectiveCamera(24, innerWidth / innerHeight, 0.1, 20)
+camera.position.set(0, 0.06, 0.42)
+const pmrem = new THREE.PMREMGenerator(renderer)
+scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture
+const key = new THREE.DirectionalLight(0xffffff, 1.6); key.position.set(0.4, 0.6, 1); scene.add(key)
+scene.add(new THREE.AmbientLight(0xffffff, 0.4))
+
+function resize() { camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight) }
+addEventListener('resize', resize); resize()
+
+// ── Morph-target driver (works across any ARKit-rigged mesh) ──────────────────
+let morphMeshes = []
+function setMorph(name, value) {
+  for (const m of morphMeshes) { const i = m.morphTargetDictionary[name]; if (i !== undefined) m.morphTargetInfluences[i] = value }
+}
+function hasMorph(name) { return morphMeshes.some((m) => m.morphTargetDictionary[name] !== undefined) }
+let headObj = null
+
+// ── Emotion engine (Module 2) ─────────────────────────────────────────────────
+const emo = { joy: 0.35, surprise: 0.08, tension: 0.15, curiosity: 0.6 }
+function processStimulus(sentiment, novel) {
+  if (sentiment > 0.4) { emo.joy = Math.min(1, emo.joy + 0.25); emo.tension = Math.max(0, emo.tension - 0.1) }
+  if (sentiment < -0.3) { emo.tension = Math.min(1, emo.tension + 0.25); emo.joy = Math.max(0, emo.joy - 0.15) }
+  if (novel) { emo.surprise = Math.min(1, emo.surprise + 0.4); emo.curiosity = Math.min(1, emo.curiosity + 0.2) }
+}
+function decayEmotion() { emo.surprise *= 0.96; emo.joy += (0.35 - emo.joy) * 0.01; emo.tension *= 0.99 }
+document.querySelectorAll('.emos button').forEach((b) => b.addEventListener('click', () => {
+  const e = b.dataset.emo
+  if (e === 'joy') { emo.joy = 0.9; emo.surprise = 0.1 }
+  else if (e === 'surprise') { emo.surprise = 0.85; emo.joy = 0.5 }
+  else { emo.joy = 0.3; emo.surprise = 0.05; emo.tension = 0.1 }
+}))
+
+// ── Blink ─────────────────────────────────────────────────────────────────────
+let nextBlink = 2, blinkT = -1
+function updateBlink(t, dt) {
+  if (blinkT < 0 && t > nextBlink) { blinkT = 0 }
+  if (blinkT >= 0) {
+    blinkT += dt * 7
+    const v = blinkT < 1 ? blinkT : (blinkT < 2 ? 2 - blinkT : 0)
+    setMorph('eyeBlinkLeft', v); setMorph('eyeBlinkRight', v)
+    if (blinkT >= 2) { blinkT = -1; nextBlink = t + 2 + Math.random() * 4; setMorph('eyeBlinkLeft', 0); setMorph('eyeBlinkRight', 0) }
+  }
+}
+
+// ── Voice + lip-sync (amplitude → jawOpen) ────────────────────────────────────
+const audioEl = new Audio(); audioEl.crossOrigin = 'anonymous'
+let actx = null, analyser = null, td = null, srcNode = null, speaking = false, jaw = 0, jawTarget = 0
+function ensureAudioGraph() {
+  if (actx) return
+  actx = new (window.AudioContext || window.webkitAudioContext)()
+  srcNode = actx.createMediaElementSource(audioEl)
+  analyser = actx.createAnalyser(); analyser.fftSize = 1024; analyser.smoothingTimeConstant = 0.4
+  td = new Uint8Array(analyser.fftSize)
+  srcNode.connect(analyser); analyser.connect(actx.destination)
+}
+function speechText(t) { return String(t).replace(/[*_#`>~|]/g, ' ').replace(/\s+/g, ' ').trim() }
+async function speak(text) {
+  const clean = speechText(text); if (!clean) return
+  ensureAudioGraph(); try { await actx.resume() } catch (_) {}
+  try {
+    const r = await fetch(TTS + '?speaker=' + VOICE + '&text=' + encodeURIComponent(clean.slice(0, 1600)))
+    if (!r.ok) throw new Error('tts ' + r.status)
+    const url = URL.createObjectURL(await r.blob())
+    audioEl.src = url; speaking = true
+    audioEl.onended = () => { speaking = false; jawTarget = 0; URL.revokeObjectURL(url) }
+    await audioEl.play()
+  } catch (e) { speaking = false }
+}
+
+// ── Conversation ──────────────────────────────────────────────────────────────
+const history = []
+const POS = /\b(great|good|love|happy|glad|excellent|wonderful|thanks|thank you|amazing|nice|awesome)\b/i
+const NEG = /\b(sad|bad|angry|hate|worried|sorry|problem|terrible|awful|upset|difficult)\b/i
+async function ask(text) {
+  setStatus('Noria is thinking…')
+  processStimulus(POS.test(text) ? 0.6 : NEG.test(text) ? -0.5 : 0, /\b(what if|imagine|new|idea|surprise)\b/i.test(text))
+  const system = 'You are Noria, a warm, emotionally intelligent, general-purpose AI. Reply in 1 to 3 short spoken sentences — natural and conversational, no markdown, no lists. Never reveal what model or system powers you.'
+  try {
+    const r = await fetch(BRAIN, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query: text, history: history.slice(-6), system }) })
+    const j = await r.json()
+    let reply = (j.answer || j.reply || '').trim()
+    try { const p = JSON.parse(reply); reply = p.display_text || p.spoken_text || reply } catch (_) {}
+    reply = reply || "I'm here."
+    history.push({ role: 'user', content: text }, { role: 'assistant', content: reply })
+    processStimulus(POS.test(reply) ? 0.4 : 0, false)
+    replyEl.textContent = reply; replyEl.classList.add('show')
+    setStatus('')
+    speak(reply)
+  } catch (e) { setStatus('Connection issue — try again.'); }
+}
+$('send').addEventListener('click', () => { const v = $('in').value.trim(); if (v) { $('in').value = ''; ask(v) } })
+$('in').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('send').click() })
+
+// Voice input (browser STT)
+let rec = null
+$('mic').addEventListener('click', () => {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition
+  if (!SR) { setStatus('Voice input not supported on this browser.'); return }
+  if (!rec) { rec = new SR(); rec.lang = 'en-US'; rec.interimResults = false; rec.onresult = (e) => { const t = e.results[0][0].transcript; $('in').value = t; ask(t) }; rec.onerror = () => setStatus('') }
+  try { rec.start(); setStatus('Listening…') } catch (_) {}
+})
+
+// ── Load the avatar ───────────────────────────────────────────────────────────
+const loader = new GLTFLoader()
+const ktx2 = new KTX2Loader().setTranscoderPath('https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/libs/basis/').detectSupport(renderer)
+loader.setKTX2Loader(ktx2).setMeshoptDecoder(MeshoptDecoder)
+loader.load(NORIA_GLB, (gltf) => {
+  const root = gltf.scene
+  scene.add(root)
+  root.traverse((o) => { if (o.isMesh && o.morphTargetDictionary) morphMeshes.push(o) })
+  headObj = root.getObjectByName('Head') || morphMeshes[0] || root
+  // Frame the face
+  const box = new THREE.Box3().setFromObject(root)
+  const center = box.getCenter(new THREE.Vector3())
+  camera.lookAt(center.x, center.y + 0.03, center.z)
+  $('loading').style.display = 'none'
+  setStatus('Say hi to Noria 👋')
+}, (p) => { if (p.total) $('loading').textContent = 'Loading 3D face… ' + Math.round(p.loaded / p.total * 100) + '%' },
+   (err) => { $('loading').textContent = 'Could not load the 3D model.'; })
+
+// ── Render loop ───────────────────────────────────────────────────────────────
+const clock = new THREE.Clock()
+function animate() {
+  requestAnimationFrame(animate)
+  const dt = Math.min(clock.getDelta(), 0.05), t = clock.elapsedTime
+  if (headObj) { headObj.rotation.y = Math.sin(t * 0.5) * 0.05; headObj.rotation.x = Math.sin(t * 0.37) * 0.025 }
+  updateBlink(t, dt)
+  // lip-sync
+  if (speaking && analyser) {
+    analyser.getByteTimeDomainData(td)
+    let sum = 0; for (let i = 0; i < td.length; i++) { const v = (td[i] - 128) / 128; sum += v * v }
+    const rms = Math.sqrt(sum / td.length)
+    jawTarget = Math.min(1, rms * 3.6)
+  } else { jawTarget *= 0.8 }
+  jaw += (jawTarget - jaw) * 0.45
+  setMorph('jawOpen', jaw * 0.75)
+  if (hasMorph('mouthOpen')) setMorph('mouthOpen', jaw * 0.4)
+  // emotion → face
+  decayEmotion()
+  setMorph('mouthSmileLeft', emo.joy * 0.55); setMorph('mouthSmileRight', emo.joy * 0.55)
+  setMorph('browInnerUp', emo.surprise * 0.8)
+  if (hasMorph('eyeWideLeft')) { setMorph('eyeWideLeft', emo.surprise * 0.5); setMorph('eyeWideRight', emo.surprise * 0.5) }
+  renderer.render(scene, camera)
+}
+animate()
+</script>
+</body>
+</html>
