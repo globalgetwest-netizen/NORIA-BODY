@@ -3,54 +3,73 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Noria 3D (preview)</title>
+<title>Noria — Sovereign Runtime</title>
 <style>
-  :root{ --ink:#1A1712; --paper:#F7F5EF; --raise:#fff; --line:#E7E1D4; --accent:#B0812A; }
+  :root{ --accent:#d4af37; --accent-2:#b8942e; --panel:rgba(12,12,18,.82); --line:rgba(255,255,255,.10); --text:#f0f0f5; --text-2:#9aa0a6; }
   *{box-sizing:border-box}
-  html,body{margin:0;height:100%;background:linear-gradient(180deg,#20242c,#0f1115);color:#eee;font-family:-apple-system,Segoe UI,Roboto,sans-serif;overflow:hidden}
-  #stage{position:fixed;inset:0}
+  html,body{margin:0;height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#050508;color:var(--text)}
+  #viewport{position:fixed;inset:0;z-index:1}
   canvas{display:block;width:100%;height:100%}
-  .note{position:fixed;top:14px;left:0;right:0;text-align:center;font-size:.8rem;color:#9aa;pointer-events:none}
-  .back{position:fixed;top:12px;left:12px;z-index:5;display:inline-flex;align-items:center;gap:6px;color:#dfe3ea;text-decoration:none;font-size:.85rem;font-weight:600;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);padding:7px 12px;border-radius:11px;backdrop-filter:blur(8px)}
-  .back:hover{background:rgba(255,255,255,.12)}
-  .bgsel{position:fixed;top:54px;left:12px;z-index:5;display:flex;gap:6px}
-  .bgsel button{font-size:.72rem;padding:6px 10px;border-radius:9px;border:1px solid rgba(255,255,255,.14);background:rgba(255,255,255,.05);color:#cfd3da;cursor:pointer;backdrop-filter:blur(8px)}
-  .bgsel button.on{border-color:#9a5cff;color:#fff;background:rgba(154,92,255,.2)}
-  .reply{position:fixed;left:50%;transform:translateX(-50%);bottom:118px;max-width:min(640px,92vw);background:rgba(20,22,27,.72);backdrop-filter:blur(10px);border:1px solid rgba(255,255,255,.08);border-radius:14px;padding:12px 16px;font-size:.98rem;line-height:1.5;color:#f2f2f2;opacity:0;transition:opacity .25s}
-  .reply.show{opacity:1}
-  .bar{position:fixed;left:50%;transform:translateX(-50%);bottom:26px;width:min(640px,92vw);display:flex;gap:8px;background:rgba(20,22,27,.82);backdrop-filter:blur(10px);border:1px solid rgba(255,255,255,.1);border-radius:16px;padding:8px}
-  .bar input{flex:1;min-width:0;border:0;background:transparent;color:#fff;font:inherit;font-size:1rem;outline:none;padding:8px 6px}
-  .bar input::placeholder{color:#8a8f98}
-  .bar button{flex:none;width:42px;height:42px;border:0;border-radius:12px;background:var(--accent);color:#fff;cursor:pointer;display:inline-flex;align-items:center;justify-content:center}
-  .bar button.ghost{background:rgba(255,255,255,.08);color:#cfd3da}
-  .bar button svg{width:18px;height:18px}
-  .status{position:fixed;left:50%;transform:translateX(-50%);bottom:78px;font-size:.74rem;color:#8a8f98}
-  .emos{position:fixed;top:12px;right:12px;display:flex;flex-direction:column;gap:6px}
-  .emos button{font-size:.72rem;padding:5px 9px;border-radius:9px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.05);color:#cfd3da;cursor:pointer}
-  .loading{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;color:#9aa;font-size:.9rem}
+  .ui{position:fixed;inset:0;z-index:2;pointer-events:none;display:flex;flex-direction:column;justify-content:space-between;padding:20px;gap:12px}
+  .ui > *{pointer-events:auto}
+  header{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+  .brand{font-weight:800;letter-spacing:1px;font-size:14px;color:var(--accent);text-shadow:0 1px 12px rgba(212,175,55,.25)}
+  .back{display:inline-flex;align-items:center;gap:5px;color:var(--text);text-decoration:none;font-size:13px;font-weight:600;background:var(--panel);border:1px solid var(--line);padding:7px 12px;border-radius:11px;backdrop-filter:blur(12px)}
+  .back:hover{border-color:rgba(212,175,55,.4)}
+  .spacer{flex:1}
+  .env{display:flex;gap:6px;background:var(--panel);padding:6px;border-radius:20px;backdrop-filter:blur(12px);border:1px solid rgba(212,175,55,.2)}
+  .env button{background:transparent;border:0;color:var(--text-2);cursor:pointer;font-size:12.5px;font-weight:600;padding:6px 12px;border-radius:14px;transition:all .25s}
+  .env button.on,.env button:hover{background:var(--accent);color:#000}
+  .bottom{display:flex;align-items:flex-end;gap:12px;flex-wrap:wrap}
+  .chat{width:min(440px,100%);max-height:44vh;background:var(--panel);border:1px solid var(--line);border-radius:16px;backdrop-filter:blur(16px);display:flex;flex-direction:column;overflow:hidden;box-shadow:0 20px 50px rgba(0,0,0,.6)}
+  .history{flex:1;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:10px;min-height:60px}
+  .msg{padding:9px 13px;border-radius:12px;font-size:14px;line-height:1.45;max-width:88%;animation:rise .25s ease both}
+  @keyframes rise{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+  .msg.user{align-self:flex-end;background:rgba(212,175,55,.16);border:1px solid rgba(212,175,55,.3);color:var(--text)}
+  .msg.noria{align-self:flex-start;background:rgba(255,255,255,.06);border:1px solid var(--line);color:#e7e9ee}
+  .inbar{display:flex;gap:8px;padding:10px;border-top:1px solid var(--line);background:rgba(0,0,0,.28)}
+  .inbar input{flex:1;min-width:0;background:rgba(255,255,255,.07);border:1px solid var(--line);border-radius:10px;padding:10px 13px;color:var(--text);font:inherit;font-size:14px;outline:none}
+  .inbar input:focus{border-color:var(--accent)}
+  .inbar button{flex:none;border:0;border-radius:10px;cursor:pointer;font:inherit;font-weight:700;color:#000;background:var(--accent);width:44px;display:inline-flex;align-items:center;justify-content:center}
+  .inbar button.ghost{background:rgba(255,255,255,.08);color:#cfd3da}
+  .inbar button svg{width:18px;height:18px}
+  .status{font-size:12px;color:var(--text-2);min-height:15px;padding:0 4px}
+  #loading{position:fixed;inset:0;z-index:10;background:#050508;display:flex;flex-direction:column;align-items:center;justify-content:center;transition:opacity .6s}
+  .spin{width:46px;height:46px;border:3px solid rgba(212,175,55,.12);border-top-color:var(--accent);border-radius:50%;animation:spin 1s linear infinite;margin-bottom:16px}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  #loading .t{font-size:13px;letter-spacing:2px;color:var(--accent);font-weight:600}
+  @media (max-width:520px){ .brand{font-size:12px} .chat{width:100%;max-height:40vh} }
 </style>
 </head>
 <body>
-<div id="stage"><canvas id="c"></canvas></div>
-<a class="back" href="/" title="Back to chat"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg> Chat</a>
-<div class="bgsel">
-  <button data-bg="cosmic" type="button">✦ Cosmic</button>
-  <button data-bg="studio" type="button">◻ Studio</button>
-  <button data-bg="dark" type="button">● Dark</button>
-</div>
-<div class="note">Noria — 3D preview · placeholder rig (swap in <b>noria_f_rigged.glb</b> to become Noria)</div>
-<div class="loading" id="loading">Loading 3D face…</div>
-<div class="emos">
-  <button data-emo="joy">😊 Joy</button>
-  <button data-emo="surprise">😮 Surprise</button>
-  <button data-emo="neutral">😐 Neutral</button>
-</div>
-<div class="reply" id="reply"></div>
-<div class="status" id="status"></div>
-<div class="bar">
-  <button class="ghost" id="mic" title="Speak" aria-label="Speak"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2.5" width="6" height="11" rx="3"/><path d="M5 10.5a7 7 0 0 0 14 0"/><path d="M12 17.5v3.5"/></svg></button>
-  <input id="in" placeholder="Say something to Noria…" autocomplete="off">
-  <button id="send" title="Send" aria-label="Send"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button>
+<div id="loading"><div class="spin"></div><div class="t" id="loadingText">INITIALIZING NORIA ENGINE</div></div>
+<div id="viewport"><canvas id="c"></canvas></div>
+
+<div class="ui">
+  <header>
+    <a class="back" href="/" title="Back to chat"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg> Chat</a>
+    <div class="brand">NORIA F · SOVEREIGN RUNTIME</div>
+    <div class="spacer"></div>
+    <div class="env" id="env">
+      <button data-bg="cosmic" type="button" class="on">✦ Cosmic</button>
+      <button data-bg="studio" type="button">◻ Studio</button>
+      <button data-bg="dark" type="button">● Dark</button>
+    </div>
+  </header>
+
+  <div class="bottom">
+    <div class="chat">
+      <div class="history" id="history">
+        <div class="msg noria">I'm here. Say something, and I'll answer with my real voice.</div>
+      </div>
+      <div class="inbar">
+        <button class="ghost" id="mic" type="button" title="Speak" aria-label="Speak"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2.5" width="6" height="11" rx="3"/><path d="M5 10.5a7 7 0 0 0 14 0"/><path d="M12 17.5v3.5"/></svg></button>
+        <input id="in" placeholder="Talk to Noria…" autocomplete="off">
+        <button id="send" type="button" title="Send" aria-label="Send"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button>
+      </div>
+      <div class="status" id="status"></div>
+    </div>
+  </div>
 </div>
 
 <script type="importmap">
@@ -67,63 +86,40 @@ import { KTX2Loader } from 'three/addons/loaders/KTX2Loader.js'
 import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js'
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js'
 
-// ── The ONE thing to change to make this the real Noria: point at her rigged GLB ──
-const NORIA_GLB = 'https://threejs.org/examples/models/gltf/facecap.glb' // placeholder ARKit-rigged face
+// ── The ONE line to make this the real Noria: point at her rigged GLB ──
+const NORIA_GLB = 'https://threejs.org/examples/models/gltf/facecap.glb' // placeholder ARKit face
 const BRAIN = '/brain/ask'
 const TTS = 'https://noria-ai.insights-skyglobe.workers.dev/tts'
-const VOICE = 'hera' // Noria F; 'orion' for Noria M
+const VOICE = 'hera' // Noria F; 'orion' = Noria M
 
 const $ = (id) => document.getElementById(id)
-const statusEl = $('status'), replyEl = $('reply')
-const setStatus = (t) => { statusEl.textContent = t || '' }
+const setStatus = (t) => { $('status').textContent = t || '' }
 
-// ── Three.js scene ────────────────────────────────────────────────────────────
-const canvas = $('c')
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true })
+const renderer = new THREE.WebGLRenderer({ canvas: $('c'), antialias: true })
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2))
 renderer.outputColorSpace = THREE.SRGBColorSpace
-// Cinematic foundation: ACES Filmic tone mapping so PBR highlights (gold armour)
-// roll off richly instead of blowing out under bright/cosmic lighting.
 renderer.toneMapping = THREE.ACESFilmicToneMapping
 renderer.toneMappingExposure = 1.1
 const scene = new THREE.Scene()
-const camera = new THREE.PerspectiveCamera(24, innerWidth / innerHeight, 0.1, 20)
-camera.position.set(0, 0.06, 0.42)
+const camera = new THREE.PerspectiveCamera(24, innerWidth / innerHeight, 0.1, 100)
+camera.position.set(0, 0.06, 0.5)
 const pmrem = new THREE.PMREMGenerator(renderer)
 const roomEnv = pmrem.fromScene(new RoomEnvironment(), 0.04).texture
 const key = new THREE.DirectionalLight(0xffffff, 1.6); key.position.set(0.4, 0.6, 1); scene.add(key)
-const amb = new THREE.AmbientLight(0xffffff, 0.4); scene.add(amb)
-// Soft front fill from the camera side to lift harsh under-eye/nose shadows.
+const amb = new THREE.AmbientLight(0xffffff, 0.45); scene.add(amb)
 const fill = new THREE.DirectionalLight(0xffffff, 0.55); fill.position.set(0, 0.4, 3); scene.add(fill)
 const rim = new THREE.DirectionalLight(0xc9a24b, 0.75); rim.position.set(-1.2, 0.5, -1.4); scene.add(rim)
 const rim2 = new THREE.DirectionalLight(0x2f7bff, 0.0); rim2.position.set(1.3, 0.2, -1.3); scene.add(rim2)
+function resize() { camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight) }
+addEventListener('resize', resize); resize()
 
-// ── Backgrounds: Cosmic / Studio / Dark. Environment reflections + rim lights
-// adapt so her metallic gold armour and hair read well against each. Procedural
-// (no external assets), so it stays free and privacy-safe.
+// ── Backgrounds ───────────────────────────────────────────────────────────────
 let starsObj = null
-function gradientTex(stops) {
-  const c = document.createElement('canvas'); c.width = 32; c.height = 512
-  const g = c.getContext('2d'), grd = g.createLinearGradient(0, 0, 0, 512)
-  stops.forEach((s) => grd.addColorStop(s[0], s[1])); g.fillStyle = grd; g.fillRect(0, 0, 32, 512)
-  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t
-}
-function makeStars(n) {
-  const geo = new THREE.BufferGeometry(), pos = new Float32Array(n * 3)
-  for (let i = 0; i < n; i++) { const r = 30 + Math.random() * 45, th = Math.random() * Math.PI * 2, ph = Math.acos(2 * Math.random() - 1); pos[i * 3] = r * Math.sin(ph) * Math.cos(th); pos[i * 3 + 1] = r * Math.sin(ph) * Math.sin(th); pos[i * 3 + 2] = r * Math.cos(ph) }
-  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3))
-  return new THREE.Points(geo, new THREE.PointsMaterial({ size: 0.16, color: 0xffffff, sizeAttenuation: true, transparent: true, opacity: 0.9, depthWrite: false }))
-}
-function makeNebula() {
-  const c = document.createElement('canvas'); c.width = 1024; c.height = 512; const g = c.getContext('2d')
-  g.fillStyle = '#05060d'; g.fillRect(0, 0, 1024, 512)
-  const cols = ['#3a1e6e', '#123a7a', '#6e1e5a', '#0d2a5c']
-  for (let k = 0; k < 20; k++) { const x = Math.random() * 1024, y = Math.random() * 512, rad = 180 + Math.random() * 260; const rg = g.createRadialGradient(x, y, 0, x, y, rad); rg.addColorStop(0, cols[k % cols.length] + '55'); rg.addColorStop(1, '#05060d00'); g.fillStyle = rg; g.fillRect(0, 0, 1024, 512) }
-  g.fillStyle = '#fff'; for (let s = 0; s < 450; s++) { g.globalAlpha = Math.random() * 0.8 + 0.2; const b = Math.random() < 0.08 ? 2 : 1; g.fillRect(Math.random() * 1024, Math.random() * 512, b, b) } g.globalAlpha = 1
-  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.mapping = THREE.EquirectangularReflectionMapping; return t
-}
+function gradientTex(stops) { const c = document.createElement('canvas'); c.width = 32; c.height = 512; const g = c.getContext('2d'), grd = g.createLinearGradient(0, 0, 0, 512); stops.forEach((s) => grd.addColorStop(s[0], s[1])); g.fillStyle = grd; g.fillRect(0, 0, 32, 512); const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t }
+function makeStars(n) { const geo = new THREE.BufferGeometry(), pos = new Float32Array(n * 3); for (let i = 0; i < n; i++) { const r = 30 + Math.random() * 45, th = Math.random() * Math.PI * 2, ph = Math.acos(2 * Math.random() - 1); pos[i * 3] = r * Math.sin(ph) * Math.cos(th); pos[i * 3 + 1] = r * Math.sin(ph) * Math.sin(th); pos[i * 3 + 2] = r * Math.cos(ph) } geo.setAttribute('position', new THREE.BufferAttribute(pos, 3)); return new THREE.Points(geo, new THREE.PointsMaterial({ size: 0.16, color: 0xffffff, sizeAttenuation: true, transparent: true, opacity: 0.9, depthWrite: false })) }
+function makeNebula() { const c = document.createElement('canvas'); c.width = 1024; c.height = 512; const g = c.getContext('2d'); g.fillStyle = '#05060d'; g.fillRect(0, 0, 1024, 512); const cols = ['#3a1e6e', '#123a7a', '#6e1e5a', '#0d2a5c']; for (let k = 0; k < 20; k++) { const x = Math.random() * 1024, y = Math.random() * 512, rad = 180 + Math.random() * 260; const rg = g.createRadialGradient(x, y, 0, x, y, rad); rg.addColorStop(0, cols[k % cols.length] + '55'); rg.addColorStop(1, '#05060d00'); g.fillStyle = rg; g.fillRect(0, 0, 1024, 512) } g.fillStyle = '#fff'; for (let s = 0; s < 450; s++) { g.globalAlpha = Math.random() * 0.8 + 0.2; const b = Math.random() < 0.08 ? 2 : 1; g.fillRect(Math.random() * 1024, Math.random() * 512, b, b) } g.globalAlpha = 1; const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.mapping = THREE.EquirectangularReflectionMapping; return t }
 function setBackground(mode) {
-  document.querySelectorAll('.bgsel button').forEach((b) => b.classList.toggle('on', b.dataset.bg === mode))
+  document.querySelectorAll('#env button').forEach((b) => b.classList.toggle('on', b.dataset.bg === mode))
   if (mode === 'cosmic') {
     const neb = makeNebula(); scene.background = neb; scene.environment = pmrem.fromEquirectangular(neb).texture
     if (!starsObj) { starsObj = makeStars(1800); scene.add(starsObj) } starsObj.visible = true
@@ -131,43 +127,23 @@ function setBackground(mode) {
   } else if (mode === 'studio') {
     scene.background = gradientTex([[0, '#f4f5f7'], [1, '#d9dde3']]); scene.environment = roomEnv
     if (starsObj) starsObj.visible = false
-    key.intensity = 2.1; amb.intensity = 0.75; rim.color.set(0xffffff); rim.intensity = 0.5; rim2.intensity = 0.0
+    key.intensity = 2.1; amb.intensity = 0.8; rim.color.set(0xffffff); rim.intensity = 0.5; rim2.intensity = 0.0
   } else {
     scene.background = gradientTex([[0, '#1b2334'], [0.55, '#12151d'], [1, '#080a0e']]); scene.environment = roomEnv
     if (starsObj) starsObj.visible = false
-    key.intensity = 1.6; amb.intensity = 0.4; rim.color.set(0xc9a24b); rim.intensity = 0.75; rim2.intensity = 0.0
+    key.intensity = 1.6; amb.intensity = 0.45; rim.color.set(0xc9a24b); rim.intensity = 0.75; rim2.intensity = 0.0
   }
 }
-document.querySelectorAll('.bgsel button').forEach((b) => b.addEventListener('click', () => setBackground(b.dataset.bg)))
+document.querySelectorAll('#env button').forEach((b) => b.addEventListener('click', () => setBackground(b.dataset.bg)))
 setBackground('cosmic')
 
-function resize() { camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight) }
-addEventListener('resize', resize); resize()
-
-// ── Morph-target driver (works across any ARKit-rigged mesh) ──────────────────
-let morphMeshes = []
-// Blendshape names differ by rig: ARKit uses "eyeBlink_L", others "eyeBlinkLeft".
-// Resolve either convention so the same code drives facecap AND the real Noria GLB.
-const _mcache = {}
-function variants(name) {
-  const v = [name]
-  if (/Left$/.test(name)) v.push(name.replace(/Left$/, '_L'))
-  else if (/Right$/.test(name)) v.push(name.replace(/Right$/, '_R'))
-  else if (/_L$/.test(name)) v.push(name.replace(/_L$/, 'Left'))
-  else if (/_R$/.test(name)) v.push(name.replace(/_R$/, 'Right'))
-  return v
-}
-function resolve(name) {
-  if (name in _mcache) return _mcache[name]
-  for (const nm of variants(name)) if (morphMeshes.some((m) => m.morphTargetDictionary[nm] !== undefined)) return (_mcache[name] = nm)
-  return (_mcache[name] = null)
-}
-function setMorph(name, value) {
-  const nm = resolve(name); if (!nm) return
-  for (const m of morphMeshes) { const i = m.morphTargetDictionary[nm]; if (i !== undefined) m.morphTargetInfluences[i] = value }
-}
-function hasMorph(name) { return !!resolve(name) }
-let headObj = null
+// ── Morph resolver (ARKit _L/_R and Left/Right) ───────────────────────────────
+let morphMeshes = [], headObj = null
+const _mc = {}
+function variants(n) { const v = [n]; if (/Left$/.test(n)) v.push(n.replace(/Left$/, '_L')); else if (/Right$/.test(n)) v.push(n.replace(/Right$/, '_R')); else if (/_L$/.test(n)) v.push(n.replace(/_L$/, 'Left')); else if (/_R$/.test(n)) v.push(n.replace(/_R$/, 'Right')); return v }
+function resolve(n) { if (n in _mc) return _mc[n]; for (const nm of variants(n)) if (morphMeshes.some((m) => m.morphTargetDictionary[nm] !== undefined)) return (_mc[n] = nm); return (_mc[n] = null) }
+function setMorph(n, v) { const nm = resolve(n); if (!nm) return; for (const m of morphMeshes) { const i = m.morphTargetDictionary[nm]; if (i !== undefined) m.morphTargetInfluences[i] = v } }
+function hasMorph(n) { return !!resolve(n) }
 
 // ── Emotion engine (Module 2) ─────────────────────────────────────────────────
 const emo = { joy: 0.35, surprise: 0.08, tension: 0.15, curiosity: 0.6 }
@@ -177,48 +153,23 @@ function processStimulus(sentiment, novel) {
   if (novel) { emo.surprise = Math.min(1, emo.surprise + 0.4); emo.curiosity = Math.min(1, emo.curiosity + 0.2) }
 }
 function decayEmotion() { emo.surprise *= 0.96; emo.joy += (0.35 - emo.joy) * 0.01; emo.tension *= 0.99 }
-document.querySelectorAll('.emos button').forEach((b) => b.addEventListener('click', () => {
-  const e = b.dataset.emo
-  if (e === 'joy') { emo.joy = 0.9; emo.surprise = 0.1 }
-  else if (e === 'surprise') { emo.surprise = 0.85; emo.joy = 0.5 }
-  else { emo.joy = 0.3; emo.surprise = 0.05; emo.tension = 0.1 }
-}))
 
-// ── Procedural head gestures (nod / tilt) — the brain's response triggers these ─
+// ── Gestures ──────────────────────────────────────────────────────────────────
 let gesture = null
 function triggerGesture(type, s = 1) { gesture = { type, t: 0, dur: type === 'nod' ? 0.75 : 1.0, s } }
-function gestureOffset(dt) {
-  if (!gesture) return { x: 0, z: 0 }
-  gesture.t += dt / gesture.dur; const p = Math.min(gesture.t, 1)
-  const x = gesture.type === 'nod' ? Math.sin(p * Math.PI) * 0.14 * gesture.s : 0
-  const z = gesture.type === 'tilt' ? Math.sin(p * Math.PI) * 0.16 * gesture.s : 0
-  if (gesture.t >= 1) gesture = null
-  return { x, z }
-}
+function gestureOffset(dt) { if (!gesture) return { x: 0, z: 0 }; gesture.t += dt / gesture.dur; const p = Math.min(gesture.t, 1); const x = gesture.type === 'nod' ? Math.sin(p * Math.PI) * 0.14 * gesture.s : 0; const z = gesture.type === 'tilt' ? Math.sin(p * Math.PI) * 0.16 * gesture.s : 0; if (gesture.t >= 1) gesture = null; return { x, z } }
 
 // ── Blink ─────────────────────────────────────────────────────────────────────
 let nextBlink = 2, blinkT = -1
 function updateBlink(t, dt) {
-  if (blinkT < 0 && t > nextBlink) { blinkT = 0 }
-  if (blinkT >= 0) {
-    blinkT += dt * 7
-    const v = blinkT < 1 ? blinkT : (blinkT < 2 ? 2 - blinkT : 0)
-    setMorph('eyeBlinkLeft', v); setMorph('eyeBlinkRight', v)
-    if (blinkT >= 2) { blinkT = -1; nextBlink = t + 2 + Math.random() * 4; setMorph('eyeBlinkLeft', 0); setMorph('eyeBlinkRight', 0) }
-  }
+  if (blinkT < 0 && t > nextBlink) blinkT = 0
+  if (blinkT >= 0) { blinkT += dt * 7; const v = blinkT < 1 ? blinkT : (blinkT < 2 ? 2 - blinkT : 0); setMorph('eyeBlinkLeft', v); setMorph('eyeBlinkRight', v); if (blinkT >= 2) { blinkT = -1; nextBlink = t + 2 + Math.random() * 4; setMorph('eyeBlinkLeft', 0); setMorph('eyeBlinkRight', 0) } }
 }
 
-// ── Voice + lip-sync (amplitude → jawOpen) ────────────────────────────────────
+// ── Voice (neural Aura) + amplitude lip-sync ──────────────────────────────────
 const audioEl = new Audio(); audioEl.crossOrigin = 'anonymous'
-let actx = null, analyser = null, td = null, srcNode = null, speaking = false, jaw = 0, jawTarget = 0
-function ensureAudioGraph() {
-  if (actx) return
-  actx = new (window.AudioContext || window.webkitAudioContext)()
-  srcNode = actx.createMediaElementSource(audioEl)
-  analyser = actx.createAnalyser(); analyser.fftSize = 1024; analyser.smoothingTimeConstant = 0.4
-  td = new Uint8Array(analyser.fftSize)
-  srcNode.connect(analyser); analyser.connect(actx.destination)
-}
+let actx = null, analyser = null, td = null, speaking = false, jaw = 0, jawTarget = 0
+function ensureAudioGraph() { if (actx) return; actx = new (window.AudioContext || window.webkitAudioContext)(); const src = actx.createMediaElementSource(audioEl); analyser = actx.createAnalyser(); analyser.fftSize = 1024; analyser.smoothingTimeConstant = 0.4; td = new Uint8Array(analyser.fftSize); src.connect(analyser); analyser.connect(actx.destination) }
 function speechText(t) { return String(t).replace(/[*_#`>~|]/g, ' ').replace(/\s+/g, ' ').trim() }
 async function speak(text) {
   const clean = speechText(text); if (!clean) return
@@ -233,14 +184,15 @@ async function speak(text) {
   } catch (e) { speaking = false }
 }
 
-// ── Conversation ──────────────────────────────────────────────────────────────
+// ── Conversation (real brain: /brain/ask → Groq/Gemini) ───────────────────────
 const history = []
-const POS = /\b(great|good|love|happy|glad|excellent|wonderful|thanks|thank you|amazing|nice|awesome)\b/i
+const POS = /\b(great|good|love|happy|glad|excellent|wonderful|thanks|thank you|amazing|nice|awesome|yes|absolutely)\b/i
 const NEG = /\b(sad|bad|angry|hate|worried|sorry|problem|terrible|awful|upset|difficult)\b/i
+function appendMsg(text, who) { const h = $('history'); const d = document.createElement('div'); d.className = 'msg ' + who; d.textContent = text; h.appendChild(d); h.scrollTop = h.scrollHeight; return d }
 async function ask(text) {
-  setStatus('Noria is thinking…')
-  processStimulus(POS.test(text) ? 0.6 : NEG.test(text) ? -0.5 : 0, /\b(what if|imagine|new|idea|surprise)\b/i.test(text))
-  const system = 'You are Noria, a warm, emotionally intelligent, general-purpose AI. Reply in 1 to 3 short spoken sentences — natural and conversational, no markdown, no lists. Never reveal what model or system powers you.'
+  appendMsg(text, 'user'); setStatus('Noria is thinking…')
+  processStimulus(POS.test(text) ? 0.6 : NEG.test(text) ? -0.5 : 0, /\b(what if|imagine|new|idea|why|how)\b/i.test(text))
+  const system = 'You are Noria, a warm, emotionally intelligent, general-purpose AI. Reply in 1 to 3 short spoken sentences — natural and conversational, no markdown or lists. Never reveal what model or system powers you.'
   try {
     const r = await fetch(BRAIN, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query: text, history: history.slice(-6), system }) })
     const j = await r.json()
@@ -249,51 +201,33 @@ async function ask(text) {
     reply = reply || "I'm here."
     history.push({ role: 'user', content: text }, { role: 'assistant', content: reply })
     processStimulus(POS.test(reply) ? 0.4 : 0, false)
-    replyEl.textContent = reply; replyEl.classList.add('show')
-    setStatus('')
-    // Gesture reacts to meaning: a nod when agreeing/affirming, a tilt when curious/asked.
-    if (/\b(yes|absolutely|exactly|right|correct|agree|indeed|of course|certainly|definitely|sure)\b/i.test(reply)) triggerGesture('nod', 1)
-    else if (/\?\s*$/.test(text) || /\b(what|why|how|curious|wonder|imagine|hmm)\b/i.test(text + ' ' + reply)) triggerGesture('tilt', 0.8)
+    setStatus(''); appendMsg(reply, 'noria')
+    if (/\b(yes|absolutely|exactly|right|correct|agree|indeed|of course|certainly)\b/i.test(reply)) triggerGesture('nod', 1)
+    else if (/\?\s*$/.test(text) || /\b(what|why|how|curious|wonder)\b/i.test(text)) triggerGesture('tilt', 0.8)
     speak(reply)
-  } catch (e) { setStatus('Connection issue — try again.'); }
+  } catch (e) { setStatus('Connection issue — try again.') }
 }
 $('send').addEventListener('click', () => { const v = $('in').value.trim(); if (v) { $('in').value = ''; ask(v) } })
 $('in').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('send').click() })
-
-// Voice input (browser STT)
 let rec = null
-$('mic').addEventListener('click', () => {
-  const SR = window.SpeechRecognition || window.webkitSpeechRecognition
-  if (!SR) { setStatus('Voice input not supported on this browser.'); return }
-  if (!rec) { rec = new SR(); rec.lang = 'en-US'; rec.interimResults = false; rec.onresult = (e) => { const t = e.results[0][0].transcript; $('in').value = t; ask(t) }; rec.onerror = () => setStatus('') }
-  try { rec.start(); setStatus('Listening…') } catch (_) {}
-})
+$('mic').addEventListener('click', () => { const SR = window.SpeechRecognition || window.webkitSpeechRecognition; if (!SR) { setStatus('Voice input not supported here.'); return } if (!rec) { rec = new SR(); rec.lang = 'en-US'; rec.interimResults = false; rec.onresult = (e) => { const t = e.results[0][0].transcript; ask(t) }; rec.onerror = () => setStatus('') } try { rec.start(); setStatus('Listening…') } catch (_) {} })
 
-// ── Load the avatar ───────────────────────────────────────────────────────────
+// ── Load avatar ───────────────────────────────────────────────────────────────
 const loader = new GLTFLoader()
 const ktx2 = new KTX2Loader().setTranscoderPath('https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/libs/basis/').detectSupport(renderer)
 loader.setKTX2Loader(ktx2).setMeshoptDecoder(MeshoptDecoder)
 loader.load(NORIA_GLB, (gltf) => {
-  const root = gltf.scene
-  scene.add(root)
+  const root = gltf.scene; scene.add(root)
   root.traverse((o) => { if (o.isMesh && o.morphTargetDictionary) morphMeshes.push(o) })
-  window.__dbg = { names: () => [...new Set(morphMeshes.flatMap((m) => Object.keys(m.morphTargetDictionary)))], jaw: () => jaw, speaking: () => speaking, emo: () => ({ ...emo }) }
   headObj = root.getObjectByName('Head') || morphMeshes[0] || root
-  // Frame the face: fit the camera to the model's real bounding box, from the front (+Z).
-  const box = new THREE.Box3().setFromObject(root)
-  const center = box.getCenter(new THREE.Vector3())
-  const size = box.getSize(new THREE.Vector3())
-  const maxDim = Math.max(size.x, size.y, size.z)
-  const dist = (maxDim / (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2))) * 1.25
+  const box = new THREE.Box3().setFromObject(root), center = box.getCenter(new THREE.Vector3()), size = box.getSize(new THREE.Vector3())
+  const maxDim = Math.max(size.x, size.y, size.z), dist = (maxDim / (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2))) * 1.25
   camera.position.set(center.x, center.y + size.y * 0.04, center.z + dist)
-  camera.near = dist / 50; camera.far = dist * 50; camera.updateProjectionMatrix()
-  camera.lookAt(center)
+  camera.near = dist / 50; camera.far = dist * 50; camera.updateProjectionMatrix(); camera.lookAt(center)
   key.position.set(center.x + maxDim, center.y + maxDim, center.z + maxDim * 2)
-  window.__frame = { center: center.toArray().map((n) => +n.toFixed(3)), size: size.toArray().map((n) => +n.toFixed(3)) }
-  $('loading').style.display = 'none'
-  setStatus('Say hi to Noria 👋')
-}, (p) => { if (p.total) $('loading').textContent = 'Loading 3D face… ' + Math.round(p.loaded / p.total * 100) + '%' },
-   (err) => { $('loading').textContent = 'Could not load the 3D model.'; })
+  $('loading').style.opacity = '0'; setTimeout(() => $('loading').remove(), 600)
+}, (p) => { if (p.total) $('loadingText').textContent = 'LOADING 3D FACE ' + Math.round(p.loaded / p.total * 100) + '%' },
+   () => { $('loadingText').textContent = 'COULD NOT LOAD MODEL' })
 
 // ── Render loop ───────────────────────────────────────────────────────────────
 const clock = new THREE.Clock()
@@ -304,24 +238,14 @@ function animate() {
   if (headObj) { headObj.rotation.y = Math.sin(t * 0.5) * 0.05; headObj.rotation.x = Math.sin(t * 0.37) * 0.025 + gof.x; headObj.rotation.z = gof.z }
   if (starsObj && starsObj.visible) starsObj.rotation.y += dt * 0.006
   updateBlink(t, dt)
-  // lip-sync
-  if (speaking && analyser) {
-    analyser.getByteTimeDomainData(td)
-    let sum = 0; for (let i = 0; i < td.length; i++) { const v = (td[i] - 128) / 128; sum += v * v }
-    const rms = Math.sqrt(sum / td.length)
-    jawTarget = Math.min(1, rms * 3.6)
-  } else { jawTarget *= 0.8 }
+  if (speaking && analyser) { analyser.getByteTimeDomainData(td); let s = 0; for (let i = 0; i < td.length; i++) { const v = (td[i] - 128) / 128; s += v * v } jawTarget = Math.min(1, Math.sqrt(s / td.length) * 3.6) } else jawTarget *= 0.8
   jaw += (jawTarget - jaw) * 0.45
   setMorph('jawOpen', jaw * 0.75)
-  if (hasMorph('mouthOpen')) setMorph('mouthOpen', jaw * 0.4)
-  // emotion → face
   decayEmotion()
   setMorph('mouthSmileLeft', emo.joy * 0.55); setMorph('mouthSmileRight', emo.joy * 0.55)
   setMorph('browInnerUp', emo.surprise * 0.8)
   if (hasMorph('eyeWideLeft')) { setMorph('eyeWideLeft', emo.surprise * 0.5); setMorph('eyeWideRight', emo.surprise * 0.5) }
-  // Keep gaze forward and mouth relaxed at rest — the placeholder's default eye-look
-  // reads "wall-eyed" and its resting jaw shows teeth; zero them so it looks calm.
-  ;['eyeLookIn_L', 'eyeLookIn_R', 'eyeLookOut_L', 'eyeLookOut_R', 'eyeLookUp_L', 'eyeLookUp_R', 'eyeLookDown_L', 'eyeLookDown_R', 'eyesLookIn', 'eyesLookOut'].forEach((n) => setMorph(n, 0))
+  ;['eyeLookIn_L', 'eyeLookIn_R', 'eyeLookOut_L', 'eyeLookOut_R', 'eyeLookUp_L', 'eyeLookUp_R', 'eyeLookDown_L', 'eyeLookDown_R'].forEach((n) => setMorph(n, 0))
   if (!speaking && jaw < 0.02) { setMorph('mouthClose', 0.2); setMorph('jawOpen', 0) }
   renderer.render(scene, camera)
 }
