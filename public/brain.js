@@ -122,13 +122,27 @@ export class Brain {
   }
 
   // Stream an answer. Calls onToken(delta) as text arrives; resolves to full text.
-  async ask(query, { onToken = () => {}, system = '' } = {}) {
-    const res = await fetch('/brain/ask/stream', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ query, history: this.history.slice(-8), system }),
-    })
-    if (!res.ok || !res.body) throw new Error('Brain unreachable (' + res.status + ')')
+  async ask(query, { onToken = () => {}, system = '', signal = null, ground = false } = {}) {
+    // Own timeout (aborts a stalled stream) merged with any caller signal (Stop button).
+    const ac = new AbortController()
+    const to = setTimeout(() => ac.abort(), 90000)
+    if (signal) { if (signal.aborted) ac.abort(); else signal.addEventListener('abort', () => ac.abort(), { once: true }) }
+    // ground: false = the client already grounded (skip server search); 'auto' =
+    // the client did NOT ground, so let the ROUTER decide and search if the query
+    // needs live facts (a second safety-net layer so nothing current slips through).
+    const payload = { query, history: this.history.slice(-8), system }
+    if (ground === false) payload.ground = false
+    else if (ground === true) payload.ground = true // 'auto' → omit → server uses serverNeedsWeb
+    let res
+    try {
+      res = await fetch('/brain/ask/stream', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        signal: ac.signal,
+      })
+    } catch (e) { clearTimeout(to); throw new Error(ac.signal.aborted ? 'aborted' : 'Brain unreachable') }
+    if (!res.ok || !res.body) { clearTimeout(to); throw new Error('Brain unreachable (' + res.status + ')') }
     const reader = res.body.getReader()
     const dec = new TextDecoder()
     let buf = '', full = '', meta = {}
@@ -149,6 +163,7 @@ export class Brain {
         } catch (e) { if (e.message && !/JSON/.test(e.message)) throw e }
       }
     }
+    clearTimeout(to)
     this.history.push({ role: 'user', content: query }, { role: 'assistant', content: full })
     return { text: full, ...meta }
   }
@@ -157,10 +172,19 @@ export class Brain {
   // PHYSICAL HUMAN PRESENCE JSON (situation/condition/face/eyes/body/voice).
   // Falls back gracefully to plain text if the model doesn't return clean JSON.
   async ask2(query, { system = '' } = {}) {
-    const res = await fetch('/brain/ask', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ query, history: this.history.slice(-8), system }),
-    })
+    // Bounded so a stalled model shows an error instead of an endless spinner.
+    const ac = new AbortController()
+    const to = setTimeout(() => ac.abort(), 70000)
+    let res
+    try {
+      res = await fetch('/brain/ask', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        // ground:false — the workspace already injected live web + vector memory.
+        body: JSON.stringify({ query, history: this.history.slice(-8), system, ground: false }),
+        signal: ac.signal,
+      })
+    } catch (e) { clearTimeout(to); throw new Error(ac.signal.aborted ? 'Brain timed out' : 'Brain unreachable') }
+    clearTimeout(to)
     if (!res.ok) throw new Error('Brain unreachable (' + res.status + ')')
     const data = await res.json()
     const raw = data.answer ?? data.reply ?? ''
@@ -286,12 +310,19 @@ export class Brain {
   stopSpeaking() { try { window.speechSynthesis && window.speechSynthesis.cancel() } catch {} }
 
   // ── Speech in ─────────────────────────────────────────────────────────────
-  listen({ onResult = () => {}, onEnd = () => {} } = {}) {
+  // Voice input. continuous=true + a silence timer means a natural pause mid-
+  // sentence no longer ends recognition early (the old continuous=false cut the
+  // user off at the first pause, so Noria received only a fragment and seemed not
+  // to understand). We keep listening and only submit after `silenceMs` of quiet,
+  // so she gets the WHOLE sentence.
+  listen({ onResult = () => {}, onEnd = () => {}, silenceMs = 2200 } = {}) {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition
     if (!SR) { onEnd('unsupported'); return null }
     const rec = new SR()
-    rec.lang = 'en-US'; rec.interimResults = true; rec.continuous = false
-    let finalText = ''
+    rec.lang = 'en-US'; rec.interimResults = true; rec.continuous = true
+    let finalText = '', done = false, timer = null
+    const arm = () => { clearTimeout(timer); timer = setTimeout(() => { try { rec.stop() } catch {} }, silenceMs) }
+    const finish = (err) => { if (done) return; done = true; clearTimeout(timer); onEnd(finalText.trim(), err) }
     rec.onresult = (e) => {
       let interim = ''
       for (let i = e.resultIndex; i < e.results.length; i++) {
@@ -299,10 +330,12 @@ export class Brain {
         if (r.isFinal) finalText += r[0].transcript; else interim += r[0].transcript
       }
       onResult(finalText + interim, finalText)
+      arm() // restart the silence countdown every time speech arrives
     }
-    rec.onend = () => onEnd(finalText.trim())
-    rec.onerror = (e) => onEnd(finalText.trim(), e.error)
-    rec.start()
+    rec.onend = () => finish()
+    rec.onerror = (e) => finish(e.error)
+    try { rec.start() } catch (_) { finish('start') }
+    arm() // if they never speak, stop after the silence window
     return rec
   }
 }

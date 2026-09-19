@@ -1,0 +1,14 @@
+name = "noria-ai"
+main = "worker.js"
+compatibility_date = "2024-09-23"
+workers_dev = true
+
+[ai]
+binding = "AI"
+
+[triggers]
+crons = ["*/10 * * * *"]
+
+[[kv_namespaces]]
+binding = "SYNC"
+id = "e8a519e217894be2a63c014c2ad36acc"
