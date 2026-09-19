@@ -24,7 +24,7 @@ const thread = $('thread'), stream = $('stream'), input = $('input'),
       send = $('send'), stop = $('stop'), status = $('status'), empty = $('empty'),
       memCard = $('memCard')
 const DOTS = '<span class="dots"><i></i><i></i><i></i></span>'
-let busy = false, cancelled = false
+let busy = false, cancelled = false, curStream = null
 
 // Brain status → the discreet presence line
 brain.health().then((h) => {
@@ -192,17 +192,88 @@ const vt = $('voiceToggle')
 // Natural neural voice (Cloudflare MeloTTS), with the browser voice as fallback.
 const TTS_URL = 'https://noria-ai.insights-skyglobe.workers.dev/tts'
 const ttsAudio = new Audio()
+// Web Audio playback: decoding each Aura clip into a buffer and playing it through
+// one persistent AudioContext is far more reliable on mobile than swapping .src on
+// an <audio> element (where the 2nd+ .play() is often rejected → she cut off mid-
+// sentence). Same neural voice — only the playback mechanism changes.
+let audioCtx = null
+let curSrc = null
+function ensureCtx() {
+  if (audioCtx) return audioCtx
+  try { const AC = window.AudioContext || window.webkitAudioContext; if (AC) audioCtx = new AC() } catch {}
+  return audioCtx
+}
+function stopWebAudio() { try { if (curSrc) { curSrc.onended = null; curSrc.stop() } } catch {} curSrc = null }
+
+// ── Media Session + background audio ──────────────────────────────────────────
+// Register Noria's speech as an OS media session so mobile lock-screens show her as
+// playing and are less likely to freeze the audio, and keep a silent looping media
+// element alive during speech so the tab stays an "active media" tab in the
+// background. iOS Safari still aggressively suspends Web Audio on a hard screen lock
+// (a true always-on locked voice belongs to the native app), but this keeps her
+// playing across app-switches / brief backgrounding and restores instantly on unlock.
+let mediaHandlersSet = false
+let keepAlive = null // silent looping <audio> that holds the media session open
+// Build a guaranteed-valid 1s silent WAV so the keep-alive element actually plays
+// (a malformed data URI silently fails and holds nothing open).
+function silentWavUrl(seconds = 1) {
+  try {
+    const sr = 8000, n = sr * seconds, buf = new ArrayBuffer(44 + n * 2), dv = new DataView(buf)
+    const w = (o, s) => { for (let i = 0; i < s.length; i++) dv.setUint8(o + i, s.charCodeAt(i)) }
+    w(0, 'RIFF'); dv.setUint32(4, 36 + n * 2, true); w(8, 'WAVE'); w(12, 'fmt '); dv.setUint32(16, 16, true)
+    dv.setUint16(20, 1, true); dv.setUint16(22, 1, true); dv.setUint32(24, sr, true); dv.setUint32(28, sr * 2, true)
+    dv.setUint16(32, 2, true); dv.setUint16(34, 16, true); w(36, 'data'); dv.setUint32(40, n * 2, true)
+    return URL.createObjectURL(new Blob([buf], { type: 'audio/wav' })) // samples default to 0 = silence
+  } catch (_) { return '' }
+}
+function keepAliveEl() {
+  if (keepAlive) return keepAlive
+  try {
+    const u = silentWavUrl(1)
+    if (u) { keepAlive = new Audio(u); keepAlive.loop = true; keepAlive.volume = 0; keepAlive.setAttribute('playsinline', '') }
+  } catch {}
+  return keepAlive
+}
+function mediaSessionStart() {
+  try {
+    // The voice now plays through the ttsAudio media element itself, which IS the
+    // media session — no separate keep-alive (two media elements fight on mobile).
+    if (!('mediaSession' in navigator)) return
+    navigator.mediaSession.metadata = new MediaMetadata({
+      title: 'Noria', artist: 'Noria — your AI companion',
+      artwork: [{ src: location.origin + '/assets/icon-192.png?v=2', sizes: '192x192', type: 'image/png' }],
+    })
+    navigator.mediaSession.playbackState = 'playing'
+    if (!mediaHandlersSet) {
+      mediaHandlersSet = true
+      const stopH = () => { stopSpeaking() }
+      try { navigator.mediaSession.setActionHandler('pause', stopH) } catch {}
+      try { navigator.mediaSession.setActionHandler('stop', stopH) } catch {}
+      try { navigator.mediaSession.setActionHandler('play', () => { const c = ensureCtx(); if (c && c.state === 'suspended') c.resume() }) } catch {}
+    }
+  } catch {}
+}
+function mediaSessionEnd() {
+  try { if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'none' } catch {}
+}
+// When the tab returns to the foreground (unlock / app-switch back), resume the
+// context so any queued speech keeps flowing instead of staying silent.
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') { try { const c = ensureCtx(); if (c && c.state === 'suspended') c.resume() } catch {} }
+})
 let audioUnlocked = false
 function unlockAudio() {
   if (audioUnlocked) return
   audioUnlocked = true
-  // Play a silent clip inside the user gesture so later async audio can play on iOS.
+  // Resume the AudioContext inside the user gesture so later chunks play on iOS.
+  try { const c = ensureCtx(); if (c && c.state === 'suspended') c.resume() } catch {}
+  // Play a silent clip inside the user gesture so the <audio> fallback can play too.
   try { ttsAudio.src = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA='; ttsAudio.play().catch(() => {}) } catch {}
   try { const u = new SpeechSynthesisUtterance(' '); u.volume = 0; window.speechSynthesis.speak(u) } catch {}
 }
 window.addEventListener('pointerdown', unlockAudio, { once: true })
 let speakGen = 0
-function stopSpeaking() { speakGen++; try { ttsAudio.pause() } catch {} brain.stopSpeaking() }
+function stopSpeaking() { speakGen++; stopWebAudio(); try { ttsAudio.pause() } catch {} mediaSessionEnd(); brain.stopSpeaking() }
 // Split cleaned text into <=maxLen chunks at sentence/line boundaries. The trailing
 // remainder is always included (force-flush) so the last words are never dropped.
 function chunkForSpeech(t, maxLen = 1400) {
@@ -230,18 +301,50 @@ async function ttsBlob(text) {
     throw new Error('tts ' + r.status)
   }
 }
-function playBlob(blob) {
-  return new Promise((resolve, reject) => {
-    const url = URL.createObjectURL(blob)
-    ttsAudio.onended = () => { URL.revokeObjectURL(url); resolve() }
-    ttsAudio.onerror = () => { URL.revokeObjectURL(url); reject(new Error('audio')) }
-    try { ttsAudio.pause() } catch {}
-    ttsAudio.src = url
-    ttsAudio.play().catch(reject)
-  })
+// Play the <audio> MEDIA ELEMENT first: unlike Web Audio (which the OS suspends
+// when the tab/app is backgrounded), a media element keeps playing in the
+// background — so this is what lets Noria keep talking while the user multitasks.
+// It's unlocked on the first tap, so mid-sequence play() is allowed. Web Audio is
+// the fallback if the element is ever blocked. `gen` lets a newer speak/stop abort.
+async function playBlob(blob, gen) {
+  const url = URL.createObjectURL(blob)
+  try {
+    await new Promise((resolve, reject) => {
+      ttsAudio.onended = () => resolve()
+      ttsAudio.onerror = () => reject(new Error('audio'))
+      try { ttsAudio.pause() } catch {}
+      ttsAudio.src = url
+      const p = ttsAudio.play()
+      if (p && p.catch) p.catch(reject)
+    })
+    URL.revokeObjectURL(url)
+    return
+  } catch (_) {
+    URL.revokeObjectURL(url)
+  }
+  // Fallback — Web Audio (foreground only; suspends in background).
+  const ctx = ensureCtx()
+  if (ctx) {
+    try {
+      if (ctx.state === 'suspended') { try { await ctx.resume() } catch {} }
+      const buf = await ctx.decodeAudioData(await blob.arrayBuffer())
+      if (gen !== undefined && gen !== speakGen) return
+      await new Promise((resolve) => {
+        const src = ctx.createBufferSource()
+        src.buffer = buf
+        src.connect(ctx.destination)
+        src.onended = () => { if (curSrc === src) curSrc = null; resolve() }
+        curSrc = src
+        try { src.start(0) } catch (_) { resolve() }
+      })
+    } catch (_) { /* give up on this chunk */ }
+  }
 }
-// Speak the FULL text (no truncation), same neural voice, played chunk-by-chunk in
-// order with the next chunk prefetched so there are no gaps and nothing is skipped.
+// Speak the FULL text (no truncation), same neural voice. Every chunk is fetched
+// UP FRONT (pre-buffered) so, once playback starts, the whole response already
+// lives in memory — a throttled background tab / locked screen can't stall the
+// queue on the network. Chunks then play in strict order through the persistent
+// <audio> media element, which keeps running in the background.
 async function speakNeural(text) {
   const t = toSpeech(text) // strip markdown/symbols/emoji so the voice never reads them
   if (!t) return
@@ -250,18 +353,23 @@ async function speakNeural(text) {
   const chunks = chunkForSpeech(t)
   if (!chunks.length) return
   let i = 0
+  mediaSessionStart() // register her voice as an active media session (background + lock-screen)
+  // Kick off ALL chunk fetches immediately (parallel, rotated across Deepgram keys),
+  // then await them IN ORDER so playback is sequential and gapless regardless of
+  // which fetch finishes first.
+  const buffered = chunks.map((c) => ttsBlob(c))
   try {
-    let nextP = ttsBlob(chunks[0])
     for (; i < chunks.length; i++) {
-      const blob = await nextP
+      const blob = await buffered[i]
       if (gen !== speakGen) return // a newer speak() or stopSpeaking() superseded this one
-      if (i + 1 < chunks.length) nextP = ttsBlob(chunks[i + 1]) // prefetch while this plays
-      await playBlob(blob)
+      await playBlob(blob, gen)
       if (gen !== speakGen) return
     }
   } catch (e) {
     // Never go silent: read whatever hasn't been spoken yet with the browser voice.
     if (gen === speakGen) { try { ttsAudio.pause() } catch {} brain.speak(chunks.slice(i).join(' '), {}) }
+  } finally {
+    if (gen === speakGen) mediaSessionEnd()
   }
 }
 if (vt) vt.addEventListener('click', () => {
@@ -270,23 +378,83 @@ if (vt) vt.addEventListener('click', () => {
 })
 
 // ── Voice input (mic) — speak to Noria; auto-sends, and she speaks back ────────
-let micRec = null
+// Hardened so the button can never hang in "Listening…": a `listening` flag plus a
+// watchdog that force-resets the UI if the browser's recognizer ever gets stuck
+// (mic busy, permission pending, or onend never firing after a start error).
+let micRec = null, listening = false, micWatch = null
 const micBtn = $('micBtn')
 function setRec(on) { if (micBtn) micBtn.classList.toggle('rec', on) }
-micBtn && micBtn.addEventListener('click', () => {
-  if (micRec) { try { micRec.stop() } catch {} micRec = null; return }
+function endMic() {
+  listening = false; micRec = null
+  clearTimeout(micWatch); micWatch = null
+  setRec(false); input.placeholder = 'Ask Noria anything…'
+}
+function bumpMicWatch() {
+  clearTimeout(micWatch)
+  // No speech recognised within 12s → assume a stuck recognizer and reset the UI.
+  micWatch = setTimeout(() => { try { micRec && micRec.stop() } catch {} endMic() }, 12000)
+}
+// Older tap-to-talk path — now only the fallback for browsers that can't do hands-free voice mode.
+function legacyMic() {
+  if (listening) { try { micRec && micRec.stop() } catch {} endMic(); return } // tap again = stop
+  try {
+    unlockAudio(); stopSpeaking()
+    if (!voiceOn) { voiceOn = true; if (vt) { vt.classList.add('on'); vt.title = 'Voice on' } } // talk → she talks back
+    listening = true; setRec(true); input.value = ''; input.placeholder = 'Listening…'; bumpMicWatch()
+    let done = false
+    const rec = brain.listen({
+      onResult: (text) => { input.value = text; grow(); bumpMicWatch() },
+      onEnd: (finalText) => {
+        if (done) return; done = true
+        endMic()
+        if (finalText && finalText.trim()) respond(finalText)
+      },
+    })
+    if (!listening) { try { rec && rec.stop() } catch {} return } // onEnd already fired synchronously
+    micRec = rec
+    if (!rec) { endMic(); note('Voice input needs Chrome or Edge — you can type instead.') }
+  } catch (e) { endMic(); note('Could not start the microphone. Check the mic permission, or type instead.') }
+}
+
+// ── Hands-free voice mode — one tap in, then she listens, answers, listens again ─
+// The ears (voice-activity detection + Whisper) live in brain.converse(); this is just the calm
+// full-screen state around it. She never hears herself: the mic is muted while she talks.
+const vmEl = $('vmode'), vmOrb = $('vmOrb'), vmState = $('vmState'), vmCap = $('vmCaption')
+let vmCtl = null, speechDone = null
+const VM_TEXT = { starting: 'Starting…', listening: 'Listening…', hearing: 'Hearing you…', thinking: 'Thinking…', speaking: 'Speaking · tap to interrupt' }
+function vmClose() { if (vmEl) vmEl.hidden = true; if (vmOrb) vmOrb.style.removeProperty('--lvl'); if (micBtn) micBtn.classList.remove('rec') }
+function endVoiceMode() { if (vmCtl) { try { vmCtl.stop() } catch {} } }
+function startVoiceMode() {
   unlockAudio(); stopSpeaking()
   if (!voiceOn) { voiceOn = true; if (vt) { vt.classList.add('on'); vt.title = 'Voice on' } } // talk → she talks back
-  setRec(true); input.value = ''; input.placeholder = 'Listening…'
-  micRec = brain.listen({
-    onResult: (text) => { input.value = text; grow() },
-    onEnd: (finalText) => {
-      setRec(false); micRec = null; input.placeholder = 'Ask Noria anything…'
-      if (finalText && finalText.trim()) respond(finalText)
+  if (vmCap) vmCap.textContent = ''
+  const ctl = brain.converse({
+    onState: (s) => { if (vmEl) vmEl.dataset.state = s; if (vmState) vmState.textContent = VM_TEXT[s] || '' },
+    onLevel: (l) => { if (vmOrb) vmOrb.style.setProperty('--lvl', l.toFixed(2)) },
+    onHeard: (t) => { if (vmCap) vmCap.textContent = t },
+    onUtterance: async (t, c) => {
+      speechDone = null
+      // In a live voice conversation she answers the way people talk: short and natural, which is also
+      // much faster to hear. (Ask for detail and she gives it.)
+      await respond(t, { system: 'You are in a live spoken conversation. Answer in one to three short, natural sentences (about 40 words at most), the way a person talks. No lists, no headings, no markdown. Only go longer if the user explicitly asks for detail or a full explanation.' }) // shows your words + her answer in the chat
+      if (speechDone) { c.mark('speaking'); await speechDone } // wait until she has finished talking
+    },
+    onEnd: (why) => {
+      vmCtl = null; vmClose()
+      if (why === 'unsupported' || why === 'stt-failed') { legacyMic(); return } // fall back to the older tap-to-talk
+      if (why === 'denied') note('Microphone is blocked. Allow it in your browser settings to talk to Noria — or type instead.')
     },
   })
-  if (!micRec) { setRec(false); input.placeholder = 'Ask Noria anything…'; note('Voice input needs Chrome or Edge — you can type instead.') }
-})
+  if (!ctl) { legacyMic(); return }
+  vmCtl = ctl
+  if (vmEl) { vmEl.dataset.state = 'starting'; vmEl.hidden = false }
+  if (vmState) vmState.textContent = VM_TEXT.starting
+  if (micBtn) micBtn.classList.add('rec')
+}
+micBtn && micBtn.addEventListener('click', () => { if (vmCtl) endVoiceMode(); else startVoiceMode() })
+$('vmEnd') && $('vmEnd').addEventListener('click', endVoiceMode)
+vmOrb && vmOrb.addEventListener('click', () => { if (vmCtl && vmCtl.state === 'speaking') stopSpeaking() }) // interrupt her
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && vmCtl) endVoiceMode() })
 
 // ── Composer ──────────────────────────────────────────────────────────────────
 function syncSend() { send.disabled = busy || (!input.value.trim() && attachments.length === 0) }
@@ -297,7 +465,7 @@ input.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); respond(input.value) }
 })
 send.addEventListener('click', () => respond(input.value))
-stop.addEventListener('click', () => { cancelled = true; stopSpeaking() })
+stop.addEventListener('click', () => { cancelled = true; try { curStream && curStream.abort() } catch {} stopSpeaking() })
 
 // ── Real file upload: text/code direct, PDF via pdf.js, photos via on-device OCR ─
 const fileInput = $('file'), attachTray = $('attach')
@@ -477,12 +645,17 @@ async function respond(q, opts = {}) {
   if (webQuery && atts.length === 0) {
     status.innerHTML = DOTS + ' Searching the web'
     try {
-      const r = await fetch('/search?q=' + encodeURIComponent(webQuery.slice(0, 300)))
+      // Bounded: a slow/stalled search must never hang the whole reply — after 7s
+      // we give up on grounding and answer from knowledge instead of spinning.
+      const ac = new AbortController()
+      const to = setTimeout(() => ac.abort(), 7000)
+      const r = await fetch('/search?q=' + encodeURIComponent(webQuery.slice(0, 300)), { signal: ac.signal })
+      clearTimeout(to)
       const j = await r.json()
       sources = (j.results || []).slice(0, 5)
-      if (sources.length) webBlock = '\n\n[LIVE WEB RESULTS — today is ' + new Date().toDateString() +
-        '. Base your answer on these current facts and do not contradict them. Use them to avoid recommending anything retired or outdated. If they do not clearly answer the question, say what you found and that you are not certain, rather than guessing. Do not invent details beyond these results.]\n' +
-        sources.map((s, i) => `(${i + 1}) ${s.title}: ${s.snippet.slice(0, 220)} — ${s.url}`).join('\n')
+      if (sources.length) webBlock = '\n\n[LIVE WEB RESULTS — retrieved ' + new Date().toDateString() +
+        ' (this is TODAY). Treat these as current, authoritative fact and prefer them over your training when they disagree. Anything described here in the past tense HAS ALREADY HAPPENED as of today — never say an event "has not happened yet" or that you are "not sure" of an outcome the results state. CRITICAL: when asked for the latest/current/most recent state of something, answer from the MOST RECENTLY DATED item here and state its date — never present an older item as the current situation when a newer one exists; if results conflict, the newest date wins. Synthesize STRICTLY from these facts: if they are thin, conflicting, or do not contain the exact answer, say plainly "I\'m not certain based on current live data" rather than extrapolating or inventing anything.]\n' +
+        sources.map((s, i) => `(${i + 1}) ${s.title}: ${(s.snippet || '').slice(0, 320)} — ${s.url}`).join('\n')
     } catch {}
   }
 
@@ -502,35 +675,56 @@ async function respond(q, opts = {}) {
 
   try {
     const kb = retrieveKnowledge(q)
-    const system = noriaSystem() + memoryContext(mem) +
+    const systemCommon = memoryContext(mem) +
       (kb ? `\n\n[BACKGROUND KNOWLEDGE — vetted reference notes. Prefer these where they apply, and follow all safety rules]\n${kb}` : '') +
       DOC_QUALITY + RICH_OUTPUT +
       (opts.system ? '\n\n' + opts.system : '') +
       memBlock + attBlock + webBlock
-    const { display, spoken, controls } = await brain.ask2(q, { system })
-    // Any document — whether from a guide chip or typed in chat — must come out
-    // finished: strip placeholder scaffolding from any document-like answer.
-    const isDocLike = display && (/^#{1,3}\s/m.test(display) || /^\s*\|.*\|\s*$/m.test(display) || /\[[^\]\n]{1,80}\]|\((?:insert|add|list|your |e\.g\.)/i.test(display))
-    const dsp = ((opts.doc || isDocLike) && display) ? cleanDocText(display) : display
+
     started = true; clearTimers()
     if (cancelled) { finish(); return }
-    // Short entry pause, then reveal the finished answer (never fake typing).
     await new Promise((r) => setTimeout(r, plan.delivery.firstBeatDelayMs || 200))
     const el = addNoria()
-    await reveal(el, dsp || spoken || "I'm here.")
-    renderMd(el, dsp || spoken || "I'm here.")
+
+    // Stream the visible answer word-by-word (like Gemini). Plain-markdown output so
+    // tokens can appear live; renderMd formats it fully once the stream completes.
+    let acc = '', raf = 0
+    const paint = () => { raf = 0; el.textContent = acc; scrollDown() }
+    curStream = new AbortController()
+    try {
+      await brain.ask(q, {
+        system: noriaSystem({ json: false }) + systemCommon,
+        signal: curStream.signal,
+        // If the client already grounded (webBlock present), skip a server search;
+        // otherwise let the router decide — a second layer so live facts aren't missed.
+        ground: webBlock ? false : 'auto',
+        onToken: (d) => { if (cancelled) return; acc += d; if (!raf) raf = requestAnimationFrame(paint) },
+      })
+    } catch (streamErr) {
+      // A stream failure must never lose the answer: fall back to the structured path.
+      if (!acc.trim() && !cancelled) {
+        try { const r = await brain.ask2(q, { system: noriaSystem() + systemCommon }); acc = r.display || r.spoken || '' } catch (_) {}
+      }
+    } finally { curStream = null }
+    if (raf) { cancelAnimationFrame(raf); raf = 0 }
+    if (cancelled) { if (!acc.trim()) el.closest('.msg').remove(); else renderMd(el, acc); finish(); return }
+
+    // Any document — guide chip or typed in chat — must come out finished: strip any
+    // placeholder scaffolding from a document-like answer.
+    let display = acc || "I'm here."
+    const isDocLike = display && (/^#{1,3}\s/m.test(display) || /^\s*\|.*\|\s*$/m.test(display) || /\[[^\]\n]{1,80}\]|\((?:insert|add|list|your |e\.g\.)/i.test(display))
+    const dsp = ((opts.doc || isDocLike) && display) ? cleanDocText(display) : display
+    renderMd(el, dsp)
     // If the user asked to see a chart and Noria answered with a data table,
     // draw the chart from that table (deterministic — no reliance on the model).
     if (/\b(chart|graph|plot|bar chart|pie chart|line chart|visuali[sz]e)\b/i.test(q)) maybeChartFromTable(el, q)
     addFeedback(el.closest('.msg'), q, dsp)
     if (sources.length) addSources(el.closest('.msg'), sources)
-    convoRecord({ role: 'noria', text: dsp || spoken || "I'm here.", sources: sources.map((s) => ({ url: s.url })) })
+    convoRecord({ role: 'noria', text: dsp, sources: sources.map((s) => ({ url: s.url })) })
     if (!opts.doc && !/\?\s*$/.test(shown)) SMem.add(shown) // remember the user's statements (not questions); device-only, fire-and-forget
-    if (controls && controls.memory) applyMemoryUpdate(mem, controls.memory)
     const sug = presence.suggestMemory(q)
     if (sug) suggestMemory(sug.value)
-    const say = spoken || dsp
-    if (voiceOn && say) speakNeural(say)
+    if (voiceOn && dsp) speechDone = speakNeural(dsp) // speakNeural strips markdown/symbols internally
     savePresence()
   } catch (e) {
     started = true; clearTimers()
@@ -614,6 +808,8 @@ function needsWeb(q) {
   if (/\b(who is|who are|who was|who won|who's|whos|when is|when was|when does|when did|where is|where was|how many|how much (is|are|was|does|do)|what happened|latest on|population of|capital of|founded|founder of|ceo of|president of|prime minister of|born|died|record for|according to|statistics|how old|how tall|how far|distance (from|between))\b/.test(s)) return true
   // Fact-checks / verification → always confirm against real sources.
   if (/\b(is it true|is that true|is this true|is .+ real|fact.?check|fact check|verify|confirm (that|whether)|did .+ really|really (happen|happened|die|died|say|said)|true or false|how accurate)\b/.test(s)) return true
+  // Common "what's going on with X" phrasings → ground them.
+  if (/\b(what'?s (new|happening|going on|the latest)|any news|tell me (the latest|about the (latest|newest|current))|how is .+ (doing|going|performing)|what did .+ (say|announce|release|launch))\b/.test(s)) return true
   return false
 }
 function addSources(msg, sources) {
@@ -924,6 +1120,13 @@ function renderConvos(filter) {
 searchEl && searchEl.addEventListener('input', () => renderConvos())
 $('newSide') && $('newSide').addEventListener('click', newConversation)
 $('newTop') && $('newTop').addEventListener('click', newConversation)
+// Phone "more" menu (holds New conversation + View in 3D so the top bar never overflows)
+const moreBtn = $('moreBtn'), moreMenu = $('moreMenu')
+function setMore(open) { if (!moreMenu || !moreBtn) return; moreMenu.classList.toggle('open', open); moreBtn.setAttribute('aria-expanded', String(open)) }
+moreBtn && moreBtn.addEventListener('click', (e) => { e.stopPropagation(); setMore(!moreMenu.classList.contains('open')) })
+$('moreNew') && $('moreNew').addEventListener('click', () => { setMore(false); newConversation() })
+document.addEventListener('click', (e) => { if (moreMenu && moreMenu.classList.contains('open') && !moreMenu.contains(e.target)) setMore(false) })
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') setMore(false) })
 $('forget') && $('forget').addEventListener('click', () => {
   forgetMemory(); if (memCard) memCard.innerHTML = '<div class="memitem" style="color:var(--muted)">Memory cleared for this device.</div>'
   const s = document.getElementById('sugg'); if (s) s.remove()

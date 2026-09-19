@@ -1,0 +1,234 @@
+/**
+ * Noria AI Worker — the Body's vision + image-generation capability, powered by
+ * Cloudflare Workers AI (free tier). Uses the account's AI binding, so there is
+ * NO API key or secret to store anywhere. CORS-open so the Noria app can call it.
+ * The Noria Engine is never involved — this is a separate Body capability.
+ */
+const CORS = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'POST, GET, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type',
+}
+
+export default {
+  async fetch(request, env) {
+    if (request.method === 'OPTIONS') return new Response(null, { headers: CORS })
+    const url = new URL(request.url)
+    try {
+      // See a photo: raw image bytes in the body, question in ?prompt=
+      if (url.pathname === '/vision' && request.method === 'POST') {
+        const prompt = url.searchParams.get('prompt') ||
+          'Describe this image in detail: any visible text (read it exactly), objects, people, setting, colors, and notable details.'
+        const buf = await request.arrayBuffer()
+        const out = await env.AI.run('@cf/llava-hf/llava-1.5-7b-hf', {
+          image: [...new Uint8Array(buf)], prompt, max_tokens: 512,
+        })
+        const text = (out && (out.description || out.response || out.text)) || ''
+        return json({ text })
+      }
+      // Generate an image: ?prompt=... → PNG bytes
+      if (url.pathname === '/image' && (request.method === 'POST' || request.method === 'GET')) {
+        let prompt = url.searchParams.get('prompt') || ''
+        if (!prompt && request.method === 'POST') { try { prompt = (await request.json()).prompt || '' } catch {} }
+        if (!prompt) return json({ error: 'no prompt' }, 400)
+        const img = await env.AI.run('@cf/stabilityai/stable-diffusion-xl-base-1.0', { prompt })
+        return new Response(img, { headers: { ...CORS, 'Content-Type': 'image/png', 'Cache-Control': 'no-store' } })
+      }
+      // Natural neural voice — Deepgram Aura (reliable), MeloTTS fallback.
+      if (url.pathname === '/tts' && (request.method === 'POST' || request.method === 'GET')) {
+        let text = url.searchParams.get('text') || ''
+        const lang = url.searchParams.get('lang') || 'en'
+        if (!text && request.method === 'POST') { try { text = (await request.json()).text || '' } catch {} }
+        text = (text || '').trim()
+        if (!text) return json({ error: 'no text' }, 400)
+        const speaker = url.searchParams.get('speaker') || 'hera'
+        let lastErr = ''
+        const AUDIO_MP3 = { ...CORS, 'Content-Type': 'audio/mpeg', 'Cache-Control': 'no-store' }
+        // 0) Deepgram DIRECT — the SAME Aura voice, but called on the account's own
+        //    Deepgram API key ($200 free dev credit ≈ millions of characters, no card),
+        //    so it is NOT subject to Cloudflare's 10,000-neuron/day cap. Only runs when
+        //    DEEPGRAM_KEY is set; otherwise we fall through to the Cloudflare path below.
+        // Multiple keys rotate for RESILIENCE (a revoked/rate-limited key falls
+        // through to the next). NOTE: keys under one Deepgram account share the same
+        // credit pool — rotation adds robustness, not extra free quota.
+        const dgKeys = String(env.DEEPGRAM_KEY || '').split(',').map((s) => s.trim()).filter(Boolean)
+        if (dgKeys.length) {
+          const model = env.DEEPGRAM_MODEL || (speaker === 'orion' ? 'aura-orion-en' : 'aura-hera-en')
+          const start = Math.floor(Math.random() * dgKeys.length) // spread load across keys
+          for (let n = 0; n < dgKeys.length; n++) {
+            const key = dgKeys[(start + n) % dgKeys.length]
+            try {
+              const dg = await fetch('https://api.deepgram.com/v1/speak?model=' + model + '&encoding=mp3', {
+                method: 'POST',
+                headers: { 'Authorization': 'Token ' + key, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ text: text.slice(0, 1900) }),
+              })
+              if (dg.ok && dg.body) return new Response(dg.body, { headers: AUDIO_MP3 })
+              lastErr = 'deepgram: ' + dg.status + ' ' + (await dg.text().catch(() => '')).slice(0, 140)
+            } catch (e) { lastErr = 'deepgram: ' + (e && e.message ? e.message : String(e)) }
+          }
+        }
+        // 1) Deepgram Aura via Cloudflare Workers AI (falls back here if no direct key).
+        //    env.AI.run returns the audio as a ReadableStream directly, so stream it back.
+        try {
+          const aura = await env.AI.run('@cf/deepgram/aura-1', { text: text.slice(0, 1800), speaker })
+          const AUDIO = { ...CORS, 'Content-Type': 'audio/mpeg', 'Cache-Control': 'no-store' }
+          if (aura instanceof ReadableStream) return new Response(aura, { headers: AUDIO })
+          if (aura && aura.body) return new Response(aura.body, { headers: AUDIO })
+          if (aura && aura.audio) { const by = Uint8Array.from(atob(aura.audio), (c) => c.charCodeAt(0)); return new Response(by, { headers: AUDIO }) }
+        } catch (e) { lastErr = 'aura: ' + (e && e.message ? e.message : String(e)) }
+        // 2) Fall back to MeloTTS (retry its transient 3043 errors).
+        const input = { prompt: text.slice(0, 900) }
+        if (lang) input.lang = lang
+        let out = null
+        for (let i = 0; i < 4; i++) {
+          try { out = await env.AI.run('@cf/myshell-ai/melotts', input); if (out && out.audio) break }
+          catch (e) { lastErr = 'melo: ' + (e && e.message ? e.message : String(e)) }
+          await new Promise((r) => setTimeout(r, 300))
+        }
+        const b64 = (out && out.audio) || ''
+        if (!b64) return json({ error: 'tts failed: ' + (lastErr || 'no audio') }, 502)
+        const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0))
+        const isWav = bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46
+        return new Response(bytes, { headers: { ...CORS, 'Content-Type': isWav ? 'audio/wav' : 'audio/mpeg', 'Cache-Control': 'no-store' } })
+      }
+      // Voice in (fallback provider): raw audio bytes → Whisper on Workers AI (free binding).
+      if (url.pathname === '/stt' && request.method === 'POST') {
+        const buf = await request.arrayBuffer()
+        if (!buf.byteLength) return json({ error: 'no audio' }, 400)
+        if (buf.byteLength > 4 * 1024 * 1024) return json({ error: 'audio too large' }, 413)
+        const out = await env.AI.run('@cf/openai/whisper-large-v3-turbo', { audio: bytesToBase64(buf) })
+        return json({ text: String((out && out.text) || '').trim() })
+      }
+      // ── Noria accounts: email + one-time code (Noria's own identity, no SkyGlobe ID) ──
+      if (url.pathname === '/auth/request' && request.method === 'POST') {
+        let b; try { b = await request.json() } catch { return json({ error: 'bad request' }, 400) }
+        const email = (b.email || '').trim().toLowerCase()
+        if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return json({ error: 'Please enter a valid email.' }, 400)
+        const eh = await sha256('noria-user:' + email)
+        if (await env.SYNC.get('rl:' + eh)) return json({ error: 'Please wait a few seconds before requesting another code.' }, 429)
+        const code = String(Math.floor(100000 + Math.random() * 900000))
+        await env.SYNC.put('code:' + eh, JSON.stringify({ code, tries: 0 }), { expirationTtl: 600 })
+        await env.SYNC.put('rl:' + eh, '1', { expirationTtl: 60 })
+        const sent = await sendLoginEmail(env, email, code)
+        return json({ ok: true, sent, ...(sent ? {} : { devCode: code }) }) // devCode only in test mode (no email provider yet)
+      }
+      if (url.pathname === '/auth/verify' && request.method === 'POST') {
+        let b; try { b = await request.json() } catch { return json({ error: 'bad request' }, 400) }
+        const email = (b.email || '').trim().toLowerCase(), code = (b.code || '').trim()
+        const eh = await sha256('noria-user:' + email)
+        const rec = await env.SYNC.get('code:' + eh)
+        if (!rec) return json({ error: 'That code expired — request a new one.' }, 400)
+        const c = JSON.parse(rec)
+        if (c.tries >= 5) { await env.SYNC.delete('code:' + eh); return json({ error: 'Too many attempts — request a new code.' }, 400) }
+        if (c.code !== code) { c.tries++; await env.SYNC.put('code:' + eh, JSON.stringify(c), { expirationTtl: 600 }); return json({ error: 'Incorrect code.' }, 400) }
+        await env.SYNC.delete('code:' + eh)
+        const tok = [...crypto.getRandomValues(new Uint8Array(24))].map((x) => x.toString(16).padStart(2, '0')).join('')
+        await env.SYNC.put('sess:' + tok, JSON.stringify({ email, eh }), { expirationTtl: 60 * 60 * 24 * 60 })
+        let ur = await env.SYNC.get('user:' + eh)
+        if (!ur) { ur = JSON.stringify({ email, pro: false, created: Date.now() }); await env.SYNC.put('user:' + eh, ur) }
+        return json({ ok: true, token: tok, email, pro: !!JSON.parse(ur).pro })
+      }
+      if (url.pathname === '/auth/me') {
+        const t = url.searchParams.get('token') || ''
+        const s = t && await env.SYNC.get('sess:' + t)
+        if (!s) return json({ signedIn: false })
+        const { email, eh } = JSON.parse(s)
+        const ur = JSON.parse((await env.SYNC.get('user:' + eh)) || '{"pro":false}')
+        return json({ signedIn: true, email, pro: !!ur.pro })
+      }
+      if (url.pathname === '/auth/logout' && request.method === 'POST') {
+        let b; try { b = await request.json() } catch { b = {} }
+        if (b.token) await env.SYNC.delete('sess:' + b.token)
+        return json({ ok: true })
+      }
+
+      // Zero-knowledge sync: client derives `key` from its passphrase and encrypts
+      // the data itself. We only store an opaque encrypted blob under that key.
+      if (url.pathname === '/sync/get' && request.method === 'GET') {
+        const key = (url.searchParams.get('key') || '').trim()
+        if (!/^[a-f0-9]{64}$/.test(key)) return json({ error: 'bad key' }, 400)
+        const v = await env.SYNC.get('u:' + key)
+        return v ? new Response(v, { headers: { ...CORS, 'Content-Type': 'application/json' } }) : json({ found: false })
+      }
+      if (url.pathname === '/sync/put' && request.method === 'POST') {
+        let body; try { body = await request.json() } catch { return json({ error: 'bad body' }, 400) }
+        const key = (body.key || '').trim()
+        if (!/^[a-f0-9]{64}$/.test(key)) return json({ error: 'bad key' }, 400)
+        if (typeof body.blob !== 'string' || body.blob.length > 6000000) return json({ error: 'bad blob' }, 400)
+        await env.SYNC.put('u:' + key, JSON.stringify({ blob: body.blob, iv: body.iv || '', salt: body.salt || '', ts: Date.now(), v: 1 }))
+        return json({ ok: true })
+      }
+      // Noria Pro license check — stateless HMAC-signed codes (no database).
+      if (url.pathname === '/pro/check') {
+        const code = (url.searchParams.get('code') || '').trim().toUpperCase()
+        return json({ pro: await validCode(code, env.PRO_KEY) })
+      }
+      return new Response('Noria AI capability worker', { headers: CORS })
+    } catch (e) {
+      return json({ error: e && e.message ? e.message : String(e) }, 500)
+    }
+  },
+  // Keep-warm: ping the Noria Body every 10 min so Render's free tier never
+  // cold-starts (which is what made replies slow after idle).
+  async scheduled(event, env, ctx) {
+    ctx.waitUntil(fetch('https://noria-body.onrender.com/brain/health').catch(() => {}))
+  },
+}
+
+function bytesToBase64(buf) {
+  const b = new Uint8Array(buf); let s = ''
+  for (let i = 0; i < b.length; i += 0x8000) s += String.fromCharCode.apply(null, b.subarray(i, i + 0x8000))
+  return btoa(s)
+}
+
+function json(obj, status = 200) {
+  return new Response(JSON.stringify(obj), { status, headers: { ...CORS, 'Content-Type': 'application/json' } })
+}
+
+// Stateless Noria Pro codes: NORIA-<BODY>-<6-char HMAC prefix>. Valid iff the
+// prefix matches HMAC-SHA256(PRO_KEY, "NORIA-<BODY>"). Generate offline with the
+// same key; validate here without any database.
+async function sha256(s) {
+  const b = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s))
+  return [...new Uint8Array(b)].map((x) => x.toString(16).padStart(2, '0')).join('')
+}
+// Sends the Noria sign-in code via the configured email provider (Resend or Brevo).
+// Returns false when no provider is configured yet (test mode → code returned in the API).
+async function sendLoginEmail(env, to, code) {
+  const from = env.MAIL_FROM || 'Noria <noria@skyglobegroup.com>'
+  const subject = 'Your Noria sign-in code'
+  const text = `Your Noria sign-in code is ${code}. It expires in 10 minutes. If you didn't request this, ignore this email.`
+  const html = `<div style="font-family:-apple-system,Segoe UI,Roboto,sans-serif;max-width:440px;margin:0 auto;padding:24px;color:#1A1712">
+    <div style="font-weight:700;font-size:20px;margin-bottom:14px">✦ Noria</div>
+    <p style="margin:0 0 8px;color:#7A7264">Your sign-in code:</p>
+    <div style="font-size:30px;font-weight:800;letter-spacing:6px;color:#0B1F3A">${code}</div>
+    <p style="margin:16px 0 0;color:#A79E8D;font-size:13px">It expires in 10 minutes. If you didn't request this, you can ignore this email.</p>
+  </div>`
+  try {
+    if (env.RESEND_KEY) {
+      const r = await fetch('https://api.resend.com/emails', { method: 'POST', headers: { Authorization: 'Bearer ' + env.RESEND_KEY, 'Content-Type': 'application/json' }, body: JSON.stringify({ from, to, subject, text, html }) })
+      return r.ok
+    }
+    if (env.BREVO_KEY) {
+      const m = from.match(/^(.*)<(.+)>$/)
+      const sender = m ? { name: m[1].trim() || 'Noria', email: m[2].trim() } : { name: 'Noria', email: from }
+      const r = await fetch('https://api.brevo.com/v3/smtp/email', { method: 'POST', headers: { 'api-key': env.BREVO_KEY, 'Content-Type': 'application/json' }, body: JSON.stringify({ sender, to: [{ email: to }], subject, textContent: text, htmlContent: html }) })
+      return r.ok
+    }
+  } catch {}
+  return false
+}
+async function hmacHex(key, msg) {
+  const enc = new TextEncoder()
+  const k = await crypto.subtle.importKey('raw', enc.encode(key), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign'])
+  const sig = await crypto.subtle.sign('HMAC', k, enc.encode(msg))
+  return [...new Uint8Array(sig)].map((b) => b.toString(16).padStart(2, '0')).join('')
+}
+async function validCode(code, key) {
+  if (!key) return false
+  const m = code.match(/^NORIA-([A-Z0-9]{4,16})-([A-F0-9]{6})$/)
+  if (!m) return false
+  const sig = await hmacHex(key, 'NORIA-' + m[1])
+  return sig.slice(0, 6).toUpperCase() === m[2]
+}

@@ -32,17 +32,44 @@
   .inbar input:focus{border-color:var(--accent)}
   .inbar button{flex:none;border:0;border-radius:10px;cursor:pointer;font:inherit;font-weight:700;color:#000;background:var(--accent);width:44px;display:inline-flex;align-items:center;justify-content:center}
   .inbar button.ghost{background:rgba(255,255,255,.08);color:#cfd3da}
+  .inbar button.ghost.live{background:var(--accent);color:#000;animation:livePulse 1.8s ease-in-out infinite}
+  @keyframes livePulse{0%,100%{box-shadow:0 0 0 0 rgba(212,175,55,.45)}50%{box-shadow:0 0 0 9px rgba(212,175,55,0)}}
   .inbar button svg{width:18px;height:18px}
   .status{font-size:12px;color:var(--text-2);min-height:15px;padding:0 4px}
   #loading{position:fixed;inset:0;z-index:10;background:#050508;display:flex;flex-direction:column;align-items:center;justify-content:center;transition:opacity .6s}
   .spin{width:46px;height:46px;border:3px solid rgba(212,175,55,.12);border-top-color:var(--accent);border-radius:50%;animation:spin 1s linear infinite;margin-bottom:16px}
   @keyframes spin{to{transform:rotate(360deg)}}
-  #loading .t{font-size:13px;letter-spacing:2px;color:var(--accent);font-weight:600}
-  @media (max-width:520px){ .brand{font-size:12px} .chat{width:100%;max-height:40vh} }
+  #loading .t{font-size:13px;letter-spacing:4px;color:var(--accent);font-weight:600}
+  .lstar{margin-bottom:16px;animation:lbreathe 1.8s ease-in-out infinite}
+  @keyframes lbreathe{0%,100%{opacity:.55;transform:scale(.94)}50%{opacity:1;transform:scale(1.04)}}
+  /* Focus toggle (top bar) — hide/show the chat so her face has full breathing room */
+  .focusbtn{display:none;align-items:center;gap:6px;background:var(--panel);border:1px solid rgba(212,175,55,.2);color:var(--text);cursor:pointer;font-size:12.5px;font-weight:600;padding:7px 12px;border-radius:20px;backdrop-filter:blur(12px)}
+  .focusbtn svg{width:15px;height:15px}
+  /* Bottom-sheet grab handle (mobile only) */
+  .sheet-handle{display:none}
+  @media (max-width:768px){
+    .ui{padding:12px}
+    .focusbtn{display:inline-flex}
+    header{gap:8px}
+    .brand{font-size:11px;order:3;width:100%}
+    .env button{padding:6px 10px;font-size:11.5px}
+    .bottom{gap:0}
+    /* Chat becomes a semi-transparent floating bottom sheet */
+    .chat{width:100%;max-height:44vh;max-height:44dvh;border-radius:20px 20px 0 0;background:rgba(10,10,16,.72)}
+    .sheet-handle{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;width:100%;padding:8px 0 4px;background:transparent;border:0;cursor:pointer;color:var(--text-2)}
+    .sheet-handle .grip{width:40px;height:4px;border-radius:2px;background:rgba(255,255,255,.28)}
+    .sheet-handle .lbl{font-size:10.5px;letter-spacing:.5px;text-transform:uppercase;opacity:.7}
+    /* Collapsed: only the handle + input remain, face fully visible */
+    .chat.min .history,.chat.min .status{display:none}
+    .chat.min .sheet-handle .lbl::after{content:'Show chat'}
+    .chat:not(.min) .sheet-handle .lbl::after{content:'Hide chat'}
+    /* Focus mode: hide the whole chat sheet */
+    body.focus .bottom{display:none}
+  }
 </style>
 </head>
 <body>
-<div id="loading"><div class="spin"></div><div class="t" id="loadingText">INITIALIZING NORIA ENGINE</div></div>
+<div id="loading"><svg class="lstar" width="46" height="46" viewBox="0 0 24 24" aria-hidden="true"><defs><linearGradient id="lg" x1="3" y1="21" x2="21" y2="3" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#1f6ff0"/><stop offset=".5" stop-color="#7d5ccf"/><stop offset="1" stop-color="#f5920b"/></linearGradient></defs><path fill="url(#lg)" d="M12 0c.7 6.3 5.7 11.3 12 12-6.3.7-11.3 5.7-12 12-.7-6.3-5.7-11.3-12-12C6.3 11.3 11.3 6.3 12 0Z"/></svg><div class="t" id="loadingText">NORIA</div></div>
 <div id="viewport"><canvas id="c"></canvas></div>
 
 <div class="ui">
@@ -55,10 +82,15 @@
       <button data-bg="studio" type="button">◻ Studio</button>
       <button data-bg="dark" type="button">● Dark</button>
     </div>
+    <button class="focusbtn" id="focusBtn" type="button" title="Focus mode — hide chat" aria-label="Toggle focus mode">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2"/></svg>
+      <span id="focusLbl">Focus</span>
+    </button>
   </header>
 
   <div class="bottom">
-    <div class="chat">
+    <div class="chat" id="chat">
+      <button class="sheet-handle" id="sheetToggle" type="button" aria-label="Collapse or expand chat"><span class="grip"></span><span class="lbl"></span></button>
       <div class="history" id="history">
         <div class="msg noria">I'm here. Say something, and I'll answer with my real voice.</div>
       </div>
@@ -74,8 +106,8 @@
 
 <script type="importmap">
 { "imports": {
-  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
-  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  "three": "/vendor/three/build/three.module.js",
+  "three/addons/": "/vendor/three/examples/jsm/"
 }}
 </script>
 
@@ -85,9 +117,10 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
 import { KTX2Loader } from 'three/addons/loaders/KTX2Loader.js'
 import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js'
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js'
+import { Brain } from '/brain.js' // Noria's ears: Whisper-first listening with the browser recognizer as the last fallback
 
 // ── The ONE line to make this the real Noria: point at her rigged GLB ──
-const NORIA_GLB = 'https://threejs.org/examples/models/gltf/facecap.glb' // placeholder ARKit face
+const NORIA_GLB = '/assets/facecap.glb' // placeholder ARKit face (hosted here so it loads fast from our own edge)
 const BRAIN = '/brain/ask'
 const TTS = 'https://noria-ai.insights-skyglobe.workers.dev/tts'
 const VOICE = 'hera' // Noria F; 'orion' = Noria M
@@ -110,7 +143,19 @@ const amb = new THREE.AmbientLight(0xffffff, 0.45); scene.add(amb)
 const fill = new THREE.DirectionalLight(0xffffff, 0.55); fill.position.set(0, 0.4, 3); scene.add(fill)
 const rim = new THREE.DirectionalLight(0xc9a24b, 0.75); rim.position.set(-1.2, 0.5, -1.4); scene.add(rim)
 const rim2 = new THREE.DirectionalLight(0x2f7bff, 0.0); rim2.position.set(1.3, 0.2, -1.3); scene.add(rim2)
-function resize() { camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight) }
+// Phone portrait: the head is framed in the TOP part of the screen (a fixed offset), so the chat
+// sheet below can never cover her eyes/mouth. On phones we ignore height-only resizes (browser
+// toolbars collapsing, keyboard) because re-framing on those made the head jump.
+let lastW = 0
+function resize() {
+  const w = innerWidth, h = innerHeight
+  const phone = matchMedia('(max-width:768px)').matches
+  if (phone && lastW && w === lastW) return
+  lastW = w
+  camera.aspect = w / h
+  if (phone && h > w) camera.setViewOffset(w, h, 0, Math.round(h * 0.12), w, h); else camera.clearViewOffset()
+  camera.updateProjectionMatrix(); renderer.setSize(w, h, false)
+}
 addEventListener('resize', resize); resize()
 
 // ── Backgrounds ───────────────────────────────────────────────────────────────
@@ -178,7 +223,7 @@ async function speak(text) {
     const r = await fetch(TTS + '?speaker=' + VOICE + '&text=' + encodeURIComponent(clean.slice(0, 1600)))
     if (!r.ok) throw new Error('tts ' + r.status)
     const url = URL.createObjectURL(await r.blob())
-    audioEl.src = url; speaking = true; triggerGesture('nod', 0.45)
+    audioEl.src = url; speaking = true; triggerGesture('nod', 0.45); autoCollapseForSpeech()
     audioEl.onended = () => { speaking = false; jawTarget = 0; URL.revokeObjectURL(url) }
     await audioEl.play()
   } catch (e) { speaking = false }
@@ -192,7 +237,7 @@ function appendMsg(text, who) { const h = $('history'); const d = document.creat
 async function ask(text) {
   appendMsg(text, 'user'); setStatus('Noria is thinking…')
   processStimulus(POS.test(text) ? 0.6 : NEG.test(text) ? -0.5 : 0, /\b(what if|imagine|new|idea|why|how)\b/i.test(text))
-  const system = 'You are Noria, a warm, emotionally intelligent, general-purpose AI. Reply in 1 to 3 short spoken sentences — natural and conversational, no markdown or lists. Never reveal what model or system powers you.'
+  const system = 'You are Noria — a poised, brilliant, deeply-educated and warm general-purpose intelligence, not a hedging chatbot. Reply in 1 to 3 short spoken sentences, natural and conversational, no markdown or lists. Lead with substance and quiet confidence. NEVER call yourself "just an AI" or "only a language model", never recite generic limitation-disclaimers ("as an AI I can miss context", "I don\'t have feelings", "I may make mistakes"), and never open with an apology. If a specific fact is genuinely uncertain, say so cleanly in a few words — but never blanket your answers in caveats. Never reveal what model or system powers you.'
   try {
     const r = await fetch(BRAIN, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query: text, history: history.slice(-6), system }) })
     const j = await r.json()
@@ -207,27 +252,93 @@ async function ask(text) {
     speak(reply)
   } catch (e) { setStatus('Connection issue — try again.') }
 }
-$('send').addEventListener('click', () => { const v = $('in').value.trim(); if (v) { $('in').value = ''; ask(v) } })
+$('send').addEventListener('click', () => { const v = $('in').value.trim(); if (v) { viaVoice = false; $('in').value = ''; ask(v) } })
 $('in').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('send').click() })
 let rec = null
-$('mic').addEventListener('click', () => { const SR = window.SpeechRecognition || window.webkitSpeechRecognition; if (!SR) { setStatus('Voice input not supported here.'); return } if (!rec) { rec = new SR(); rec.lang = 'en-US'; rec.interimResults = false; rec.onresult = (e) => { const t = e.results[0][0].transcript; ask(t) }; rec.onerror = () => setStatus('') } try { rec.start(); setStatus('Listening…') } catch (_) {} })
+// Ears: same listening engine as the chat workspace (Whisper first; the browser recognizer is the
+// last fallback). Tap to start, she stops when you pause; tap again to stop early.
+const ears = new Brain()
+// Hands-free: one tap on the mic starts a live conversation. Her ears stay open, she notices when you
+// start and stop talking, answers in her voice, then listens again. Tap the mic again to end it.
+let live = null
+const LIVE_TEXT = { starting: 'Starting…', listening: 'Listening — just talk', hearing: 'Hearing you…', thinking: 'Thinking…', speaking: 'Speaking…' }
+async function waitSpeechDone() { // the reply is spoken by speak(); wait until she has finished before listening again
+  const t0 = Date.now(); let seen = false
+  while (Date.now() - t0 < 90000) {
+    if (speaking) { if (!seen) { seen = true; live && live.mark('speaking') } } else if (seen) return
+    else if (Date.now() - t0 > 10000) return // no voice started (e.g. voice unavailable) — don't wait forever
+    await new Promise((r) => setTimeout(r, 150))
+  }
+}
+function startLive() {
+  const c = ears.converse({
+    onState: (s) => setStatus(LIVE_TEXT[s] || ''),
+    onUtterance: async (t) => { viaVoice = true; await ask(t); await waitSpeechDone() },
+    onEnd: (why) => {
+      live = null; $('mic').classList.remove('live'); setStatus('')
+      if (why === 'unsupported' || why === 'stt-failed') { legacyMic(); return } // older single-shot path
+      if (why === 'denied') setStatus('Microphone is blocked — allow it in your browser settings.')
+    },
+  })
+  if (!c) { legacyMic(); return }
+  live = c; $('mic').classList.add('live'); setStatus(LIVE_TEXT.starting)
+}
+$('mic').addEventListener('click', () => { unlockAudio(); if (live) live.stop(); else startLive() })
+function legacyMic() {
+  if (rec) { try { rec.stop() } catch (_) {} return }
+  setStatus('Listening…')
+  let ended = false
+  const r = ears.listen({
+    onResult: () => {},
+    onEnd: (text, err) => {
+      if (ended) return; ended = true
+      rec = null; setStatus(err === 'unsupported' ? 'Voice input not supported here.' : '')
+      const t = (text || '').trim()
+      if (t) { viaVoice = true; ask(t) }
+    },
+  })
+  if (!ended) rec = r
+}
+// iPhone/Safari only lets audio play if it was started from a tap. Her reply arrives later (after
+// the network), so unlock the audio path on the first tap or she would answer silently.
+let audioUnlocked = false
+function silentWav() { const n = 800, b = new DataView(new ArrayBuffer(44 + n)); const s = (o, t) => { for (let i = 0; i < t.length; i++) b.setUint8(o + i, t.charCodeAt(i)) }; s(0, 'RIFF'); b.setUint32(4, 36 + n, true); s(8, 'WAVE'); s(12, 'fmt '); b.setUint32(16, 16, true); b.setUint16(20, 1, true); b.setUint16(22, 1, true); b.setUint32(24, 8000, true); b.setUint32(28, 8000, true); b.setUint16(32, 1, true); b.setUint16(34, 8, true); s(36, 'data'); b.setUint32(40, n, true); for (let i = 0; i < n; i++) b.setUint8(44 + i, 128); return URL.createObjectURL(new Blob([b], { type: 'audio/wav' })) }
+function unlockAudio() {
+  if (audioUnlocked || speaking) return // never cut in on a reply that is already playing
+  try {
+    ensureAudioGraph(); actx.resume().catch(() => {})
+    audioEl.src = silentWav()
+    const p = audioEl.play()
+    if (p && p.then) p.then(() => { audioEl.pause(); audioUnlocked = true }).catch(() => {})
+  } catch (_) {}
+}
+;['pointerdown', 'touchend', 'click', 'keydown'].forEach((ev) => addEventListener(ev, unlockAudio, { passive: true }))
+
+// ── Mobile: bottom-sheet collapse + focus mode (keeps her 3D face unobstructed) ──
+let viaVoice = false
+const isMobile = () => window.matchMedia('(max-width:768px)').matches
+$('sheetToggle').addEventListener('click', () => $('chat').classList.toggle('min'))
+$('focusBtn').addEventListener('click', () => { const on = document.body.classList.toggle('focus'); $('focusLbl').textContent = on ? 'Show' : 'Focus' })
+// When the user speaks to her (hands-free/watch mode) on a phone, collapse the
+// transcript so her face is fully visible while she replies. Typed chats stay open.
+function autoCollapseForSpeech() { if (viaVoice && isMobile() && !document.body.classList.contains('focus')) $('chat').classList.add('min') }
 
 // ── Load avatar ───────────────────────────────────────────────────────────────
 const loader = new GLTFLoader()
-const ktx2 = new KTX2Loader().setTranscoderPath('https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/libs/basis/').detectSupport(renderer)
+const ktx2 = new KTX2Loader().setTranscoderPath('/vendor/three/examples/jsm/libs/basis/').detectSupport(renderer)
 loader.setKTX2Loader(ktx2).setMeshoptDecoder(MeshoptDecoder)
 loader.load(NORIA_GLB, (gltf) => {
   const root = gltf.scene; scene.add(root)
   root.traverse((o) => { if (o.isMesh && o.morphTargetDictionary) morphMeshes.push(o) })
   headObj = root.getObjectByName('Head') || morphMeshes[0] || root
   const box = new THREE.Box3().setFromObject(root), center = box.getCenter(new THREE.Vector3()), size = box.getSize(new THREE.Vector3())
-  const maxDim = Math.max(size.x, size.y, size.z), dist = (maxDim / (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2))) * 1.25
+  const maxDim = Math.max(size.x, size.y, size.z), dist = (maxDim / (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2))) * 1.25 * (matchMedia('(max-width:768px)').matches && innerHeight > innerWidth ? 1.35 : 1)
   camera.position.set(center.x, center.y + size.y * 0.04, center.z + dist)
   camera.near = dist / 50; camera.far = dist * 50; camera.updateProjectionMatrix(); camera.lookAt(center)
   key.position.set(center.x + maxDim, center.y + maxDim, center.z + maxDim * 2)
   $('loading').style.opacity = '0'; setTimeout(() => $('loading').remove(), 600)
-}, (p) => { if (p.total) $('loadingText').textContent = 'LOADING 3D FACE ' + Math.round(p.loaded / p.total * 100) + '%' },
-   () => { $('loadingText').textContent = 'COULD NOT LOAD MODEL' })
+}, undefined,
+   () => { $('loadingText').textContent = 'PLEASE REFRESH' })
 
 // ── Render loop ───────────────────────────────────────────────────────────────
 const clock = new THREE.Clock()
