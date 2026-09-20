@@ -116,6 +116,8 @@ function sttEnabled() {
     return localStorage.getItem('noria_stt') === '1'
   } catch { return false }
 }
+// The visitor's own time zone (so "what time is it?" with no place means THEIR time).
+function userTz() { try { return Intl.DateTimeFormat().resolvedOptions().timeZone || '' } catch { return '' } }
 function pickAudioMime() {
   const c = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg;codecs=opus']
   try { for (const m of c) if (MediaRecorder.isTypeSupported(m)) return m } catch {}
@@ -182,7 +184,7 @@ export class Brain {
     // ground: false = the client already grounded (skip server search); 'auto' =
     // the client did NOT ground, so let the ROUTER decide and search if the query
     // needs live facts (a second safety-net layer so nothing current slips through).
-    const payload = { query, history: this.history.slice(-8), system }
+    const payload = { query, history: this.history.slice(-8), system, tz: userTz() }
     if (ground === false) payload.ground = false
     else if (ground === true) payload.ground = true // 'auto' → omit → server uses serverNeedsWeb
     let res
@@ -232,7 +234,7 @@ export class Brain {
       res = await fetch('/brain/ask', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         // ground:false — the workspace already injected live web + vector memory.
-        body: JSON.stringify({ query, history: this.history.slice(-8), system, ground: false }),
+        body: JSON.stringify({ query, history: this.history.slice(-8), system, ground: false, tz: userTz() }),
         signal: ac.signal,
       })
     } catch (e) { clearTimeout(to); throw new Error(ac.signal.aborted ? 'Brain timed out' : 'Brain unreachable') }

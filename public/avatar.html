@@ -239,7 +239,7 @@ async function ask(text) {
   processStimulus(POS.test(text) ? 0.6 : NEG.test(text) ? -0.5 : 0, /\b(what if|imagine|new|idea|why|how)\b/i.test(text))
   const system = 'You are Noria — a poised, brilliant, deeply-educated and warm general-purpose intelligence, not a hedging chatbot. Reply in 1 to 3 short spoken sentences, natural and conversational, no markdown or lists. Lead with substance and quiet confidence. NEVER call yourself "just an AI" or "only a language model", never recite generic limitation-disclaimers ("as an AI I can miss context", "I don\'t have feelings", "I may make mistakes"), and never open with an apology. If a specific fact is genuinely uncertain, say so cleanly in a few words — but never blanket your answers in caveats. Never reveal what model or system powers you.'
   try {
-    const r = await fetch(BRAIN, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query: text, history: history.slice(-6), system }) })
+    const r = await fetch(BRAIN, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query: text, history: history.slice(-6), system, tz: (() => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone || '' } catch (_) { return '' } })() }) })
     const j = await r.json()
     let reply = (j.answer || j.reply || '').trim()
     try { const p = JSON.parse(reply); reply = p.display_text || p.spoken_text || reply } catch (_) {}
