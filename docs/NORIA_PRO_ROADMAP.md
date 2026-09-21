@@ -158,3 +158,17 @@ Gates in order, each audited: registry, availability, input schema, permission a
 Tested: sequential and dependent tasks, parallel-safe groups and the parallelism cap, blocked tools and blocked dependents, permission failures (not retried), approval (none, denied, granted, still needs authorisation), timeout, cancellation (mid-run and before start), retry (transient, non-retryable, bounded), provider failure with alternative tool, verification failure, partial completion, dependency cycles, duplicate execution across runs, audit tamper detection and audit under parallel load, hostile text in tool output, unregistered tools, bad input.
 
 Registry counts, made explicit: **tools** are executable units (`/brain/tools`, 25); **capability items** are user-facing statements (`/brain/capabilities`, counted separately, with a note saying so). Test coverage is reported per tool: a tool marked LIVE must list a test.
+
+## Read-only live phase (owner-authorised 2026-09-21)
+
+Authorised: read-only live execution only. Acting tools (email, messages, calendar changes, purchases, deletion, account changes, publishing, production database writes, arbitrary code execution, irreversible actions) remain blocked and are refused by the gate whatever anyone approves.
+
+**Where the rules live.** `agent/gate.js` is the single read-only gate. The executor calls it before approval, and the server route `POST /brain/tool` calls it again, so nothing depends on the browser being honest and the same rules apply if execution later moves to a Worker or a background job. The browser runtime (`public/agent-runtime.js`) is not a security boundary: it carries steps out and reports every network request and storage change through a side-effect monitor.
+
+**Health model.** A provider or dependency is OK only with a fresh (15-minute) successful observation, DEGRADED when observed failing or out of allowance, and UNKNOWN otherwise, including an expired record or a dependency that has never been observed. UNKNOWN read-only tools may be tried (the attempt is the observation); UNKNOWN acting tools may not. Stale status pages probe unknown providers with a rate-limited real call. Tavily HTTP 432 reads DEGRADED (quota, paused).
+
+**Test state is separate from tool state.** CONNECTED plus UNTESTED is allowed; LIVE requires an automated or explicitly accepted production test, enforced mechanically, and every automated test the registry names must be a real file (`tools_state_t.mjs`).
+
+**Allowed live read-only tools (9):** web.search, weather.get, fx.rate, crypto.price, clock.now, calc.math, reference.list, doc.read, data.query. Each has an automated test. Not allowed: memory.device (not on the list), research.deep, vision, image, speech (Pro-gated), export and charts (untested by machine).
+
+**Tests:** 334 offline checks (`arch_tests.mjs`, 13 suites) plus live tests of the route (`feeds_t.mjs`) and a run in a real browser (results in the session report).

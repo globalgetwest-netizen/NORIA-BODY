@@ -1237,7 +1237,7 @@ const CAPS = [
     ["A read-only task planner: turns a goal into an auditable plan (tasks, tools, dependencies, order, checks, and what is missing) without executing anything", "connected", "", "Noria Pro. It shows the plan; it does not carry it out."],
   ]],
   ["Autonomous action", [
-    ["Autonomous multi-step agents that choose tools, run them in parallel, recover from errors and finish a job alone", "not_built", "", "Not built for real use. A permissioned executor exists and is tested in dry-run mode only (it touches nothing and every action is simulated); live execution is not authorised. Noria follows fixed pipelines (decide, retrieve, answer, verify, correct); she does not take actions in other apps, send messages or make purchases."],
+    ["Autonomous multi-step agents that choose tools, run them in parallel, recover from errors and finish a job alone", "not_built", "", "Not built for real use. A permissioned executor exists and has been tested in dry-run and in read-only live mode (search, weather, exchange rates, crypto prices, clock, calculator, reference lists, and the person's own attached files): it can read but never change anything. It is not connected to the app screen yet, and every tool that acts (email, calendar, purchases, deletion, publishing, code execution) is blocked and not authorised. Noria follows fixed pipelines (decide, retrieve, answer, verify, correct); she does not take actions in other apps, send messages or make purchases."],
     ["Connections to email, calendars, maps or other accounts", "not_built", "", "Not built."],
   ]],
 ];
