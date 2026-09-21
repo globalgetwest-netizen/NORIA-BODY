@@ -1,6 +1,7 @@
 import { runProviders, searchHealth, probeUnknown } from "./agent/search.js";
 import { TOOLS, REGISTRY_VERSION, listTools, plannerCatalog, registrySummary, canUse } from "./agent/tools.js";
 import { readOnlyLiveGate } from "./agent/gate.js";
+import { safeCalc } from "./agent/calc.js";
 import { validateInput, sanitizeOutput } from "./agent/executor.js";
 import { buildPlannerMessages, extractJson, validatePlan } from "./agent/planner.js";
 // Cloudflare Pages (Advanced Mode) — Noria's front door AND her brain, served
@@ -1248,7 +1249,13 @@ const TOOL_HANDLERS = {
     return { sources: items.slice(0, 8).map((x) => ({ title: x.title, snippet: String(x.snippet || "").slice(0, 300), url: x.url || "", date: x.date || x.pub || "", provider: x.via || x.src || "" })) };
   },
   "clock.now": async (i, env, ctx) => { const a = clockDirect(String(i.question), ctx && ctx.tz); if (!a) throw toolFail("that is not a question the clock can answer exactly", 422); return { answer: a }; },
-  "calc.math": async (i) => { const a = mathDirect(String(i.expression)); if (!a) throw toolFail("that is not a plain calculation", 422); const m = /=\s*\**\s*(-?[\d,]+(?:\.\d+)?)/.exec(a); return { answer: a, value: m ? Number(m[1].replace(/,/g, "")) : NaN }; },
+  // a worded question ("17% of 2,340") goes to the calculator that already handles words; a written expression ("(15 / 100) * 2480") to the safe parser (no eval)
+  "calc.math": async (i) => {
+    const text = String(i.expression).slice(0, 160), a = mathDirect(text);
+    if (a) { const m = /=\s*\**\s*(-?[\d,]+(?:\.\d+)?)/.exec(a); return { answer: a, value: m ? Number(m[1].replace(/,/g, "")) : NaN }; }
+    const c = safeCalc(text); if (c && c.error) throw toolFail(c.error, 422); if (!c) throw toolFail("that is not a plain calculation", 422);
+    return { answer: c.text, value: c.value };
+  },
   "weather.get": async (i, env, ctx) => { const b = await weatherBlock("What is the weather in " + String(i.place).slice(0, 80) + "?", ctx && ctx.tz); if (!b) throw toolFail("no weather data for that place", 404); return { report: b.trim() }; },
   "fx.rate": async (i) => { const b = await currencyBlock("How much is 1 " + String(i.from).slice(0, 12) + " in " + String(i.to).slice(0, 12) + "?"); if (!b) throw toolFail("no exchange rate for that pair", 404); return { report: b.trim() }; },
   "crypto.price": async (i) => { const b = await cryptoBlock("What is the price of " + String(i.asset).slice(0, 40) + " now?"); if (!b) throw toolFail("no price for that asset", 404); return { report: b.trim() }; },

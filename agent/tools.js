@@ -90,7 +90,7 @@ const META = {
   "web.search":       { provider: "search provider registry (tavily, brave, wikipedia, news feeds)", dependencies: ["search"], tests: ["search_layer_t.mjs", "worker_int_t.mjs", "temporal_t.mjs", "bench.mjs (current)"] },
   "research.deep":    { provider: "search provider registry + model", dependencies: ["search", "models"], tests: ["manual: research_live.py"] },
   "clock.now":        { provider: "worker (calculated)", tests: ["clockdirect_t.mjs", "bench.mjs (current)"] },
-  "calc.math":        { provider: "worker (calculated)", tests: ["bench.mjs (math)", "live-check-2.mjs"] },
+  "calc.math":        { provider: "worker (exact calculator and a safe expression parser, no eval)", tests: ["calc_t.mjs", "bench.mjs (math)", "live-check-2.mjs"] },
   "weather.get":      { provider: "Open-Meteo", dependencies: ["feeds"], tests: ["feeds_t.mjs (live)"] },
   "fx.rate":          { provider: "open exchange-rate feed", dependencies: ["feeds"], tests: ["feeds_t.mjs (live)", "bench.mjs (current: exchange rate)"] },
   "crypto.price":     { provider: "Binance, CoinGecko", dependencies: ["feeds"], tests: ["feeds_t.mjs (live)"] },

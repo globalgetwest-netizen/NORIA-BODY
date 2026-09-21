@@ -121,7 +121,12 @@ export class Executor {
     if (this.abort.signal.aborted) return { status: "cancelled", notes: ["cancelled before start"] };
     if (task.status === "blocked") { await this.log(Object.assign({ event: "blocked", detail: (task.blocked_by || []).join("; ") }, base)); return { status: "blocked", notes: task.blocked_by || [] }; }
     for (const d of task.depends_on || []) { const r = results[d]; if (!r || r.status !== "done") { await this.log(Object.assign({ event: "skipped", detail: "dependency " + d + " did not complete (" + (r ? r.status : "not run") + ")" }, base)); return { status: r && r.status === "awaiting_approval" ? "awaiting_approval" : "skipped", notes: ["dependency " + d + " did not complete"] }; } }
-    if (!task.tools || !task.tools.length) { await this.log(Object.assign({ event: "model_step_simulated" }, base)); return { status: "done", tool: null, notes: ["reasoning or writing step (simulated in dry-run)"], output: { simulated: true } }; }
+    if (!task.tools || !task.tools.length) {
+      // A reasoning or writing step needs no tool. The executor does not call a model: in a dry run it is simulated, and in live mode it is handed back to Noria's normal conversation, which does the writing.
+      const live = this.mode !== "dry-run";
+      await this.log(Object.assign({ event: live ? "model_step_deferred" : "model_step_simulated" }, base));
+      return { status: "done", tool: null, notes: [live ? "reasoning or writing step: not executed here; Noria's conversation writes it" : "reasoning or writing step (simulated in dry-run)"], output: live ? { executed: false, handled_by: "noria-conversation" } : { simulated: true } };
+    }
     const outs = [], notes = []; let attemptsTotal = 0;
     for (const name of task.tools) {
       const r = await this.runTool(plan, task, name, base);
