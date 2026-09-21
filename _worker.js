@@ -1022,7 +1022,7 @@ function verifyAnswer(text, live, q) {
   // talking (the previous edition), or a mix of old and new. It is treated as unsupported so the answer is redone from the sources.
   let stale = false;
   if (RECENT_EVENT_Q.test(String(q || ""))) {
-    const ay = (String(text).match(/\b(?:19|20)\d{2}\b/g) || []).map(Number), cy = new Date().getUTCFullYear();
+    const ay = (String(text).replace(/(?:dated|as of|source:?)[^,.;)]{0,40}/gi, " ").replace(/\d{4}-\d{2}-\d{2}/g, " ").match(/\b(?:19|20)\d{2}\b/g) || []).map(Number), cy = new Date().getUTCFullYear();
     const ctxNew = (String(live.ctx).match(/\b(?:19|20)\d{2}\b/g) || []).some((y) => Number(y) >= cy - 1);
     if (ay.length && ctxNew && ay.every((y) => y <= cy - 2)) { stale = true; bad.push("an older edition (" + ay[0] + ") instead of the most recent one"); }
   }
