@@ -961,7 +961,7 @@ async function respond(q, opts = {}) {
         signal: curStream.signal,
         // If the client already grounded (webBlock present), skip a server search;
         // otherwise let the router decide — a second layer so live facts aren't missed.
-        ground: webBlock ? false : 'auto',
+        ground: (webBlock || attBlock) ? false : 'auto', // a question about an attached document is answered from that document, not the web
         voice: !!opts.voice, // spoken turns: the brain answers briefly and with less deliberation
         onToken: (d) => {
           if (cancelled) return
