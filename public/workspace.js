@@ -1197,6 +1197,7 @@ function openCanvas(title, md) {
   $('canvasTitle').textContent = curCanvasTitle
   renderMd($('canvasDoc'), curCanvasMd)
   $('canvasDoc').scrollTop = 0
+  if ($('canvasXlsx')) $('canvasXlsx').hidden = !/^\s*\|.*\|\s*\n\s*\|?\s*:?-{2,}/m.test(curCanvasMd) // Excel only when there is a table to put in it
   canvasBackdrop.hidden = false; canvasEl.hidden = false
   requestAnimationFrame(() => { canvasBackdrop.classList.add('show'); canvasEl.classList.add('show') })
 }
@@ -1224,10 +1225,37 @@ $('canvasMd') && $('canvasMd').addEventListener('click', () => { downloadBlob(ne
 $('canvasPdf') && $('canvasPdf').addEventListener('click', () => exportPdf(curCanvasTitle, curCanvasMd))
 $('canvasDocx') && $('canvasDocx').addEventListener('click', async () => {
   const btn = $('canvasDocx')
+  try { // a real Word file (headings, lists, tables, page numbers) — the earlier HTML-based method below is the fallback
+    const X = await import('./exports.js?v=1')
+    await lazyScript('https://cdn.jsdelivr.net/npm/docx@8.5.0/build/index.umd.js')
+    downloadBlob(await X.buildDocx(X.mdToBlocks(curCanvasMd), curCanvasTitle, window.docx), slug(curCanvasTitle) + '.docx'); canvasFlash(btn, 'Saved'); return
+  } catch (e) { /* fall through to the previous method */ }
   try {
     await lazyScript('https://cdn.jsdelivr.net/npm/html-docx-js/dist/html-docx.js')
     const blob = window.htmlDocx.asBlob(mdToHtmlDoc(curCanvasTitle, curCanvasMd))
     downloadBlob(blob, slug(curCanvasTitle) + '.docx'); canvasFlash(btn, 'Saved')
+  } catch (e) { canvasFlash(btn, 'Failed') }
+})
+
+// Excel and PowerPoint (Noria Pro): built on this device from the document, so nothing is sent anywhere.
+$('canvasXlsx') && $('canvasXlsx').addEventListener('click', async () => {
+  if (!isPro) { openPro('Excel export is part of Noria Pro.'); return }
+  const btn = $('canvasXlsx')
+  try {
+    canvasFlash(btn, 'Building…')
+    const X = await import('./exports.js?v=1')
+    await lazyScript('https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js')
+    downloadBlob(await X.buildXlsx(X.mdToBlocks(curCanvasMd), curCanvasTitle, window.ExcelJS), slug(curCanvasTitle) + '.xlsx'); canvasFlash(btn, 'Saved')
+  } catch (e) { canvasFlash(btn, 'Failed') }
+})
+$('canvasPptx') && $('canvasPptx').addEventListener('click', async () => {
+  if (!isPro) { openPro('PowerPoint export is part of Noria Pro.'); return }
+  const btn = $('canvasPptx')
+  try {
+    canvasFlash(btn, 'Building…')
+    const X = await import('./exports.js?v=1')
+    await lazyScript('https://cdn.jsdelivr.net/npm/pptxgenjs@3.12.0/dist/pptxgen.bundle.js')
+    downloadBlob(await X.buildPptx(X.mdToBlocks(curCanvasMd), curCanvasTitle, window.PptxGenJS), slug(curCanvasTitle) + '.pptx'); canvasFlash(btn, 'Saved')
   } catch (e) { canvasFlash(btn, 'Failed') }
 })
 
