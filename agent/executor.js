@@ -16,10 +16,13 @@
 //    10 RECOVER         retry, switch to a registered alternative, or stop honestly; never repeat blindly
 //
 // Steps come ONLY from the plan. Nothing a tool returns can add a step or a tool.
-// Live execution is not authorised: the engine refuses any mode but "dry-run" and any runtime that can touch the real world.
+// Modes: "dry-run" (a simulated runtime touches nothing) and "read-only-live" (real read-only tools only; the shared read-only gate runs
+// BEFORE approval, so nothing can approve its way past it). A mode that lets tools act does not exist: it is refused.
+// The permission and approval logic is here, in the tool layer. No runtime, browser or otherwise, is trusted to enforce it.
 
-import { USABLE } from "./tools.js";
+import { canUse } from "./tools.js";
 import { AuditLog } from "./audit.js";
+import { readOnlyLiveGate, LIVE_READONLY_AUTHORISED, LIVE_ACTING_AUTHORISED } from "./gate.js";
 
 export const LIVE_EXECUTION_AUTHORISED = false;
 
@@ -74,9 +77,13 @@ async function keyOf(text) { const buf = await crypto.subtle.digest("SHA-256", n
 export class Executor {
   // catalog: listTools(health) (each tool with .available). policy: { mode, grants[], approve(request), maxParallel, timeoutCapMs, backoffScale }
   constructor({ catalog, runtime, policy = {}, audit = null, ledger = null }) {
-    if (policy.mode !== "dry-run") throw new Error("live execution is not authorised: the executor only runs in dry-run mode");
-    if (LIVE_EXECUTION_AUTHORISED !== false) throw new Error("live execution flag is set: refusing to start");
-    if (!runtime || runtime.dryRun !== true) throw new Error("a runtime that can touch the real world is refused in dry-run mode");
+    if (LIVE_EXECUTION_AUTHORISED !== false || LIVE_ACTING_AUTHORISED !== false) throw new Error("an acting-execution flag is set: refusing to start");
+    if (policy.mode === "dry-run") { if (!runtime || runtime.dryRun !== true) throw new Error("a runtime that can touch the real world is refused in dry-run mode"); }
+    else if (policy.mode === "read-only-live") {
+      if (LIVE_READONLY_AUTHORISED !== true) throw new Error("read-only live execution is not authorised");
+      if (!runtime || runtime.readOnly !== true || runtime.dryRun === true) throw new Error("read-only live mode needs a runtime that declares itself read-only and is not a simulation");
+    } else throw new Error("live execution is not authorised: modes are dry-run and read-only-live only");
+    this.mode = policy.mode;
     this.catalog = catalog; this.byName = new Map(catalog.map((t) => [t.name, t])); this.runtime = runtime;
     this.grants = new Set(policy.grants || []); this.approve = policy.approve || null; this.maxParallel = policy.maxParallel || 4; this.timeoutCapMs = policy.timeoutCapMs || 0; this.backoffScale = policy.backoffScale == null ? 1 : policy.backoffScale;
     this.audit = audit || new AuditLog(); this.ledger = ledger || new Map(); this.abort = new AbortController();
@@ -90,7 +97,7 @@ export class Executor {
     if (res.valid === false) { await this.log({ event: "refused", detail: "the plan is not valid", issues: res.issues || [] }); return this.finish(res.plan, {}, "refused"); }
     const plan = res.plan, planId = plan.audit && plan.audit.planId;
     if (plan.audit && plan.audit.executed !== false) { await this.log({ event: "refused", plan: planId, detail: "plan is already marked executed" }); return this.finish(plan, {}, "refused"); }
-    await this.log({ event: "plan_started", plan: planId, mode: "dry-run", tasks: plan.tasks.length, runtime: this.runtime.id });
+    await this.log({ event: "plan_started", plan: planId, mode: this.mode, tasks: plan.tasks.length, runtime: this.runtime.id });
     const results = {}, byId = new Map(plan.tasks.map((t) => [t.id, t]));
     for (const group of plan.execution_order) {
       const pool = []; let idx = 0;
@@ -106,7 +113,7 @@ export class Executor {
     const st = tasks.map((t) => t.status), done = st.filter((s) => s === "done").length;
     let state = force || (this.abort.signal.aborted ? "cancelled" : done === tasks.length ? "completed" : st.includes("awaiting_approval") && !st.includes("failed") ? "awaiting_approval" : done ? "partial" : "failed");
     await this.log({ event: "plan_finished", plan: plan.audit && plan.audit.planId, state, done, total: tasks.length });
-    return { state, dry_run: true, tasks, counts: { done, total: tasks.length }, side_effects: Array.isArray(this.runtime.touched) ? this.runtime.touched.length : 0, audit: { records: this.audit.records.length, chain: await this.audit.verify() } };
+    return { state, mode: this.mode, dry_run: this.mode === "dry-run", tasks, counts: { done, total: tasks.length }, side_effects: Array.isArray(this.runtime.touched) ? this.runtime.touched.length : 0, side_effect_report: typeof this.runtime.report === "function" ? this.runtime.report() : null, audit: { records: this.audit.records.length, chain: await this.audit.verify() } };
   }
 
   async runTask(plan, task, results) {
@@ -131,8 +138,10 @@ export class Executor {
     // 1 registry
     const tool = this.byName.get(name);
     if (!tool) return fail("denied", "unregistered tool \"" + name + "\": only registered tools may run");
-    // 2 availability
-    if (!USABLE.has(tool.available)) return fail("blocked", name + " is " + tool.available);
+    // 2 availability (a read-only tool whose health is unknown may be tried; a tool that acts may not)
+    if (!canUse(tool)) return fail("blocked", name + " is " + tool.available);
+    // 2b the read-only gate, ahead of everything that could grant permission: approval cannot override it
+    if (this.mode === "read-only-live") { const g = readOnlyLiveGate(tool); if (!g.ok) return fail("denied", "not permitted in read-only live mode: " + g.reason); }
     // 3 input
     const input = buildInput(tool, task), verrs = validateInput(tool.input, input);
     if (verrs.length) return fail("failed", "invalid input: " + verrs.join("; "));
@@ -175,7 +184,7 @@ export class Executor {
         lastError = "verification failed: " + problem; lastRetryable = true;
       } else { lastError = r.error || "tool failed"; lastRetryable = r.retryable !== false; await this.log(Object.assign({ event: "tool_failed", tool: name, detail: lastError, retryable: lastRetryable }, base)); }
       // 10 recover
-      const alts = (tool.alternatives || []).filter((a) => !triedAlt.has(a) && this.byName.has(a) && USABLE.has(this.byName.get(a).available));
+      const alts = (tool.alternatives || []).filter((a) => !triedAlt.has(a) && this.byName.has(a) && canUse(this.byName.get(a)));
       const dec = decideRecovery({ error: lastError, retryable: lastRetryable, attempt, maxAttempts, alternatives: alts });
       await this.log(Object.assign({ event: "recovery", tool: name, action: dec.action, why: dec.why }, base));
       if (dec.action === "retry") { await sleep(((tool.retry && tool.retry.backoffMs) || 0) * this.backoffScale, this.abort.signal).catch(() => {}); continue; }

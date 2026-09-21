@@ -16,37 +16,37 @@
 //
 // States follow the capability registry. UNCERTAIN and CONFLICT describe an answer, not a tool.
 
-export const REGISTRY_VERSION = "2026-09-21.2";
+export const REGISTRY_VERSION = "2026-09-21.3";
 
-const T = (o) => Object.assign({ id: o.name, version: "1.0.0", dependencies: [], provider: "noria", tests: [], alternatives: [], auth: "none", permissions: ["read"], state: "live", need: null, risk: "read", timeoutMs: 10000, retry: { max: 0, backoffMs: 0 }, verify: "schema", runtime: ["server"] }, o);
+const T = (o) => Object.assign({ id: o.name, version: "1.0.0", dependencies: [], provider: "noria", tests: [], alternatives: [], live_read: false, auth: "none", permissions: ["read"], state: "live", need: null, risk: "read", timeoutMs: 10000, retry: { max: 0, backoffMs: 0 }, verify: "schema", runtime: ["server"] }, o);
 
 export const TOOLS = [
   // ── information (read-only) ──
   T({ name: "web.search", description: "Search the open web, Wikipedia and news feeds for current information; returns dated, ranked, de-duplicated sources with provenance.",
     input: { query: { type: "string", required: true }, fresh: { type: "boolean" } }, output: { sources: { type: "array", description: "title, snippet, url, date, provider" } },
-    permissions: ["read", "network"], state: "connected", need: "search", timeoutMs: 12000, retry: { max: 1, backoffMs: 300 }, verify: "temporal" }),
+    permissions: ["read", "network"], state: "connected", need: "search", timeoutMs: 20000, retry: { max: 1, backoffMs: 300 }, verify: "temporal", live_read: true }),
   T({ name: "research.deep", description: "Plan several search angles, read the sources and write a cited brief with unsupported sentences removed (Noria Pro, a few a day).",
     input: { topic: { type: "string", required: true } }, output: { brief: { type: "string" }, sources: { type: "array" } },
     auth: "pro", permissions: ["read", "network"], state: "connected", need: "search", timeoutMs: 110000, verify: "sources" }),
   T({ name: "clock.now", description: "Exact date, time, weekday and days until or since a date, for any place; calculated, never guessed.",
-    input: { place: { type: "string" }, question: { type: "string" } }, output: { answer: { type: "string" } }, verify: "exact" }),
+    input: { question: { type: "string", required: true } }, output: { answer: { type: "string" } }, verify: "exact", live_read: true }),
   T({ name: "calc.math", description: "Exact arithmetic and percentages, computed by a calculator rather than estimated by a model.",
-    input: { expression: { type: "string", required: true } }, output: { value: { type: "number" } }, verify: "exact" }),
-  T({ name: "weather.get", description: "Current weather and forecast for a place.", input: { place: { type: "string", required: true } }, output: { forecast: { type: "object" } },
-    permissions: ["read", "network"], state: "connected", need: "feeds", timeoutMs: 8000, retry: { max: 1, backoffMs: 300 }, verify: "schema" }),
+    input: { expression: { type: "string", required: true } }, output: { value: { type: "number" }, answer: { type: "string" } }, verify: "exact", live_read: true }),
+  T({ name: "weather.get", description: "Current weather and forecast for a place.", input: { place: { type: "string", required: true } }, output: { report: { type: "string" } },
+    permissions: ["read", "network"], state: "connected", need: "feeds", timeoutMs: 15000, retry: { max: 1, backoffMs: 300 }, verify: "schema", live_read: true }),
   T({ name: "fx.rate", description: "Current currency exchange rate between two currencies.", input: { from: { type: "string", required: true }, to: { type: "string", required: true } },
-    output: { rate: { type: "number" } }, permissions: ["read", "network"], state: "connected", need: "feeds", timeoutMs: 8000, retry: { max: 1, backoffMs: 300 }, verify: "schema" }),
-  T({ name: "crypto.price", description: "Current cryptocurrency price and 24-hour change.", input: { asset: { type: "string", required: true } }, output: { price: { type: "number" } },
-    permissions: ["read", "network"], state: "connected", need: "feeds", timeoutMs: 8000, retry: { max: 1, backoffMs: 300 }, verify: "schema" }),
+    output: { report: { type: "string" } }, permissions: ["read", "network"], state: "connected", need: "feeds", timeoutMs: 15000, retry: { max: 1, backoffMs: 300 }, verify: "schema", live_read: true }),
+  T({ name: "crypto.price", description: "Current cryptocurrency price and 24-hour change.", input: { asset: { type: "string", required: true } }, output: { report: { type: "string" } },
+    permissions: ["read", "network"], state: "connected", need: "feeds", timeoutMs: 15000, retry: { max: 1, backoffMs: 300 }, verify: "schema", live_read: true }),
   T({ name: "reference.list", description: "Fixed reference lists quoted from a verified library (for example the 99 Names, countries of Africa).",
-    input: { list: { type: "string", required: true } }, output: { items: { type: "array" } }, verify: "exact" }),
+    input: { list: { type: "string", required: true } }, output: { answer: { type: "string" } }, verify: "exact", live_read: true }),
   // ── the person's own files and data (run on their device) ──
   T({ name: "doc.read", description: "Read an attached PDF, Word, text, CSV or Excel file and pull out the passages relevant to a question.",
     input: { file: { type: "file", required: true }, question: { type: "string" } }, output: { passages: { type: "array" } },
-    permissions: ["read", "device"], runtime: ["browser"], verify: "sources" }),
+    permissions: ["read", "device"], runtime: ["browser"], verify: "sources", live_read: true }),
   T({ name: "data.query", description: "Exact analysis of an attached spreadsheet: counts, totals, averages, medians, distinct values, top-N, filters, group-by, correlation.",
     input: { file: { type: "file", required: true }, question: { type: "string", required: true } }, output: { answer: { type: "string" }, table: { type: "object" } },
-    permissions: ["read", "device"], runtime: ["browser"], verify: "exact" }),
+    permissions: ["read", "device"], runtime: ["browser"], verify: "exact", live_read: true }),
   T({ name: "memory.device", description: "Facts the person chose to share, kept on this device; can be read, corrected and deleted by them.",
     input: { key: { type: "string" } }, output: { value: { type: "string" } }, permissions: ["read", "device"], runtime: ["browser"], verify: "user" }),
   // ── senses and creation ──
@@ -57,9 +57,9 @@ export const TOOLS = [
   T({ name: "speech.speak", description: "Speak text aloud in Noria's voice (Noria Pro).", input: { text: { type: "string", required: true } }, output: { audio: { type: "file" } },
     auth: "pro", permissions: ["network"], state: "connected", need: "ai", timeoutMs: 20000, verify: "user" }),
   T({ name: "doc.export", description: "Turn a finished document into Word, Excel, PowerPoint, PDF or Markdown.", input: { markdown: { type: "string", required: true }, format: { type: "string", required: true } },
-    output: { file: { type: "file" } }, permissions: ["device"], runtime: ["browser"], verify: "user" }),
+    output: { file: { type: "file" } }, permissions: ["device"], state: "connected", runtime: ["browser"], verify: "user" }),
   T({ name: "chart.draw", description: "Draw a chart or table from data.", input: { data: { type: "object", required: true }, kind: { type: "string" } }, output: { chart: { type: "object" } },
-    runtime: ["browser"], verify: "schema" }),
+    state: "connected", runtime: ["browser"], verify: "schema" }),
   // ── knowledge (built in stages) ──
   T({ name: "knowledge.search", description: "Hybrid (vector plus keyword) retrieval over the person's documents and knowledge bases, with reranking and citation checks.",
     input: { query: { type: "string", required: true }, collection: { type: "string" } }, output: { passages: { type: "array" } },
@@ -91,29 +91,41 @@ const META = {
   "research.deep":    { provider: "search provider registry + model", dependencies: ["search", "models"], tests: ["manual: research_live.py"] },
   "clock.now":        { provider: "worker (calculated)", tests: ["clockdirect_t.mjs", "bench.mjs (current)"] },
   "calc.math":        { provider: "worker (calculated)", tests: ["bench.mjs (math)", "live-check-2.mjs"] },
-  "weather.get":      { provider: "Open-Meteo", dependencies: ["feeds"] },
-  "fx.rate":          { provider: "open exchange-rate feed", dependencies: ["feeds"], tests: ["bench.mjs (current: exchange rate)"] },
-  "crypto.price":     { provider: "Binance, CoinGecko", dependencies: ["feeds"], tests: ["broad.mjs (manual review)"] },
+  "weather.get":      { provider: "Open-Meteo", dependencies: ["feeds"], tests: ["feeds_t.mjs (live)"] },
+  "fx.rate":          { provider: "open exchange-rate feed", dependencies: ["feeds"], tests: ["feeds_t.mjs (live)", "bench.mjs (current: exchange rate)"] },
+  "crypto.price":     { provider: "Binance, CoinGecko", dependencies: ["feeds"], tests: ["feeds_t.mjs (live)"] },
   "reference.list":   { provider: "worker (verified library)", tests: ["live-check.mjs", "live-check-2.mjs"] },
-  "doc.read":         { provider: "browser (pdf.js, mammoth-style parsers)", tests: ["manual: 60-page contract, 3 of 3 questions", "rag_t.mjs (offline retrieval module, not connected)"] },
-  "data.query":       { provider: "browser (dataeng.js)", tests: ["manual: 1,200-row file checked against pandas (data/test-data.mjs)"] },
-  "memory.device":    { provider: "browser (localStorage)", tests: ["manual: browser"] },
+  "doc.read":         { provider: "browser (pdf.js parsers, docExcerpts retrieval)", tests: ["docread_t.mjs", "manual: 60-page contract, 3 of 3 questions"] },
+  "data.query":       { provider: "browser (dataeng.js)", tests: ["data/test-data.mjs (1,200 rows against pandas)"] },
+  "memory.device":    { provider: "browser (localStorage)", tests: ["memory_t.mjs"] },
   "vision.describe":  { provider: "noria-ai worker (Cloudflare Workers AI)", dependencies: ["ai"] },
   "image.generate":   { provider: "noria-ai worker (Cloudflare Workers AI)", dependencies: ["ai"] },
   "speech.speak":     { provider: "noria-ai worker", dependencies: ["ai"] },
-  "doc.export":       { provider: "browser (docx, ExcelJS, PptxGenJS, pdfmake)", tests: ["manual: browser"] },
-  "chart.draw":       { provider: "browser (Chart.js)", tests: ["manual: browser"] },
+  "doc.export":       { provider: "browser (docx, ExcelJS, PptxGenJS, pdfmake, loaded from a CDN)", tests: ["manual: browser"] },
+  "chart.draw":       { provider: "browser (Chart.js, loaded from a CDN)", tests: ["manual: browser"] },
   "knowledge.search": { provider: "public/rag.js (not connected)", dependencies: ["ai"] },
 };
 for (const t of TOOLS) Object.assign(t, META[t.name] || {});
-const STATES = ["live", "connected", "degraded", "requires_auth", "not_built", "unsupported"];
+// TEST STATE is separate from TOOL STATE. A tool can be CONNECTED and UNTESTED; it can never be LIVE unless it has an automated test or an
+// explicitly accepted production test ("accepted: ..." entries are added only by the owner's decision).
+//   automated  a repeatable script in noria-eval/     accepted  the owner accepted a named production test
+//   manual     checked by hand, not repeatable         untested  nothing
+export function testState(tool) {
+  const t = tool.tests || [];
+  if (t.some((x) => !/^(manual|accepted):/i.test(x))) return "automated";
+  if (t.some((x) => /^accepted:/i.test(x))) return "accepted";
+  if (t.some((x) => /^manual:/i.test(x))) return "manual";
+  return "untested";
+}
+const STATES = ["live", "connected", "degraded", "unknown", "requires_auth", "not_built", "unsupported"];
 const AUTHS = ["none", "pro", "account", "oauth"];
 
 // A tool declaration must have every field; this is run by the tests and by the server at start-up.
 export function validateTool(t) {
   const p = [];
   for (const k of ["id", "name", "description", "input", "output", "auth", "permissions", "state", "risk", "timeoutMs", "retry", "verify", "runtime", "version", "provider", "dependencies", "tests", "alternatives"]) if (t[k] === undefined || t[k] === null || t[k] === "") p.push("missing " + k);
-  if (t.state === "live" && !(t.tests || []).length) p.push("a LIVE tool must list at least one test");
+  if (t.state === "live" && !["automated", "accepted"].includes(testState(t))) p.push("a LIVE tool needs an automated or an explicitly accepted test (it has: " + testState(t) + ")");
+  if (t.live_read && (t.risk !== "read" || (t.permissions || []).includes("write"))) p.push("only a read-only tool may be marked live_read");
   if (t.id !== t.name) p.push("id must equal name");
   if (!/^[a-z]+\.[a-z_]+$/.test(t.name || "")) p.push("name must look like group.action");
   if (!STATES.includes(t.state)) p.push("bad state " + t.state);
@@ -128,16 +140,22 @@ export function validateTool(t) {
 
 // Availability right now: the base state, changed by the health of what it depends on.
 // health = { search, feeds, ai, accounts } (booleans; missing means unknown and is treated as healthy)
+// health[need] is "ok" (a fresh successful observation), "degraded" (observed failing or out of quota) or "unknown" (no fresh observation).
+// Booleans are accepted for older callers (true = ok, false = degraded). A missing value is UNKNOWN: a dependency is never assumed healthy.
 export function toolState(tool, health = {}) {
   if (["not_built", "unsupported", "requires_auth"].includes(tool.state)) return tool.state;
-  if (tool.need && health[tool.need] === false) return "degraded";
-  return tool.state;
+  if (!tool.need) return tool.state;
+  let h = health[tool.need]; if (h === true) h = "ok"; else if (h === false) h = "degraded"; else if (h !== "ok" && h !== "degraded") h = "unknown";
+  return h === "ok" ? tool.state : h;
 }
 
 // The tools a plan may use: live, connected or degraded ones. Anything else is reported as missing, never quietly planned.
 export const USABLE = new Set(["live", "connected", "degraded"]);
+// A read-only tool whose health is unknown may still be TRIED (the attempt is the fresh observation). A tool that acts may not.
+export const ATTEMPTABLE = new Set(["live", "connected", "degraded", "unknown"]);
+export const canUse = (tool) => (tool.risk === "read" ? ATTEMPTABLE : USABLE).has(tool.available);
 export function listTools(health = {}) {
-  return TOOLS.map((t) => Object.assign({}, t, { available: toolState(t, health) }));
+  return TOOLS.map((t) => Object.assign({}, t, { available: toolState(t, health), test_state: testState(t) }));
 }
 // Two different numbers are reported everywhere, and they mean different things:
 //   tools               executable units the agent can call (this registry)
@@ -145,9 +163,9 @@ export function listTools(health = {}) {
 export function registrySummary(health = {}) {
   const tools = listTools(health), by = {};
   for (const t of tools) by[t.available] = (by[t.available] || 0) + 1;
-  const cov = { automated: 0, manual_only: 0, none: 0 };
-  for (const t of tools) { const a = t.tests.some((x) => !/^manual:/i.test(x)); const m = t.tests.length > 0; if (a) cov.automated++; else if (m) cov.manual_only++; else cov.none++; }
-  return { tools: tools.length, by_state: by, test_coverage: cov, note: "tools are executable units; capability items are user-facing statements and are counted separately (see /brain/capabilities)" };
+  const cov = { automated: 0, accepted: 0, manual: 0, untested: 0 };
+  for (const t of tools) cov[t.test_state]++;
+  return { tools: tools.length, by_state: by, test_coverage: cov, live_read_tools: tools.filter((t) => t.live_read).map((t) => t.name), note: "tools are executable units; capability items are user-facing statements and are counted separately (see /brain/capabilities)" };
 }
 export function findTool(name) { return TOOLS.find((t) => t.name === name) || null; }
 

@@ -1,5 +1,7 @@
-import { runProviders, searchHealth } from "./agent/search.js";
-import { TOOLS, REGISTRY_VERSION, listTools, plannerCatalog, registrySummary } from "./agent/tools.js";
+import { runProviders, searchHealth, probeUnknown } from "./agent/search.js";
+import { TOOLS, REGISTRY_VERSION, listTools, plannerCatalog, registrySummary, canUse } from "./agent/tools.js";
+import { readOnlyLiveGate } from "./agent/gate.js";
+import { validateInput, sanitizeOutput } from "./agent/executor.js";
 import { buildPlannerMessages, extractJson, validatePlan } from "./agent/planner.js";
 // Cloudflare Pages (Advanced Mode) — Noria's front door AND her brain, served
 // entirely from Cloudflare's edge. The workspace UI is static assets (instant,
@@ -1238,23 +1240,57 @@ const CAPS = [
     ["Connections to email, calendars, maps or other accounts", "not_built", "", "Not built."],
   ]],
 ];
-async function toolHealth(env) {
-  const aiUp = await withTimeout(fetch("https://noria-ai.insights-skyglobe.workers.dev/", { signal: AbortSignal.timeout(3500) }).then((r) => r.status < 500).catch(() => false), 4000, false);
-  const sh = await searchHealth(SEARCH_PROVIDERS, env, HEALTH_STORE);
-  return { search: sh.webOk, feeds: true, ai: aiUp, accounts: aiUp, providers: sh.providers, webOk: sh.webOk };
+// The read-only tools that run on the server. Each returns data only; none writes, sends or changes anything.
+const toolFail = (message, status) => Object.assign(new Error(message), { status });
+const TOOL_HANDLERS = {
+  "web.search": async (i, env) => {
+    const items = await webSearch(String(i.query).slice(0, 300), env, i.fresh !== false);
+    return { sources: items.slice(0, 8).map((x) => ({ title: x.title, snippet: String(x.snippet || "").slice(0, 300), url: x.url || "", date: x.date || x.pub || "", provider: x.via || x.src || "" })) };
+  },
+  "clock.now": async (i, env, ctx) => { const a = clockDirect(String(i.question), ctx && ctx.tz); if (!a) throw toolFail("that is not a question the clock can answer exactly", 422); return { answer: a }; },
+  "calc.math": async (i) => { const a = mathDirect(String(i.expression)); if (!a) throw toolFail("that is not a plain calculation", 422); const m = /=\s*\**\s*(-?[\d,]+(?:\.\d+)?)/.exec(a); return { answer: a, value: m ? Number(m[1].replace(/,/g, "")) : NaN }; },
+  "weather.get": async (i, env, ctx) => { const b = await weatherBlock("What is the weather in " + String(i.place).slice(0, 80) + "?", ctx && ctx.tz); if (!b) throw toolFail("no weather data for that place", 404); return { report: b.trim() }; },
+  "fx.rate": async (i) => { const b = await currencyBlock("How much is 1 " + String(i.from).slice(0, 12) + " in " + String(i.to).slice(0, 12) + "?"); if (!b) throw toolFail("no exchange rate for that pair", 404); return { report: b.trim() }; },
+  "crypto.price": async (i) => { const b = await cryptoBlock("What is the price of " + String(i.asset).slice(0, 40) + " now?"); if (!b) throw toolFail("no price for that asset", 404); return { report: b.trim() }; },
+  "reference.list": async (i) => { const a = refDirect("List the " + String(i.list).slice(0, 80)); if (!a) throw toolFail("that reference list is not in the library", 404); return { answer: a }; },
+};
+// Each dependency is ok only after a FRESH successful observation (within 15 minutes); a fresh failure is degraded; otherwise unknown.
+// With probe on, a stale dependency is observed with one small real call (at most one per lock period, so a status page cannot spend allowances).
+const DEP_FRESH_MS = 15 * 60 * 1000;
+async function observeDep(name, probeFn, probe) {
+  const key = "health/dep/" + name; let h = await HEALTH_STORE.get(key);
+  if ((!h || Date.now() - h.t > DEP_FRESH_MS) && probe) {
+    const lock = await HEALTH_STORE.get("probe/dep/" + name);
+    if (!lock || Date.now() - lock.t > 300000) {
+      await HEALTH_STORE.put("probe/dep/" + name, { t: Date.now() }, 300);
+      let ok = false; try { ok = !!(await withTimeout(probeFn(), 5000, false)); } catch (_) {}
+      h = { ok, t: Date.now() }; await HEALTH_STORE.put(key, h, 3600);
+    }
+  }
+  return !h || Date.now() - h.t > DEP_FRESH_MS ? "unknown" : h.ok ? "ok" : "degraded";
+}
+const NORIA_AI = "https://noria-ai.insights-skyglobe.workers.dev";
+async function toolHealth(env, opts = {}) {
+  const probe = !!opts.probe;
+  if (probe) await probeUnknown(SEARCH_PROVIDERS, env, HEALTH_STORE);
+  const [sh, ai, feeds, accounts] = await Promise.all([
+    searchHealth(SEARCH_PROVIDERS, env, HEALTH_STORE),
+    observeDep("ai", async () => (await fetch(NORIA_AI + "/", { signal: AbortSignal.timeout(4000) })).status < 500, probe),
+    observeDep("feeds", async () => { const j = await jget("https://open.er-api.com/v6/latest/USD", 4000); return !!(j && j.rates); }, probe),
+    observeDep("accounts", async () => (await fetch(NORIA_AI + "/acct/me", { headers: { Authorization: "Bearer health-probe" }, signal: AbortSignal.timeout(4000) })).status < 500, probe),
+  ]);
+  return { search: sh.webState, feeds, ai, accounts, providers: sh.providers, webState: sh.webState, webOk: sh.webState === "ok" };
 }
 async function capabilityReport(env) {
-  const th = await toolHealth(env);
-  const webOk = th.webOk;
-  const have = { search: true, feeds: true, ai: th.ai, accounts: th.accounts }; // Wikipedia and the news feeds need no key, so live search never depends on one service
+  const th = await toolHealth(env, { probe: true });
   const groups = CAPS.map(([area, items]) => ({ area, items: items.map(([name, state, need, note]) => {
-    const up = !need || have[need] !== false;
     if (state === "not_built" || state === "unsupported" || state === "requires_auth") return { name, state, note };
-    if (!up) return { name, state: "degraded", note: (note ? note + " " : "") + "Right now this is not answering, so it is not being relied on." };
-    if (need === "search" && !webOk) return { name, state: "degraded", note: (note ? note + " " : "") + "The open-web search has returned nothing recently; answers lean on Wikipedia and news feeds, and she says so when she cannot confirm something." };
+    const h = need ? th[need] : "ok";
+    if (h === "degraded") return { name, state: "degraded", note: (note ? note + " " : "") + (need === "search" ? "The open-web providers are observed failing or out of allowance; answers lean on Wikipedia and news feeds, and she says so when she cannot confirm something." : "Observed not answering right now, so it is not being relied on.") };
+    if (h === "unknown") return { name, state: "unknown", note: (note ? note + " " : "") + "No recent health check, so it is not reported as healthy." };
     return { name, state, note };
   }) }));
-  const label = { live: "LIVE", connected: "CONNECTED (working now)", degraded: "DEGRADED (works, but weaker right now)", requires_auth: "REQUIRES YOUR AUTHORISATION", not_built: "NOT BUILT YET", unsupported: "NOT SUPPORTED (by policy or design)" };
+  const label = { live: "LIVE", connected: "CONNECTED (working now)", degraded: "DEGRADED (works, but weaker right now)", unknown: "STATUS UNKNOWN (no recent health check)", requires_auth: "REQUIRES YOUR AUTHORISATION", not_built: "NOT BUILT YET", unsupported: "NOT SUPPORTED (by policy or design)" };
   const text = groups.map((g) => g.area + ":\n" + g.items.map((i) => "  - [" + label[i.state] + "] " + i.name + (i.note ? " — " + i.note : "")).join("\n")).join("\n");
   const flat = groups.flatMap((g) => g.items), by_state = {}; for (const it of flat) by_state[it.state] = (by_state[it.state] || 0) + 1;
   return { generated: new Date().toISOString(), counts: { capability_items: flat.length, by_state, note: "capability items are user-facing statements about what Noria can do, grouped by area; they are not the same thing as the executable tools in /brain/tools (a tool can support several items, and some items need no tool)" }, groups, text };
@@ -1851,15 +1887,39 @@ data: ${JSON.stringify({ done: true })}
       return new Response(JSON.stringify(showKeys ? { status: ok ? "ok" : "no-key", keys: { cloudflareAI: !!env.AI, groq: g, mistral: mistralKeys(env).length, cerebras: cerebrasKeys(env).length, gemini: gm, openrouter: o } } : { status: ok ? "ok" : "no-key" }), { headers: JSON_H });
     }
 
+    // ── the read-only tool route: the server end of the browser runtime. The same gate the executor uses runs HERE too, so nothing depends on
+    //    the caller being honest: only registered, allow-listed, tested, read-only tools run, and nothing is ever written. ──
+    if (path === "/brain/tool" && request.method === "POST") {
+      const fail = (status, code, reason) => new Response(JSON.stringify({ ok: false, code, reason }), { status, headers: JSON_H });
+      let b; try { b = await request.json(); } catch (_) { return fail(400, "bad_request", "send JSON: { tool, input }"); }
+      if (!b || typeof b !== "object" || Array.isArray(b)) return fail(400, "bad_request", "send a JSON object: { tool, input }");
+      const name = String(b.tool || ""), input = b.input && typeof b.input === "object" ? b.input : {};
+      const ip = request.headers.get("cf-connecting-ip") || "unknown", minute = Math.floor(Date.now() / 60000), rlKey = "rl/tool/" + ip + "/" + minute;
+      const used = ((await HEALTH_STORE.get(rlKey)) || { n: 0 }).n; if (used >= 40) return fail(429, "rate_limited", "too many tool calls this minute");
+      await HEALTH_STORE.put(rlKey, { n: used + 1 }, 90);
+      const health = await toolHealth(env, { probe: false }), tool = listTools(health).find((t) => t.name === name);
+      if (!tool) return fail(404, "unregistered", "the tool is not in the registry");
+      const g = readOnlyLiveGate(tool); if (!g.ok) return fail(403, g.code, g.reason);
+      if (!canUse(tool)) return fail(503, "unavailable", name + " is " + tool.available);
+      const handler = TOOL_HANDLERS[name]; if (!handler) return fail(400, "not_a_server_tool", name + " runs on the device, not on the server");
+      const errs = validateInput(tool.input, input); if (errs.length) return fail(400, "invalid_input", errs.join("; "));
+      const t0 = Date.now();
+      try {
+        // a tool's own error must stay an error (withTimeout would swallow it into the fallback), so the race is done here
+        let timer; const out = await Promise.race([handler(input, env, { tz: b.tz }), new Promise((_, rej) => { timer = setTimeout(() => rej(Object.assign(new Error(name + " timed out after " + tool.timeoutMs + " ms"), { status: 504, code: "timeout" })), tool.timeoutMs); })]).finally(() => clearTimeout(timer));
+        return new Response(JSON.stringify({ ok: true, tool: name, output: sanitizeOutput(out), ms: Date.now() - t0, observed_at: new Date().toISOString(), read_only: true, health: tool.available }), { headers: JSON_H });
+      } catch (e) { return fail(e && e.status ? e.status : 502, (e && e.code) || "tool_error", String((e && e.message) || e).slice(0, 200)); }
+    }
+
     // ── the tool registry, search-provider status and the read-only planner ──
     if (path === "/brain/tools") {
-      const h = await toolHealth(env);
-      const tools = listTools(h).map((t) => ({ id: t.id, name: t.name, version: t.version, provider: t.provider, dependencies: t.dependencies, tests: t.tests, alternatives: t.alternatives, description: t.description, state: t.available, risk: t.risk, auth: t.auth, permissions: t.permissions, runtime: t.runtime, timeoutMs: t.timeoutMs, retry: t.retry, verify: t.verify, input: t.input, output: t.output }));
+      const h = await toolHealth(env, { probe: true });
+      const tools = listTools(h).map((t) => ({ id: t.id, name: t.name, version: t.version, provider: t.provider, dependencies: t.dependencies, tests: t.tests, alternatives: t.alternatives, description: t.description, state: t.available, risk: t.risk, auth: t.auth, permissions: t.permissions, runtime: t.runtime, timeoutMs: t.timeoutMs, retry: t.retry, verify: t.verify, input: t.input, output: t.output, test_state: t.test_state, live_read: !!t.live_read }));
       return new Response(JSON.stringify({ version: REGISTRY_VERSION, generated: new Date().toISOString(), summary: registrySummary(h), health: { search: h.search, feeds: h.feeds, ai: h.ai, accounts: h.accounts }, tools }), { headers: JSON_H });
     }
     if (path === "/brain/search/providers") {
-      const h = await toolHealth(env);
-      return new Response(JSON.stringify({ generated: new Date().toISOString(), webAvailable: h.webOk, providers: h.providers }), { headers: JSON_H });
+      const h = await toolHealth(env, { probe: true });
+      return new Response(JSON.stringify({ generated: new Date().toISOString(), webState: h.webState, webAvailable: h.webOk, freshnessMinutes: 15, providers: h.providers }), { headers: JSON_H });
     }
     if (path === "/brain/plan" && request.method === "POST") {
       let b; try { b = await request.json(); } catch (_) { b = {}; }

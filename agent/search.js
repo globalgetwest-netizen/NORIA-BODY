@@ -93,17 +93,54 @@ export function mergeProviderResults(ran, order) {
   return out;
 }
 
-// What the health records say, for the capability registry and the status page.
-export async function searchHealth(providers, env, store) {
-  const rows = [];
+// ── HEALTH ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+// A provider is only OK when there is a FRESH successful observation. What the records say:
+//   ok       succeeded within the freshness window
+//   quota    out of allowance right now (paused)                    -> degraded
+//   failing  failed within the freshness window                     -> degraded
+//   unknown  never observed, or the last observation is older than the window: nothing is assumed
+//   not_configured   no credential set
+// An unknown provider may still be TRIED (the attempt is the observation), but it is never reported as healthy.
+export const FRESH_MS = 15 * 60 * 1000;
+
+export function providerState(enabled, h, nowMs = now(), freshMs = FRESH_MS) {
+  if (!enabled) return "not_configured";
+  if (!h) return "unknown";
+  if (h.quotaUntil && h.quotaUntil > nowMs) return "quota";
+  if (nowMs - h.t > freshMs) return "unknown";
+  return h.ok ? "ok" : "failing";
+}
+
+export async function searchHealth(providers, env, store, opts = {}) {
+  const nowMs = opts.now || now(), freshMs = opts.freshMs || FRESH_MS, rows = [];
   for (const p of providers) {
     let enabled = false; try { enabled = !!p.enabled(env); } catch (_) {}
     const h = store ? await store.get("health/search/" + p.id).catch(() => null) : null;
-    let state = !enabled ? "not_configured" : !h ? "unknown" : h.quotaUntil && h.quotaUntil > now() ? "quota" : h.ok ? (now() - h.t < 3600000 ? "ok" : "unknown") : "failing";
-    rows.push({ id: p.id, kind: p.kind, enabled, state, lastOk: h ? !!h.ok : null, lastResults: h ? h.n : null, lastCheck: h ? new Date(h.t).toISOString() : null, error: h && !h.ok ? h.error : "", httpStatus: h && !h.ok && h.status ? h.status : 0 });
+    rows.push({ id: p.id, kind: p.kind, enabled, state: providerState(enabled, h, nowMs, freshMs), lastOk: h ? !!h.ok : null, lastResults: h ? h.n : null, lastCheck: h ? new Date(h.t).toISOString() : null, ageSeconds: h ? Math.round((nowMs - h.t) / 1000) : null, error: h && !h.ok ? h.error : "", httpStatus: h && !h.ok && h.status ? h.status : 0 });
   }
-  // the open web counts as available when at least one web/official provider is fine, or has not been tried yet
-  const webRows = rows.filter((r) => (r.kind === "web" || r.kind === "official") && r.enabled);
-  const webOk = !webRows.length ? false : webRows.some((r) => r.state === "ok" || r.state === "unknown");
-  return { providers: rows, webOk, anyOk: rows.some((r) => r.state === "ok") };
+  // The open web: ok if any web/official provider has a fresh success; degraded if every configured one is observed failing or out of quota;
+  // otherwise unknown (including "none configured": it cannot be called healthy).
+  const web = rows.filter((r) => (r.kind === "web" || r.kind === "official") && r.enabled);
+  const webState = web.some((r) => r.state === "ok") ? "ok" : web.length && web.every((r) => r.state === "quota" || r.state === "failing") ? "degraded" : "unknown";
+  const any = rows.filter((r) => r.enabled);
+  const anyState = any.some((r) => r.state === "ok") ? "ok" : any.length && any.every((r) => r.state === "quota" || r.state === "failing") ? "degraded" : "unknown";
+  return { providers: rows, webState, anyState, webOk: webState === "ok", anyOk: anyState === "ok" };
+}
+
+// Observes providers whose state is unknown by making one small real call, at most once per lockSeconds each (so a status page cannot
+// spend the allowance). Providers that are paused for quota are not probed. Returns the ids probed.
+export async function probeUnknown(providers, env, store, opts = {}) {
+  if (!store) return [];
+  const lock = opts.lockSeconds || 600, q = opts.query || "noria health check", probed = [], nowMs = opts.now || now();
+  await Promise.all(providers.map(async (p) => {
+    let enabled = false; try { enabled = !!p.enabled(env); } catch (_) {}
+    if (!enabled) return;
+    const h = await store.get("health/search/" + p.id).catch(() => null);
+    if (providerState(true, h, nowMs, opts.freshMs || FRESH_MS) !== "unknown") return;
+    const locked = await store.get("probe/" + p.id).catch(() => null);
+    if (locked && nowMs - locked.t < lock * 1000) return;
+    await store.put("probe/" + p.id, { t: nowMs }, lock);
+    await runOne(p, q, env, {}, store); probed.push(p.id);
+  }));
+  return probed;
 }

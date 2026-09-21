@@ -16,7 +16,7 @@
 //   missing_capabilities: [{ tool, state, reason }], audit: { planId, createdAt, registryVersion, objectiveHash, mode: "plan-only", executed: false }
 // }
 
-import { USABLE, REGISTRY_VERSION } from "./tools.js";
+import { canUse, REGISTRY_VERSION } from "./tools.js";
 
 export function buildPlannerMessages(objective, catalog, todayISO) {
   const system =
@@ -98,8 +98,9 @@ export function validatePlan(raw, objective, catalog, opts = {}) {
     for (const name of t.tools.filter((n) => !NO_TOOL.test(String(n).trim()))) {
       const tool = byName.get(name);
       if (!tool) { issues.push("task " + t.id + " named an unknown tool \"" + name + "\": dropped"); addMissing(name, "not_in_registry", "the planner named a tool that does not exist"); t.blocked_by.push(name + " (unknown)"); continue; }
-      if (!USABLE.has(tool.available)) { addMissing(name, tool.available, tool.available === "requires_auth" ? "needs the person's authorisation" : tool.available === "unsupported" ? "not supported by policy or design" : "not built yet"); t.blocked_by.push(name + " (" + tool.available + ")"); continue; }
+      if (!canUse(tool)) { addMissing(name, tool.available, tool.available === "requires_auth" ? "needs the person's authorisation" : tool.available === "unsupported" ? "not supported by policy or design" : "not built yet"); t.blocked_by.push(name + " (" + tool.available + ")"); continue; }
       if (tool.risk === "write") { t.approval_required = true; }
+      if (tool.available === "unknown") { t.notes = (t.notes || []).concat(name + " has no recent health check: it will be tried and observed"); if (!degraded.includes(name)) degraded.push(name); }
       if (tool.available === "degraded") { t.notes = (t.notes || []).concat(name + " is degraded right now: expect fewer or weaker results"); if (!degraded.includes(name)) degraded.push(name); }
       usable.push(name);
     }
