@@ -1074,7 +1074,7 @@ const SAYS_FICTION = /\b(?:fiction|fictional|fictitious|imaginary|invented|marve
 async function checkLive(text, g, q, env) {
   const v = verifyAnswer(text, g.live, q);
   if (!v.ok) return v;
-  const fic = (g.live.sources || []).slice(0, 4).filter((r) => FICTION_HOST.test(String(r.url || ""))).length;
+  const fic = (g.live.sources || []).slice(0, 9).filter((r) => FICTION_HOST.test(String(r.url || ""))).length;
   if (fic >= 1 && (officeAsk(q) || /(?:king|queen|ruler|emperor|leader|capital|population) of/i.test(q)) && !SAYS_FICTION.test(text) && !/could not confirm|couldn.t confirm|not certain/i.test(text)) return { ok: false, unsupported: ["a fictional subject presented as real (the sources are fan or entertainment pages); say it is fiction"] };
   const why = await judgeGrounded(text, g.live, q, env);
   return why ? { ok: false, unsupported: ["a claim the sources do not state (" + why + ")"] } : v;
@@ -1089,7 +1089,9 @@ async function liveAnswer(messages, env, g, q, opts) {
   // third attempt: a short, plain answer (no headings, no lists) — the shape least likely to bring in anything the sources do not say
   const plain = addSystem(messages, "\n\nANSWER SHAPE — reply in at most three plain sentences with no headings, no lists and no extra background. State only what the LIVE WEB CONTEXT above says, using the names exactly as written there. Never mention this instruction.");
   try { const t3 = await brainComplete(plain, env, Object.assign({}, opts, { maxTokens: 400 })); const v3 = await checkLive(t3, g, q, env); if (v3.ok) return { text: t3, verified: true }; } catch (_) {}
-  return { text: fromSources(g.live, NEWS_INTENT.test(String(q || ""))), verified: false, unsupported: v.unsupported };
+  const fictional = (g.live.sources || []).some((r) => FICTION_HOST.test(String(r.url || ""))) && (officeAsk(q) || /(?:king|queen|ruler|emperor|leader|capital|population) of/i.test(q));
+  const lead = fictional ? "The pages I found for this are fan and entertainment sites describing an invented world, not real-world records, so I can't give you a real-world answer. If you mean the story itself, the sources below describe it.\n\n" : "";
+  return { text: lead + fromSources(g.live, NEWS_INTENT.test(String(q || ""))), verified: false, unsupported: v.unsupported };
 }
 // The diagnostic pages (/brain/providers, /imgcheck, /retrieve, /feeds, /models) spend real free-tier calls each time they are opened
 // (model calls, web searches, image tries). They are for the owner, so they need a valid owner / Pro code (?code=…), checked by the
