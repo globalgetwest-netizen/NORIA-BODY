@@ -12,3 +12,7 @@ crons = ["*/10 * * * *"]
 [[kv_namespaces]]
 binding = "SYNC"
 id = "e8a519e217894be2a63c014c2ad36acc"
+
+[vars]
+# Image models tried in order (Cloudflare ids). If all fail, the built-in Stable Diffusion XL path runs.
+IMAGE_MODELS = "@cf/black-forest-labs/flux-2-klein-9b,@cf/leonardo/lucid-origin,@cf/black-forest-labs/flux-1-schnell"
