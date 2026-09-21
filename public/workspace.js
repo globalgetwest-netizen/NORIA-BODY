@@ -1576,6 +1576,12 @@ const GUIDES = [
     prompt: (v) => `Create a ${v.days}-day travel itinerary for ${v.destination}${v.focus ? ` (${v.focus})` : ''}.`,
     web: (v) => `${v.destination} travel guide ${YEAR} attractions cost`,
     system: (v) => `Produce a practical day-by-day itinerary. Markdown: # ${v.destination} — ${v.days}-Day Itinerary, ## Overview & Best Time to Go, then ## Day 1 through ## Day ${v.days} (each with morning / afternoon / evening), ## Getting Around, ## Where to Stay, ## Budget (local currency ranges), ## Practical Notes. Opening hours and prices change — say they must be confirmed and never present them as fixed fact.` },
+  { id: 'series', cat: 'creator', title: 'Content Series & Calendar Planner', icon: ICON + '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M10 9.5v5l4.5-2.5z"/></svg>',
+    desc: 'A multi-part content series with episode plan, posting calendar and a consistent visual style — ready to export to Excel or PowerPoint.',
+    fields: [{ k: 'topic', label: 'Topic or niche', ph: 'e.g. street food from across Ghana' }, { k: 'platform', label: 'Main platform', type: 'select', options: ['YouTube', 'TikTok', 'Instagram', 'LinkedIn', 'Podcast', 'Facebook'] }, { k: 'audience', label: 'Who it is for', ph: 'e.g. young Ghanaians and the diaspora', long: true }, { k: 'goal', label: 'Your goal (optional)', ph: 'e.g. build an audience, promote my business, get clients', optional: true }, { k: 'parts', label: 'How many episodes / weeks', ph: 'e.g. 8', optional: true }, { k: 'location', label: 'Your city / country (optional)', ph: 'e.g. Accra, Ghana', optional: true }],
+    prompt: (v) => `Plan a content series of ${v.parts || '8'} episodes about "${v.topic}" for ${v.platform}. Audience: ${v.audience}.${v.goal ? ` Goal: ${v.goal}.` : ''}${v.location ? ` Based in: ${v.location}.` : ''}`,
+    web: (v) => `${v.topic} ${v.platform} content trends ${YEAR} ${v.location || ''}`.trim(),
+    system: (v) => 'Produce a practical CONTENT SERIES PLAN. Use markdown headings: # ' + v.topic + ' — Content Series Plan, ## Series Concept (one clear promise and why this audience would follow it), ## Audience & Goal, ## Content Pillars (a table: Pillar | What it covers | Why it works), ## Episode Plan (a table with one row per episode: # | Title | Hook for the first 3 seconds | Format and length | Key points | Call to action), ## Posting Calendar (a table: Week | Day | Episode | Platform | Notes; choose a realistic rhythm a solo creator can keep), ## Production Checklist (a short bullet list of what to prepare for each episode), ## Visual Style Guide (colours, fonts, framing, thumbnail or cover layout, and the caption style, written so every episode looks like part of one series; use words, not image prompts), ## How to Measure Progress (which numbers to watch and what a healthy early result looks like), ## Next Steps. Make the episode titles specific, hooks concrete and platform-appropriate for ' + v.platform + '. Be honest: never promise views, followers or income, describe results as things to test and adjust. Where a location is given, use local references, languages and events; otherwise keep it general.' },
 ]
 const guidesEl = $('guides'), guideModal = $('guideModal')
 let activeGuide = null
@@ -1583,6 +1589,7 @@ const GUIDE_CATS = [
   { id: 'strategy', title: 'Executive & Venture Strategy' },
   { id: 'career', title: 'Career & Professional Mastery' },
   { id: 'mobility', title: 'Global Mobility & Logistics' },
+  { id: 'creator', title: 'Creator & Content Growth' },
 ]
 function renderGuides() {
   if (!guidesEl) return
@@ -1627,7 +1634,7 @@ $('guideCreate') && $('guideCreate').addEventListener('click', () => {
   respond(activeGuide.prompt(v), { display: activeGuide.title + (summary ? ': ' + summary : ''), doc: true, system: (activeGuide.system ? activeGuide.system(v) : '') + MODERN_STANDARD + DOC_RULES, web: activeGuide.web ? activeGuide.web(v) : '', noWeb: !activeGuide.web })
 })
 // ── Command palette (/) — the elite engines, summoned; the canvas stays pristine ──
-const CMD_KEYS = { business: 'venture', roadmap: 'architecture', profile: 'profile', career: 'career', visa: 'mobility', travel: 'logistics' }
+const CMD_KEYS = { business: 'venture', roadmap: 'architecture', profile: 'profile', career: 'career', visa: 'mobility', travel: 'logistics', series: 'content' }
 const cmdPalette = $('cmdPalette'), cmdList = $('cmdList'), cmdBackdrop = $('cmdBackdrop'), cmdBtn = $('cmdBtn')
 let cmdOpen = false, cmdItems = [], cmdSel = -1
 function cmdMatches(g, q) { return !q || (CMD_KEYS[g.id] || g.id).includes(q) || g.title.toLowerCase().includes(q) }

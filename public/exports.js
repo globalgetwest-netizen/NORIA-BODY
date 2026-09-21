@@ -254,16 +254,27 @@ export async function buildPptx(blocks, title, lib, opts = {}) {
       chunk.push(b); chars += b.text.length
     }
     flush()
-    // table slides
+    // table slides — rows are packed by their estimated wrapped height so nothing runs off the slide
     for (const t of tables) {
       const cols = t.header.length
-      for (let at = 0; at < Math.max(1, t.rows.length); at += TABLE_ROWS) {
-        const s = pptx.addSlide(); frame(s, sec.title, first ? false : (at === 0 ? 'table' : true)); first = false
-        const rows = [t.header.map((h) => ({ text: plain(h), options: { bold: true, color: 'FFFFFF', fill: { color: NAVY }, fontFace: F, fontSize: 15 } }))]
-        for (const r of t.rows.slice(at, at + TABLE_ROWS)) rows.push(r.map((c) => ({ text: plain(c), options: { color: INK, fontFace: F, fontSize: 14, fill: { color: (rows.length % 2) ? 'FFFFFF' : LIGHT } } })))
-        s.addTable(rows, { x: 0.7, y: 1.7, w: 11.9, colW: Array(cols).fill(11.9 / cols), border: { type: 'solid', pt: 0.5, color: 'CCCCCC' }, valign: 'middle', margin: [0.06, 0.1, 0.06, 0.1] })
+      const fs = cols >= 5 ? 11 : cols === 4 ? 12 : 14
+      const weights = t.header.map((h, ci) => Math.max(1, Math.min(4, Math.max(plain(h).length, ...t.rows.map((r) => Math.min(60, plain(r[ci] || []).length))) / 12)))
+      const tot = weights.reduce((x, y) => x + y, 0), colW = weights.map((w) => (11.9 * w) / tot)
+      const rowH = (cells) => Math.max(...cells.map((c, ci) => Math.ceil(Math.max(1, plain(c).length) / Math.max(4, (colW[ci] - 0.2) * 72 / (fs * 0.55)))), 1) * fs * 1.3 / 72 + 0.16
+      const headH = rowH(t.header), AVAIL = 5.1
+      let at = 0
+      do {
+        const pick = []; let used = headH
+        while (at < t.rows.length) {
+          const h = rowH(t.rows[at]); if (pick.length && used + h > AVAIL) break
+          pick.push(t.rows[at]); used += h; at++
+        }
+        const s = pptx.addSlide(); frame(s, sec.title, first ? false : (pick.length && at - pick.length === 0 ? 'table' : true)); first = false
+        const rows = [t.header.map((h) => ({ text: plain(h), options: { bold: true, color: 'FFFFFF', fill: { color: NAVY }, fontFace: F, fontSize: fs + 1 } }))]
+        for (const r of pick) rows.push(r.map((c) => ({ text: plain(c), options: { color: INK, fontFace: F, fontSize: fs, fill: { color: (rows.length % 2) ? 'FFFFFF' : LIGHT } } })))
+        s.addTable(rows, { x: 0.7, y: 1.7, w: 11.9, colW, border: { type: 'solid', pt: 0.5, color: 'CCCCCC' }, valign: 'middle', margin: [0.05, 0.08, 0.05, 0.08] })
         number(s)
-      }
+      } while (at < t.rows.length)
     }
   }
   if (sections.length === 0) { const s = pptx.addSlide(); frame(s, title || 'Overview'); number(s) }
