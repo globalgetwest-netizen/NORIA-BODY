@@ -761,6 +761,19 @@ function refBlock(q) {
 // Nothing outside Noria may hold up her reply: a search, a feed or a data service that stalls is given a fixed time and
 // then dropped, and she answers with what she has (or says plainly that she could not get the live detail).
 const withTimeout = (p, ms, fallback) => Promise.race([Promise.resolve(p).catch(() => fallback), new Promise((r) => setTimeout(() => r(fallback), ms))]);
+// The real clock, on EVERY request. The time tool below only fires on the phrasings it recognises, and a model that is
+// not handed the clock either says it "cannot know the time" or invents a date. So every turn carries one short line with
+// the exact date and time (in the person's own time zone, plus UTC); it is the source for any question about now.
+function nowBlock(tz) {
+  const zone = tz && String(tz).includes("/") ? String(tz) : "UTC";
+  const d = new Date();
+  let local = "";
+  try {
+    local = new Intl.DateTimeFormat("en-GB", { timeZone: zone, weekday: "long", day: "numeric", month: "long", year: "numeric", hour: "numeric", minute: "2-digit", hour12: true }).format(d);
+  } catch (_) { return ""; }
+  return "\n\n[CURRENT DATE AND TIME — the exact server clock, authoritative: " + local + " (" + zone + "); UTC " + d.toISOString().slice(0, 16).replace("T", " ") +
+    ". Use this for any question about the time, date, day of the week, month, year, or how long until or since something. Never say you cannot know the time and never guess a date.]";
+}
 // Router-level grounding: when a query needs live facts, fetch the web and fold
 // the results into the system message so every provider in the fallback chain
 // reasons over the same fresh context. `ground` in the request body forces it on
@@ -768,6 +781,7 @@ const withTimeout = (p, ms, fallback) => Promise.race([Promise.resolve(p).catch(
 // the router decides with serverNeedsWeb().
 async function groundMessages(messages, body, env) {
   const q = String(body.query || "");
+  messages = addSystem(messages, nowBlock(body.tz));
   const rb = refBlock(q);
   if (rb) return { messages: addSystem(messages, rb), grounded: true }; // a fixed list is read off the library, not the web
   const fb = futureBlock(q);
