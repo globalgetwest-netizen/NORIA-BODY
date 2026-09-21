@@ -627,6 +627,23 @@ function mathBlock(q) {
   return "\n\nCOMPUTED EXACTLY BY THE SYSTEM (calculator) — authoritative; do not recompute or round differently.\n- " + expr.replace(/\*/g, " × ").replace(/\//g, " ÷ ").replace(/\^/g, " ^ ") + " = " + val.toLocaleString("en-US", { maximumFractionDigits: 10 }) + "\nState the result plainly.";
 }
 const calcBlock = (q) => calendarBlock(q) || mathBlock(q);
+// A question that is ONLY arithmetic ("what is 17% of 2,340") is answered by the calculator itself. Even with the exact
+// result placed in front of a model, one reply in a few came out wrong (39.78 for 397.8), so a plain sum never goes
+// through a model at all: instant, and correct every time. Anything with other words in it still goes to the model.
+const MATH_WORDS = /^(what|what's|whats|is|calculate|compute|how|much|solve|evaluate|the|result|of|percent|times|plus|minus|divided|by|multiplied|squared|cubed|power|to|square|root|equals?|please|tell|me|answer|[\d.,+\-*\/^()×÷x%=]+)$/i;
+function mathDirect(q) {
+  const raw = String(q || "").trim();
+  if (raw.length > 70 || !/\d/.test(raw)) return null;
+  const toks = raw.replace(/[?!]/g, " ").split(/\s+/).filter(Boolean);
+  if (!toks.length || !toks.every((t) => MATH_WORDS.test(t))) return null;
+  const blk = mathBlock(raw);
+  const m = /= ([^\n]+)\n/.exec(blk);
+  if (!m) return null;
+  const val = Number(String(m[1]).replace(/,/g, ""));
+  if (!isFinite(val)) return null;
+  const shown = raw.replace(/[?!=]/g, "").replace(/^(please\s+)?(tell me\s+)?(what(?:'s| is)?|whats|calculate|compute|how much is|solve|evaluate|the result of|the answer to)\s+/i, "").trim();
+  return shown + " = **" + val.toLocaleString("en-US", { maximumFractionDigits: 10 }) + "**";
+}
 // A question about the RESULT of a year that hasn't happened yet ("who won the 2050 World Cup") has no
 // true answer. Left alone, the model invents one — so the system tells her the date and forbids it.
 function futureBlock(q) {
@@ -1005,7 +1022,7 @@ export default {
       let body; try { body = await request.json(); } catch (_) { body = {}; }
       let messages = buildMessages(body);
       if (!messages.length) return new Response(JSON.stringify({ error: "empty request" }), { status: 400, headers: JSON_H });
-      const refAns = refDirect(body.query);
+      const refAns = refDirect(body.query) || mathDirect(body.query);
       if (refAns) return new Response(JSON.stringify({ answer: refAns }), { headers: JSON_H });
       const g = await groundMessages(messages, body, env);
       messages = g.messages;
@@ -1024,7 +1041,7 @@ export default {
     // ── Brain: streaming (SSE) — translate Groq deltas to the app's {token}/{done} ──
     if (path === "/brain/ask/stream" && request.method === "POST") {
       let body; try { body = await request.json(); } catch (_) { body = {}; }
-      const refAns = refDirect(body.query);
+      const refAns = refDirect(body.query) || mathDirect(body.query);
       if (refAns) return new Response(`data: ${JSON.stringify({ token: refAns })}
 
 data: ${JSON.stringify({ done: true })}
