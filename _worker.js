@@ -142,11 +142,14 @@ const NEWS_FEEDS = [
   "https://feeds.bbci.co.uk/news/world/africa/rss.xml",
   "https://www.aljazeera.com/xml/rss/all.xml",
   "https://allafrica.com/tools/headlines/rdf/latest/headlines.rdf",
-  "https://citinewsroom.com/feed/",
-  "https://www.gna.org.gh/feed/",
+  "https://www.myjoyonline.com/feed/",
+  "https://www.graphic.com.gh/news/general-news.feed",
+  "https://3news.com/feed/",
+  "https://www.vanguardngr.com/feed/",
+  "https://www.nation.africa/kenya/rss.xml",
+  "https://www.standardmedia.co.ke/rss/headlines.php",
   "https://punchng.com/feed/",
   "https://www.premiumtimesng.com/feed",
-  "https://www.thecable.ng/feed",
 ];
 function cdata(s) { return String(s || "").replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1"); }
 function parseFeed(xml) {
