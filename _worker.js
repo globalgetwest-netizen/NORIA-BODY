@@ -302,6 +302,7 @@ async function webSearchRaw(q, env, fresh, o) {
   const tavilyP = withTimeout((async () => { for (const k of tks) { const t = await tavilySearch(q, k); if (t === null) continue; return t; } return []; })(), 7000, []);
   const braveP = env && env.BRAVE_KEY ? withTimeout(braveSearch(q, env.BRAVE_KEY), 6000, []) : Promise.resolve([]);
   const [tv, br, w, n] = await Promise.all([tavilyP, braveP, withTimeout(wikiSearch(q), 6000, []), o && o.noNews ? Promise.resolve([]) : withTimeout(newsSearch(q), 6000, [])]);
+  try { if (typeof caches !== "undefined" && tks.length) await caches.default.put(new Request("https://noria-cache.invalid/health/web"), new Response(JSON.stringify({ ok: (tv || []).filter((x) => x.title !== "Summary").length + (br || []).length > 0, t: Date.now() }), { headers: { "Cache-Control": "max-age=3600" } })); } catch (_) {}
   const summary = (tv || []).filter((x) => x.title === "Summary").map((x) => Object.assign({}, x, { snippet: "(search-engine summary — check it against the sources above) " + x.snippet }));
   const tag = (list, src) => (list || []).map((x) => Object.assign({}, x, { src }));
   const rows = tag((tv || []).filter((x) => x.title !== "Summary"), "web");
@@ -1074,17 +1075,48 @@ function verifyAnswer(text, live, q) {
   // a short factual answer may not introduce two unsupported names; a long summary of many items is judged by proportion
   const recentYear = new Date().getUTCFullYear() - 1; // "in office since 2022" is history the model may know; a claim about this or last year must be in the sources
   const badNames = bad.filter((x) => !/^(?:19|20)\d{2}$/.test(x) && !/^\d+(?:\.\d+)?$/.test(x)), yearBad = years.some((y) => Number(y) >= recentYear && !hay.includes(y));
-  // "Who won the most recent …": an answer that names only an OLD year while the sources hold a newer one is the model's memory
-  // talking (the previous edition), or a mix of old and new. It is treated as unsupported so the answer is redone from the sources.
-  let stale = false;
-  if (RECENT_EVENT_Q.test(String(q || ""))) {
-    const ay = (String(text).replace(/(?:dated|as of|source:?)[^,.;)]{0,40}/gi, " ").replace(/\d{4}-\d{2}-\d{2}/g, " ").match(/\b(?:19|20)\d{2}\b/g) || []).map(Number), cy = new Date().getUTCFullYear();
-    const ctxNew = (String(live.ctx).match(/\b(?:19|20)\d{2}\b/g) || []).some((y) => Number(y) >= cy - 1);
-    const oldTag = /\b((?:19|20)\d{2})\s+(?:edition|tournament|final|season|cup|afcon|world cup|olympics|championship|title)\b|\b(?:edition|tournament|final|season|cup|afcon|championship|olympics)\s*[(]?((?:19|20)\d{2})\b/i.exec(String(text).replace(/(?:dated|as of|source:?)[^,.;)]{0,40}/gi, " ").replace(/\d{4}-\d{2}-\d{2}/g, " "));
-    if (oldTag && Number(oldTag[1] || oldTag[2]) <= cy - 2) { stale = true; bad.push("an older edition (" + (oldTag[1] || oldTag[2]) + ") attached to the most recent one"); }
-    if (ay.length && ay.every((y) => y <= cy - 2)) /* named only old years: with no recent year in the sources there is no evidence it is the newest either */ { stale = true; bad.push("an older edition (" + ay[0] + ") instead of the most recent one"); }
-  }
+  // Time: does the answer refer to the moment the question asks about? (see temporalIssues)
+  const temporal = temporalIssues(q, text), stale = temporal.length > 0;
+  for (const t of temporal) bad.push(t);
   return { ok: !stale && !yearBad && !badNums.length && (badNames.length < 2 || badNames.length / Math.max(1, phrases.length) < 0.25), unsupported: bad };
+}
+// ── TEMPORAL EVIDENCE RESOLVER ─────────────────────────────────────────────────────────────────────────────────────
+// One mechanism for every question whose answer depends on WHEN: it works out which moment the question means (the newest one, this
+// year, last year, the next one, or an explicit year the person named) and checks that the years the answer relies on match that
+// moment. It replaces one-off rules for individual events: sports, elections, releases, holidays and prices all pass through it.
+const EVENT_NOUN = /\b(?:won|winner|winners|champion|champions|final|finals|edition|tournament|cup|league|title|election|season|match|result|results|record|released?|launch(?:ed)?|award)\b/i;
+function temporalIntent(q) {
+  const s = String(q || "");
+  if (/\b(?:19|20)\d{2}\b/.test(s)) return "explicit"; // the person named the year: an old year is exactly what they asked for
+  if (/\b(?:previous|earlier|former|first|original|history of|all[- ]time)\b/i.test(s)) return "explicit";
+  if (/\b(?:next|upcoming|coming up|will be held|will take place|scheduled|how many days (?:until|till|to)|when is the next)\b/i.test(s)) return "upcoming";
+  if (/\b(?:last year|previous year|year before)\b/i.test(s)) return "last_year";
+  if (/\b(?:this year|this season)\b/i.test(s)) return "this_year";
+  if (/\b(?:most recent|latest|newest|current(?:ly)?|reigning|defending|last)\b/i.test(s) && EVENT_NOUN.test(s)) return "latest";
+  return "none";
+}
+function temporalIssues(q, text) {
+  const kind = temporalIntent(q);
+  if (kind === "explicit" || kind === "none") return [];
+  const cy = new Date().getUTCFullYear();
+  // years the answer relies on (not the dates of the data itself, which say when the sources were read)
+  const clean = String(text).replace(/(?:dated|as of|source:?)[^,.;)]{0,40}/gi, " ").replace(/\d{4}-\d{2}-\d{2}/g, " ");
+  const ys = (clean.match(/\b(?:19|20)\d{2}\b/g) || []).map(Number);
+  if (!ys.length) return [];
+  const out = [];
+  if (kind === "latest") {
+    // an old year stuck to the event's own name ("AFCON 2023", "the 2019 final") is a wrong label even when the winner is right
+    const tag = /\b((?:19|20)\d{2})\s+(?:edition|tournament|final|season|cup|afcon|world cup|olympics|championship|title)\b|\b(?:edition|tournament|final|season|cup|afcon|championship|olympics)\s*[(]?((?:19|20)\d{2})\b/i.exec(clean);
+    if (tag && Number(tag[1] || tag[2]) <= cy - 2) out.push("an older edition (" + (tag[1] || tag[2]) + ") attached to the most recent one");
+    else if (ys.every((y) => y <= cy - 2)) out.push("an older edition (" + ys[0] + ") instead of the most recent one");
+  } else if (kind === "this_year") {
+    if (ys.every((y) => y < cy)) out.push("the answer is about " + ys[ys.length - 1] + ", not this year");
+  } else if (kind === "last_year") {
+    if (ys.every((y) => y <= cy - 2)) out.push("the answer is about " + ys[ys.length - 1] + ", not last year");
+  } else if (kind === "upcoming") {
+    if (ys.every((y) => y < cy)) out.push("a past date (" + Math.max(...ys) + ") presented as upcoming");
+  }
+  return out;
 }
 const RECENT_EVENT_Q = /\b(?:most recent|latest|last|current|newest)\b[^?.]{0,60}\b(?:won|winner|champion|champions|final|edition|tournament|cup|league|title|election|season)\b|\bwho won\b[^?.]{0,40}\b(?:last|latest|most recent|recent)\b/i;
 function fromSources(live, news) {
@@ -1160,29 +1192,30 @@ const CAPS = [
   ]],
   ["Knowledge & documents", [
     ["Reading PDF, Word, text, CSV, TSV and Excel files; whole-document search of long files on Noria Pro", "live", "", "The free plan reads the opening pages; Noria Pro searches the whole document. Retrieval is by keywords on the device, not by a vector database."],
-    ["Vector database or semantic knowledge-base construction", "planned", "", "Not built."],
+    ["Vector database or semantic knowledge-base construction", "not_built", "", "Not built."],
   ]],
   ["Memory", [
     ["Remembering facts you share, on this device; deleting it whenever you like", "live", "", "Stored in the browser, private to the device."],
     ["Saved conversations under a sign-in, synced across devices", "connected", "accounts", "Optional account; conversations are stored under it."],
-    ["Long-term project memory, task memory and cross-tool memory", "planned", "", "Not built."],
+    ["Long-term project memory, task memory and cross-tool memory", "not_built", "", "Not built."],
   ]],
   ["Research", [
     ["Deep research: several angles searched, a cited brief written, unsupported sentences removed, real sources listed", "connected", "search", "Noria Pro, a few briefs a day."],
-    ["Automatic detection of contradictions between sources", "planned", "", "Not built as a separate step; the fact-check only catches claims the sources do not support."],
+    ["Automatic detection of contradictions between sources", "not_built", "", "Not built as a separate step; the fact-check only catches claims the sources do not support."],
   ]],
   ["Images & senses", [
+    ["Identifying real people from their faces; realistic pictures of real people", "unsupported", "", "Declined on purpose: it can mislead and harm."],
     ["Understanding photos and images", "connected", "ai", "Noria Pro. Reading the text in a photo also works on the device."],
     ["Charts and tables drawn from your data or from a request", "live", "", "Drawn in the browser."],
     ["Creating pictures", "connected", "ai", "Depends on a daily allowance and is not always available; no realistic pictures of real people."],
   ]],
   ["Data", [
     ["Exact spreadsheet analysis: row counts, totals, averages, medians, distinct values, top-N, filters, group-by, correlation", "live", "", "Computed from every row on the device, not estimated by a model."],
-    ["Statistical modelling, forecasting, database access", "planned", "", "Not built."],
+    ["Statistical modelling, forecasting, database access", "not_built", "", "Not built."],
   ]],
   ["Programming", [
     ["Writing, explaining and debugging code; designing systems; automation scripts", "live", "", "Written and reviewed by the model; Noria does not run the code."],
-    ["Running code, repository analysis, calling outside APIs for you", "planned", "", "Not built."],
+    ["Running code, repository analysis, calling outside APIs for you", "not_built", "", "Not built."],
   ]],
   ["Creation", [
     ["Professional writing, translation, marketing and educational material, presentations, proposals", "live", "", ""],
@@ -1190,11 +1223,13 @@ const CAPS = [
     ["Voice: speaking answers aloud and listening", "connected", "ai", "Hands-free conversation on Noria Pro."],
   ]],
   ["Autonomous action", [
-    ["Autonomous multi-step agents that choose tools, run them in parallel, recover from errors and finish a job alone", "planned", "", "Not built. Noria follows fixed pipelines (decide, retrieve, answer, verify, correct); she does not take actions in other apps, send messages or make purchases."],
-    ["Connections to email, calendars, maps or other accounts", "planned", "", "Not built."],
+    ["Autonomous multi-step agents that choose tools, run them in parallel, recover from errors and finish a job alone", "not_built", "", "Not built. Noria follows fixed pipelines (decide, retrieve, answer, verify, correct); she does not take actions in other apps, send messages or make purchases."],
+    ["Connections to email, calendars, maps or other accounts", "not_built", "", "Not built."],
   ]],
 ];
 async function capabilityReport(env) {
+  let webOk = true;
+  try { const h = typeof caches !== "undefined" ? await caches.default.match(new Request("https://noria-cache.invalid/health/web")) : null; if (h) { const j = await h.json(); webOk = !!j.ok; } } catch (_) {}
   const aiUp = await withTimeout(fetch("https://noria-ai.insights-skyglobe.workers.dev/", { signal: AbortSignal.timeout(3500) }).then((r) => r.status < 500).catch(() => false), 4000, false);
   const have = {
     search: true, // Wikipedia and the news feeds need no key, so live search never depends on one service
@@ -1204,9 +1239,12 @@ async function capabilityReport(env) {
   };
   const groups = CAPS.map(([area, items]) => ({ area, items: items.map(([name, state, need, note]) => {
     const up = !need || have[need] !== false;
-    return { name, state: state === "planned" ? "planned" : up ? state : "unavailable", note };
+    if (state === "not_built" || state === "unsupported" || state === "requires_auth") return { name, state, note };
+    if (!up) return { name, state: "degraded", note: (note ? note + " " : "") + "Right now this is not answering, so it is not being relied on." };
+    if (need === "search" && !webOk) return { name, state: "degraded", note: (note ? note + " " : "") + "The open-web search has returned nothing recently; answers lean on Wikipedia and news feeds, and she says so when she cannot confirm something." };
+    return { name, state, note };
   }) }));
-  const label = { live: "LIVE", connected: "CONNECTED (working now)", planned: "NOT BUILT YET", unavailable: "TEMPORARILY UNAVAILABLE" };
+  const label = { live: "LIVE", connected: "CONNECTED (working now)", degraded: "DEGRADED (works, but weaker right now)", requires_auth: "REQUIRES YOUR AUTHORISATION", not_built: "NOT BUILT YET", unsupported: "NOT SUPPORTED (by policy or design)" };
   const text = groups.map((g) => g.area + ":\n" + g.items.map((i) => "  - [" + label[i.state] + "] " + i.name + (i.note ? " — " + i.note : "")).join("\n")).join("\n");
   return { generated: new Date().toISOString(), groups, text };
 }

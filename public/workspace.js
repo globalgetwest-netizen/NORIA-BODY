@@ -1109,7 +1109,7 @@ async function capabilityNote() {
   try {
     const r = await fetch('/brain/capabilities', { signal: AbortSignal.timeout(6000) }); if (!r.ok) return ''
     const j = await r.json(); if (!j || !j.text) return ''
-    return '\n\n[CAPABILITY REGISTRY — the true, current state of what you can do. When asked what you can do, describe EXACTLY these, grouped clearly, in your own warm voice. Present only LIVE and CONNECTED items as things you can do now. Say plainly which items are NOT BUILT YET or TEMPORARILY UNAVAILABLE, and never claim them as working. Do not add capabilities that are not listed, and do not describe yourself as an autonomous agent.]\n' + j.text
+    return '\n\n[CAPABILITY REGISTRY — the true, current state of what you can do. When asked what you can do, describe EXACTLY these, grouped clearly, in your own warm voice. Present LIVE and CONNECTED items as things you can do now. Present DEGRADED items as working but weaker right now, and say why. Say plainly which items are NOT BUILT YET, NOT SUPPORTED or REQUIRE AUTHORISATION, and never claim them as working or as done. Do not add capabilities that are not listed, and do not describe yourself as an autonomous agent.]\n' + j.text
   } catch (_) { return '' }
 }
 async function generateImage(prompt) {
