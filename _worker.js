@@ -2,6 +2,7 @@ import { runProviders, searchHealth, probeUnknown } from "./agent/search.js";
 import { TOOLS, REGISTRY_VERSION, listTools, plannerCatalog, registrySummary, canUse } from "./agent/tools.js";
 import { readOnlyLiveGate } from "./agent/gate.js";
 import { safeCalc } from "./agent/calc.js";
+import { FAMILIES, validateFamilies, summarizeFamilies } from "./agent/families.js";
 import { validateInput, sanitizeOutput } from "./agent/executor.js";
 import { buildPlannerMessages, extractJson, validatePlan } from "./agent/planner.js";
 // Cloudflare Pages (Advanced Mode) — Noria's front door AND her brain, served
@@ -1937,6 +1938,11 @@ data: ${JSON.stringify({ done: true })}
       const h = await toolHealth(env, { probe: true });
       const tools = listTools(h).map((t) => ({ id: t.id, name: t.name, version: t.version, provider: t.provider, dependencies: t.dependencies, tests: t.tests, alternatives: t.alternatives, description: t.description, state: t.available, risk: t.risk, auth: t.auth, permissions: t.permissions, runtime: t.runtime, timeoutMs: t.timeoutMs, retry: t.retry, verify: t.verify, input: t.input, output: t.output, test_state: t.test_state, live_read: !!t.live_read }));
       return new Response(JSON.stringify({ version: REGISTRY_VERSION, generated: new Date().toISOString(), summary: registrySummary(h), health: { search: h.search, feeds: h.feeds, ai: h.ai, accounts: h.accounts }, tools }), { headers: JSON_H });
+    }
+    // Target / Implemented / Verified for every capability family. The tests measure the machine; they do not define what Noria can do.
+    if (path === "/brain/families") {
+      const states = Object.fromEntries(TOOLS.map((x) => [x.name, x.state]));
+      return new Response(JSON.stringify({ generated: new Date().toISOString(), summary: summarizeFamilies(FAMILIES), rule_violations: validateFamilies(FAMILIES, states, null), families: FAMILIES }), { headers: JSON_H });
     }
     if (path === "/brain/search/providers") {
       const h = await toolHealth(env, { probe: true });

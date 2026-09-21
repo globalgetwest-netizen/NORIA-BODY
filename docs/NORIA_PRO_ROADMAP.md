@@ -172,3 +172,7 @@ Authorised: read-only live execution only. Acting tools (email, messages, calend
 **Allowed live read-only tools (9):** web.search, weather.get, fx.rate, crypto.price, clock.now, calc.math, reference.list, doc.read, data.query. Each has an automated test. Not allowed: memory.device (not on the list), research.deep, vision, image, speech (Pro-gated), export and charts (untested by machine).
 
 **Tests:** 334 offline checks (`arch_tests.mjs`, 13 suites) plus live tests of the route (`feeds_t.mjs`) and a run in a real browser (results in the session report).
+
+## Direction (read first)
+
+The 100-row table above and the test suites are instruments and status, not the definition of Noria. The target is a general-purpose objective-to-result agent system; see `docs/NORIA_PRO_GENERAL_ARCHITECTURE.md` and the live table at `GET /brain/families` (Target / Implemented / Verified for 59 capabilities in 12 families).
