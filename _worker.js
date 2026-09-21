@@ -228,6 +228,31 @@ async function tavilySearch(q, key) {
     return sorted;
   } catch (_) { return null; }
 }
+// RELEVANCE comes before recency. Ordering everything newest-first put unrelated fresh headlines above the page that actually
+// answers the question. So each result is scored on how many of the question's distinctive words it contains (the names and
+// subject words, not "who", "latest" or "price"); results that do not cover the subject are dropped; and only among the
+// relevant ones does the newest come first. If nothing is relevant, nothing is returned, which is the honest result.
+const RANK_GENERIC = new Set("price cost worth latest current currently news today tonight recent recently now right still this that week month year many much people live new about tell what who which where when does have has been the and for are was were with from into than then his her their they them will would could should can you your our not but all any one two more most some such only over very also just only who's whos won win wins winner winners champion champions get got give show find list name named called".split(" "));
+const stem = (w) => w.replace(/(ies)$/, "y").replace(/(es|s)$/, "");
+function distinctiveTerms(q) {
+  const words = fold(toSearchQuery(q)).split(/[^a-z0-9]+/).filter((w) => w.length > 2 && !RANK_GENERIC.has(w));
+  return [...new Set(words.map(stem))];
+}
+function rankRelevant(pool, q, fresh) {
+  const terms = distinctiveTerms(q);
+  if (!terms.length) return fresh ? recencySort(pool) : pool;
+  const scored = pool.map((r, i) => {
+    const hay = fold((r.title || "") + " " + (r.snippet || "") + " " + (r.url || ""));
+    const hit = terms.filter((t) => hay.includes(t)).length;
+    return { r, i, score: hit / terms.length, t: Date.parse(r.date || r.pub || "") || 0, web: r.src === "web" };
+  });
+  const need = terms.length <= 2 ? 1 : 0.6; // one or two subject words must all appear; longer questions need most of them
+  let keep = scored.filter((x) => x.score >= need);
+  if (!keep.length) keep = scored.filter((x) => x.web && x.score >= 0.34).slice(0, 3); // the open-web engine ranks by meaning; trust its best few
+  const tier = (x) => (x.score >= 0.99 ? 2 : 1);
+  keep.sort((a, b) => (tier(b) - tier(a)) || (fresh ? (b.t - a.t) : 0) || (a.i - b.i));
+  return keep.map((x) => x.r);
+}
 async function webSearch(q, env, fresh) {
   // Every source runs at the same time and each has its own time limit, so one slow or failing source can never cost the
   // others: Tavily (open web, key rotation), Brave (if a key is set), Wikipedia (knowledge, updated within minutes for big
@@ -240,12 +265,13 @@ async function webSearch(q, env, fresh) {
   const braveP = env && env.BRAVE_KEY ? withTimeout(braveSearch(q, env.BRAVE_KEY), 6000, []) : Promise.resolve([]);
   const [tv, br, w, n] = await Promise.all([tavilyP, braveP, withTimeout(wikiSearch(q), 6000, []), withTimeout(newsSearch(q), 6000, [])]);
   const summary = (tv || []).filter((x) => x.title === "Summary").map((x) => Object.assign({}, x, { snippet: "(search-engine summary — check it against the sources above) " + x.snippet }));
-  const rows = (tv || []).filter((x) => x.title !== "Summary");
+  const tag = (list, src) => (list || []).map((x) => Object.assign({}, x, { src }));
+  const rows = tag((tv || []).filter((x) => x.title !== "Summary"), "web");
   const seen = new Set(), pool = [];
-  for (const x of [].concat(rows, br || [], isFresh ? (n || []).concat(w || []) : (w || []).concat(n || []))) {
+  for (const x of [].concat(rows, tag(br, "web"), isFresh ? tag(n, "news").concat(tag(w, "wiki")) : tag(w, "wiki").concat(tag(n, "news")))) {
     const k = x && (x.url || x.title); if (!k || !x.title || seen.has(k)) continue; seen.add(k); pool.push(x);
   }
-  const ordered = isFresh ? recencySort(pool) : pool;
+  const ordered = rankRelevant(pool, q, isFresh);
   const out = ordered.slice(0, 8).concat(summary);
   if (out.length) return out;
   const r = await withTimeout(ddgHtml(q), 5000, []); if (r.length) return r;
