@@ -1061,8 +1061,8 @@ async function proValid(env, code) {
   if (!code) return false;
   try { const r = await fetch("https://noria-ai.insights-skyglobe.workers.dev/pro/check?code=" + encodeURIComponent(String(code).trim().toUpperCase()), { signal: AbortSignal.timeout(4000) }); return !!(await r.json()).pro; } catch (_) { return false; }
 }
-async function takeQuota(code, kind, max) {
-  try { const r = await fetch("https://noria-ai.insights-skyglobe.workers.dev/quota/take?kind=" + kind + "&max=" + max + "&code=" + encodeURIComponent(String(code).trim().toUpperCase()), { signal: AbortSignal.timeout(5000) }); return await r.json(); } catch (_) { return { ok: false, error: "quota service unavailable" }; }
+async function takeQuota(code, kind, max, peek) {
+  try { const r = await fetch("https://noria-ai.insights-skyglobe.workers.dev/quota/take?kind=" + kind + "&max=" + max + (peek ? "&peek=1" : "") + "&code=" + encodeURIComponent(String(code).trim().toUpperCase()), { signal: AbortSignal.timeout(5000) }); return await r.json(); } catch (_) { return { ok: false, error: "quota service unavailable" }; }
 }
 async function researchPlan(query, env) {
   const fallback = [query, query + " latest developments", query + " statistics and data", query + " challenges and criticism"];
@@ -1374,13 +1374,13 @@ export default {
       const fail = (msg, status) => new Response(sse({ error: msg }), { status: status || 200, headers: SSE_H });
       if (query.length < 4) return fail("Tell me what to research.", 400);
       if (!(await proValid(env, code))) return fail("Deep research is part of Noria Pro.", 402);
-      const q = await takeQuota(code, "research", 3);
+      const q = await takeQuota(code, "research", 3, true); // checked now, counted only when a brief is delivered
       if (!q || !q.ok) return fail(q && q.error === "limit" ? "You have used today's deep research briefs (3 a day). They come back tomorrow." : "Deep research is unavailable right now. Please try again in a moment.", 429);
       const stream = new ReadableStream({
         async start(controller) {
           const enc = new TextEncoder(); const send = (o) => { try { controller.enqueue(enc.encode(sse(o))); } catch (_) {} };
           const beat = setInterval(() => { try { controller.enqueue(enc.encode(": still working\n\n")); } catch (_) {} }, 8000); // keeps the connection open while the brief is written
-          try { const r = await runResearch(query, env, send); send({ token: r.text }); send({ done: true, title: r.title, sources: r.sources, verified: r.verified, left: q.left }); }
+          try { const r = await runResearch(query, env, send); const ok = r.sources && r.sources.length >= 3; const used = ok ? await takeQuota(code, "research", 3, false) : null; send({ token: r.text }); send({ done: true, title: r.title, sources: r.sources, verified: r.verified, left: used && typeof used.left === "number" ? used.left : q.left }); }
           catch (e) { send(Object.assign({ error: "I could not finish that research just now. Please try again in a moment." }, b.debug ? { detail: String((e && e.message) || e).slice(0, 400) } : {})); }
           clearInterval(beat);
           try { controller.close(); } catch (_) {}

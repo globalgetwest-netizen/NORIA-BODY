@@ -239,6 +239,7 @@ export default {
         const key = 'quota:' + kind + ':' + utcDay() + ':' + (await shortHash(code))
         const used = Number(await env.SYNC.get(key)) || 0
         if (used >= max) return json({ ok: false, error: 'limit', left: 0 })
+        if (url.searchParams.get('peek')) return json({ ok: true, left: max - used }) // just looking: nothing is counted
         await env.SYNC.put(key, String(used + 1), { expirationTtl: 172800 })
         return json({ ok: true, left: max - used - 1 })
       }
