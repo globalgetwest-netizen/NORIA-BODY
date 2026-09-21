@@ -674,6 +674,20 @@ function paperclip() { return '<svg viewBox="0 0 24 24" fill="none" stroke="curr
 // answers in that shape, only the words meant for the person are kept.
 const META_RX = /^\s*(?:```(?:json)?\s*)?\{\s*"(?:spoken_text|display_text|emotion|voice_tone|reply|conversation_action)"/
 const looksMeta = (t) => META_RX.test(t || '')
+// A web address in an answer is kept only if it came from somewhere real: the person's own message, an attached file, a document
+// search, or the sources the answer was built on. A link a model writes from memory can be invented (a plausible-looking address
+// that leads nowhere), so any other link is reduced to its plain words. This never touches the sources chips under the answer.
+function stripUnverifiedLinks(text, allowedText, sources) {
+  const hosts = new Set()
+  const add = (u) => { try { hosts.add(new URL(u).hostname.replace(/^www\./, '')) } catch (_) {} }
+  String(allowedText || '').replace(/https?:\/\/[^\s)\]>"']+/g, (u) => { add(u); return u })
+  for (const x of sources || []) if (x && x.url) add(x.url)
+  const ok = (u) => { try { return hosts.has(new URL(u).hostname.replace(/^www\./, '')) } catch (_) { return false } }
+  return String(text || '')
+    .replace(/\[([^\]\n]+)\]\((https?:\/\/[^)\s]+)\)/g, (m, label, url) => (ok(url) ? m : label))
+    .replace(/(^|[\s(])(https?:\/\/[^\s)\]>"']+)[ ]?/g, (m, pre, url) => (ok(url) ? m : pre))
+    .replace(/[ \t]+\n/g, '\n').replace(/\(\s*\)/g, '')
+}
 function cleanMeta(t) {
   if (!looksMeta(t)) return t
   const str = (k) => {
@@ -933,7 +947,7 @@ async function respond(q, opts = {}) {
 
     // Any document — guide chip or typed in chat — must come out finished: strip any
     // placeholder scaffolding from a document-like answer.
-    let display = cleanMeta(acc)
+    let display = stripUnverifiedLinks(cleanMeta(acc), q + ' ' + attBlock + ' ' + webBlock, sources)
     // Nothing came back: a busy moment usually clears in seconds, so she quietly tries once more, and only then says so.
     if (!display.trim() && !cancelled && q.length < 20000) {
       await new Promise((r) => setTimeout(r, 2500))
