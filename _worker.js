@@ -317,10 +317,10 @@ function groundingBlock(results) {
     "when they disagree. Anything described in the past tense here HAS ALREADY HAPPENED as of " +
     "today — never say an event 'has not happened yet' or 'is not yet determined' if the " +
     "results state its outcome. CRITICAL: when the question asks for the latest / current / " +
-    "FICTION RULE: results from fan wikis, film, comic, game or entertainment pages describe an invented world. If the thing asked about is a fictional place, character or office (for example a ruler of an imaginary country), say plainly that it is fictional and describe it only as part of that story — never as a real-world fact. " +
     "most recent / newest state of something, base your answer on the MOST RECENTLY DATED item " +
     "in these results and state that date — never present an older dated item as the current " +
     "situation when a newer one is present. If the results conflict, the newest date wins. " +
+    "FICTION RULE: results from fan wikis, film, comic, game or entertainment pages describe an invented world. If the thing asked about is a fictional place, character or office (for example a ruler of an imaginary country), say plainly that it is fictional and describe it only as part of that story — never as a real-world fact. " +
     "You must synthesize your answer STRICTLY from these facts: if they are thin, conflicting, " +
     "or do not contain the exact answer, say plainly 'I'm not certain based on current live " +
     "data' rather than extrapolating or inventing anything. CRITICAL anti-fabrication rule: if " +
@@ -1221,6 +1221,10 @@ async function groundMessages(messages, body, env) {
   const lists = await Promise.all(queries.map((x) => withTimeout(webSearch(x, env, strength === "must" || office), 9000, [])));
   const seen = new Set(), results = [];
   for (const list of lists) for (const r of list || []) { const k = r && (r.url || r.title); if (k && !seen.has(k)) { seen.add(k); results.push(r); } }
+  if (results.length > 1 && !office) { // each planned query was ranked against its own wording; the user's question has the last word
+    const strict = rankRelevant(results, q, strength === "must");
+    if (strict.length) { results.length = 0; for (const r of strict) results.push(r); }
+  }
   if (office && !results.length) { // one more try, with the plain question, before giving up
     const again = await withTimeout(webSearch(q.replace(/[?!.]+$/, ""), env, true), 9000, []);
     for (const r of again || []) { const k = r && (r.url || r.title); if (k && !seen.has(k)) { seen.add(k); results.push(r); } }
