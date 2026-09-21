@@ -737,6 +737,30 @@ function clockDirect(q, tz) {
   }
   return null;
 }
+// Every plain "a + b = c" or "a × b = c" written in an answer is recomputed. A model once wrote "135 + 60 = 210" in a shop-bill
+// answer; a wrong sum inside a confident explanation is worse than no explanation, so it is corrected before anyone reads it.
+function arithmeticErrors(text) {
+  const bad = [];
+  const clean = String(text || "").replace(/\*\*|__/g, "").replace(/(\d),(?=\d{3}\b)/g, "$1");
+  const rx = /(\d+(?:\.\d+)?)\s*([+\-\u00d7x*\u00f7\/])\s*(\d+(?:\.\d+)?)(?:\s*([+\-\u00d7x*\u00f7\/])\s*(\d+(?:\.\d+)?))?\s*=\s*(\d+(?:\.\d+)?)/g;
+  const op = (o) => (o === "\u00d7" || o === "x" ? "*" : o === "\u00f7" ? "/" : o);
+  for (const m of clean.matchAll(rx)) {
+    const expr = m[1] + op(m[2]) + m[3] + (m[5] ? op(m[4]) + m[5] : "");
+    let v = null; try { v = calcEval(expr); } catch (_) {}
+    const claimed = Number(m[6]);
+    if (v !== null && isFinite(v) && Math.abs(v - claimed) > Math.max(0.011, Math.abs(v) * 0.0005)) bad.push(m[0].trim() + " (the correct result is " + Number(v.toPrecision(12)) + ")");
+  }
+  return bad;
+}
+const mathWordProblem = (q) => ((String(q || "").match(/\d+(?:[.,]\d+)?/g) || []).length >= 2) && /\b(total|sum|altogether|in all|each|per|cost|costs|price|how many|how much|average|percent|profit|loss|change|discount|difference|product|remaining|left|split|share|interest)\b|%/i.test(String(q || ""));
+async function plainVerified(messages, env, opts) {
+  let text = await brainComplete(messages, env, opts);
+  let errs = arithmeticErrors(text);
+  if (!errs.length) return text;
+  const fix = addSystem(messages, "\n\nARITHMETIC CORRECTION — your draft contained calculations that are wrong: " + errs.join("; ") + ". Redo every calculation carefully, one step at a time, and give the corrected answer. Never mention this correction.");
+  try { const t2 = await brainComplete(fix, env, opts); if (!arithmeticErrors(t2).length) return t2; text = t2; } catch (_) {}
+  return text + "\n\n*(Please double-check the arithmetic above: I could not fully confirm it.)*";
+}
 // A question that is ONLY arithmetic ("what is 17% of 2,340") is answered by the calculator itself. Even with the exact
 // result placed in front of a model, one reply in a few came out wrong (39.78 for 397.8), so a plain sum never goes
 // through a model at all: instant, and correct every time. Anything with other words in it still goes to the model.
@@ -927,7 +951,8 @@ const NO_OFFICE_ANSWER = "I couldn't check who currently holds that office just 
 //                 introduces names the sources never mention is rewritten once under a strict instruction; if it still
 //                 does, she shows what the sources actually say instead. A guess never reaches the reader.
 const STABLE_TASK = /\b(write|compose|draft|poem|story|essay|lyrics|code|function|refactor|debug|translate|rephrase|reword|summari[sz]e|brainstorm|pretend|role-?play|plan|build|create|make|prepare|produce|generate|design|explain (how|why)|teach me|help me)\b/i;
-const LIVE_CUE = /\b(current|currently|latest|newest|recent|recently|today|tonight|right now|this (week|month|year|season)|as of|still|upcoming|nowadays|these days|at the moment|at present|present-day|so far this)\b|\bnow\b(?!\s+that)/i;
+const LIVE_CUE = /\b(current|currently|latest|newest|recent|recently|today|tonight|yesterday|last (?:night|week|weekend|month)|this (?:week|month|year|season|morning|afternoon|evening|weekend)|earlier today|right now|as of|still|upcoming|nowadays|these days|at the moment|at present|present-day|so far this)\b|\bnow\b(?!\s+that)/i;
+const EVENT_VERB = /\b(announce[ds]?|announcement|unveil(?:ed|s)?|launch(?:ed|es)?|acquir(?:e|ed|es)|acquisition|merge[ds]?|resign(?:ed|s)?|appointed|sacked|arrested|indicted)\b/i;
 const MOVING_VALUE = /\b(price|cost of|rate|worth|net worth|population|score|scores|standings?|results?|forecast|schedule|fixtures?|ranking|rankings|salary|version|release date|stock|share price|exchange rate|inflation|unemployment|market cap|record|odds|winner|winners|champions?|how many (people|residents|inhabitants|users|customers|members))\b/i;
 const STATE_Q = /\b(who|what|which)\s+(is|are|was|were)\b|\bwho\s+(leads|runs|heads|owns|manages|coaches|captains|founded|won|wins|plays|represents|replaced|succeeded|replaces|took over)\b|\bhow (much|many)\b|\bis\s+.{2,40}\b(still|alive|dead|married|open|closed|available|legal|banned|real|true|dating|retired)\b/i;
 const STABLE_FACT = /\b(capital of|currency of|official language|largest (country|city|ocean)|who (wrote|invented|discovered|painted|composed)|meaning of|definition of|synonym|antonym|boiling point|melting point|formula for|symbol for|atomic number)\b/i;
@@ -941,14 +966,15 @@ function hasEntity(q) { // a capitalised name somewhere after the first word: a 
 // from general knowledge is still fair when the sources have nothing.
 function liveStrength(q) {
   const s = String(q || "");
+  if (/\b(write|compose|draft|poem|story|essay|lyrics|code|function|refactor|debug|translate|rephrase|reword|summari[sz]e|brainstorm|pretend|role-?play)\b/i.test(s) && !MOVING_VALUE.test(s) && !officeAsk(s)) return "no"; // a creative or language task is never a lookup
   if (STABLE_TASK.test(s) && !LIVE_CUE.test(s) && !officeAsk(s)) return "no";
   if (STABLE_FACT.test(s) && !LIVE_CUE.test(s)) return "no";
-  if (officeAsk(s) || LIVE_CUE.test(s) || MOVING_VALUE.test(s) || STATUS_Q.test(s)) return "must";
+  if (officeAsk(s) || LIVE_CUE.test(s) || MOVING_VALUE.test(s) || STATUS_Q.test(s) || (EVENT_VERB.test(s) && hasEntity(s))) return "must";
   if (STATE_Q.test(s) && hasEntity(s)) return "maybe";
   if (serverNeedsWeb(s)) return "must";
   return "no";
 }
-const NO_LIVE_ANSWER = "I couldn't reach my live sources for that just now, and it is the kind of question where an out-of-date answer would mislead you. I would rather not guess. Please try again in a moment.";
+const NO_LIVE_ANSWER = "I couldn't find reliable, current information about that: either nothing matches, or my live sources did not answer just now. It is the kind of question where a guess could mislead you, so I would rather not make one. If it is a real company, person or event, tell me a little more (the country or the field) and I will look again.";
 
 // ── verification ───────────────────────────────────────────────────────────────────────────────────────────────────
 const SC_SKIP = new Set("background,recognition,activities,activity,leadership,focus,security,notes,note,statements,statement,engagement,diplomatic,visits,visit,public,appearances,appearance,additional,verified,overview,career,education,life,early,personal,politics,political,policy,policies,achievements,achievement,highlights,highlight,details,detail,context,timeline,facts,fact,key,current,role,office,profile,biography,about,contact,address,recent,official,sources,ghana\u2019s,headlines,headline,news,latest,breaking,update,updates,top,stories,story,key,more,also,overall,meanwhile,finally,first,second,third,next,ghanaian,i,i'm,i've,noria,the,a,an,as,in,on,at,it,it's,he,she,they,we,you,this,that,these,those,here,there,note,source,sources,yes,no,however,also,today,according,based,currently,current,latest,recent,live,web,context,summary,sunday,monday,tuesday,wednesday,thursday,friday,saturday,january,february,march,april,may,june,july,august,september,october,november,december,utc,gmt,and,but,or,so,if,for,from,with,while,since,after,before,during,since,then,when,where,who,what,which,why,how,is,are,was,were,his,her,their,its,one,two,three,mr,mrs,ms,dr,hon,president,minister,prime,foreign,vice,chief,secretary,governor,mayor,ceo".split(","));
@@ -988,7 +1014,8 @@ function verifyAnswer(text, live, q) {
   }
   for (const y of years) if (!hay.includes(y)) bad.push(y);
   // a short factual answer may not introduce two unsupported names; a long summary of many items is judged by proportion
-  const badNames = bad.filter((x) => !/^(?:19|20)\d{2}$/.test(x)), yearBad = years.some((y) => !hay.includes(y));
+  const recentYear = new Date().getUTCFullYear() - 1; // "in office since 2022" is history the model may know; a claim about this or last year must be in the sources
+  const badNames = bad.filter((x) => !/^(?:19|20)\d{2}$/.test(x)), yearBad = years.some((y) => Number(y) >= recentYear && !hay.includes(y));
   return { ok: !yearBad && (badNames.length < 2 || badNames.length / Math.max(1, phrases.length) < 0.25), unsupported: bad };
 }
 function fromSources(live, news) {
@@ -1177,14 +1204,15 @@ async function cfAiComplete(env, messages, opts) {
 // strongest models with a big budget; everyday chat goes to fast, low-latency models.
 async function brainComplete(messages, env, opts = {}) {
   const attempts = [];
-  const gm = opts.deep
-    ? groqModels(env)
-    : [env.GROQ_FAST_MODEL || "openai/gpt-oss-20b"].concat(groqModels(env)).filter((m, i, a) => a.indexOf(m) === i);
+  // The strongest Groq model first, then Mistral's strongest, and only then Groq's small fast model (it made arithmetic and logic
+  // slips the others do not), then the remaining providers.
+  const gmMain = groqModels(env).slice(0, 1), gmFast = groqModels(env).slice(1);
   // Note: Gemini Pro models are quota-gated on the free tier, so we use flash for
   // both modes (env-overridable). Deep-mode strength comes from Groq gpt-oss-120b + budget.
   const gemOpts = Object.assign({}, opts, { geminiModel: opts.deep ? (env.GEMINI_DEEP_MODEL || "gemini-2.5-flash") : (env.GEMINI_MODEL || "gemini-2.5-flash") });
-  for (const key of rotate(groqKeys(env))) attempts.push({ name: "groq", fn: () => openaiCompatible("https://api.groq.com/openai/v1/chat/completions", key, gm, messages, opts) });
+  for (const key of rotate(groqKeys(env))) attempts.push({ name: "groq", fn: () => openaiCompatible("https://api.groq.com/openai/v1/chat/completions", key, gmMain, messages, opts) });
   for (const key of rotate(mistralKeys(env)).slice(0, 3)) attempts.push({ name: "mistral", fn: () => openaiCompatible("https://api.mistral.ai/v1/chat/completions", key, mistralModels(env), messages, opts) });
+  if (gmFast.length) for (const key of rotate(groqKeys(env)).slice(0, 2)) attempts.push({ name: "groq-fast", fn: () => openaiCompatible("https://api.groq.com/openai/v1/chat/completions", key, gmFast, messages, opts) });
   // Cerebras answers 402 (payment required) for these keys, so it stays out of the chain until CEREBRAS_ENABLED=1 is set.
   if (env.CEREBRAS_ENABLED === "1") for (const key of rotate(cerebrasKeys(env)).slice(0, 2)) attempts.push({ name: "cerebras", fn: () => openaiCompatible("https://api.cerebras.ai/v1/chat/completions", key, [env.CEREBRAS_MODEL || "gpt-oss-120b", "llama-3.3-70b"], messages, opts) });
   for (const key of rotate(geminiKeys(env)).slice(0, 3)) attempts.push({ name: "gemini", fn: () => geminiComplete(key, env, messages, gemOpts) });
@@ -1273,7 +1301,7 @@ export default {
           catch (_) { r = { text: fromSources(g.live, NEWS_INTENT.test(q)), verified: false }; } // the brain is down: the sources themselves still answer
           return new Response(JSON.stringify(Object.assign({ answer: r.text, sources: g.live.sources, verified: r.verified }, body.debug ? { unsupported: r.unsupported || [], context: g.live.ctx.slice(0, 1500) } : {})), { headers: JSON_H });
         }
-        const text = await brainComplete(messages, env, { deep, maxTokens: deep ? 8000 : 2600, temperature });
+        const text = await plainVerified(messages, env, { deep, maxTokens: deep ? 8000 : 2600, temperature });
         return new Response(JSON.stringify(body.debug ? { answer: text, usage: _lastUsage } : { answer: text }), { headers: JSON_H });
       } catch (e) {
         return new Response(JSON.stringify({ error: e.message }), { status: 503, headers: JSON_H });
@@ -1293,6 +1321,12 @@ data: ${JSON.stringify({ done: true })}
       const gr = await groundMessages(messages, body, env);
       if (gr.refuse) return new Response(`data: ${JSON.stringify({ token: gr.refuse })}\n\ndata: ${JSON.stringify({ done: true })}\n\n`, { headers: SSE_H });
       messages = gr.messages;
+      if (!gr.live && mathWordProblem(String(body.query || ""))) { // a number problem: answered whole, its sums re-checked, then sent
+        try {
+          const text = await plainVerified(messages, env, { deep: false, maxTokens: body.voice ? 600 : 2600, temperature: 0.2 });
+          return new Response(`data: ${JSON.stringify({ token: text })}\n\ndata: ${JSON.stringify({ done: true })}\n\n`, { headers: SSE_H });
+        } catch (_) { /* fall through to the streamed path */ }
+      }
       if (gr.live) { // live-grounded: the whole answer is verified against the sources first, then sent (with the sources)
         let r;
         try { r = await liveAnswer(messages, env, gr, String(body.query || ""), { deep: false, maxTokens: body.voice ? 600 : 3000, temperature: 0.2 }); }
@@ -1309,7 +1343,7 @@ data: ${JSON.stringify({ done: true })}
       const cfgs = body.voice ? [{ effort: "low", max: 600 }, { effort: null, max: 600 }] : [{ effort: null, max: 8000 }];
       outer:
       for (const key of gkeys) {
-        for (const model of groqModels(env)) {
+        for (const model of groqModels(env).slice(0, 1)) {
           for (const cfg of cfgs) {
             try {
               const payload = { model, messages, max_tokens: cfg.max, temperature: 0.4, stream: true };
@@ -1342,6 +1376,18 @@ data: ${JSON.stringify({ done: true })}
             } catch (_) { break; }
           }
           if (up) break;
+        }
+      }
+      if (!up) { // last streamed choice: Groq's small fast model
+        outerFast:
+        for (const key of gkeys) {
+          for (const model of groqModels(env).slice(1)) {
+            try {
+              const r = await fetch(GROQ_URL, { method: "POST", headers: { "Content-Type": "application/json", Authorization: "Bearer " + key }, body: JSON.stringify({ model, messages, max_tokens: body.voice ? 600 : 3000, temperature: 0.4, stream: true }), signal: AbortSignal.timeout(12000) });
+              if (r.ok) { up = r; break outerFast; }
+              try { await r.body.cancel(); } catch (_) {}
+            } catch (_) { break; }
+          }
         }
       }
       if (!up) {
