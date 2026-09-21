@@ -276,7 +276,22 @@ function rankRelevant(pool, q, fresh) {
   if (newsQ) { let w = 0; keep = keep.filter((x) => x.r.src !== "wiki" || ++w <= 2); } // a news question does not need more than two encyclopedia pages
   return keep.map((x) => x.r);
 }
+// The free search allowance is small, so an identical search made a moment ago is answered from Cloudflare's cache (10 minutes for
+// anything time-sensitive, an hour otherwise). Thin or failed results are never cached, so a bad moment is not remembered.
 async function webSearch(q, env, fresh, o) {
+  const isFresh = fresh !== undefined ? !!fresh : true;
+  let cache = null, key = null;
+  try {
+    cache = typeof caches !== "undefined" ? caches.default : null;
+    key = new Request("https://noria-cache.invalid/search?q=" + encodeURIComponent(String(q || "").toLowerCase().trim()) + "&f=" + (isFresh ? 1 : 0) + "&n=" + (o && o.noNews ? 1 : 0));
+    const hit = cache ? await cache.match(key) : null;
+    if (hit) { const j = await hit.json(); if (Array.isArray(j) && j.length) return j; }
+  } catch (_) {}
+  const out = await webSearchRaw(q, env, fresh, o);
+  try { if (cache && key && Array.isArray(out) && out.length >= 3) await cache.put(key, new Response(JSON.stringify(out), { headers: { "Cache-Control": "public, max-age=" + (isFresh ? 600 : 3600) } })); } catch (_) {}
+  return out;
+}
+async function webSearchRaw(q, env, fresh, o) {
   // Every source runs at the same time and each has its own time limit, so one slow or failing source can never cost the
   // others: Tavily (open web, key rotation), Brave (if a key is set), Wikipedia (knowledge, updated within minutes for big
   // events) and live news feeds from Africa and the world. Results are merged, de-duplicated, and — for anything time-
