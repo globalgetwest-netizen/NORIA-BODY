@@ -1109,6 +1109,73 @@ async function liveAnswer(messages, env, g, q, opts) {
   const lead = fictional ? "The pages I found for this are fan and entertainment sites describing an invented world, not real-world records, so I can't give you a real-world answer. If you mean the story itself, the sources below describe it.\n\n" : "";
   return { text: lead + fromSources(g.live, NEWS_INTENT.test(String(q || ""))), verified: false, unsupported: v.unsupported };
 }
+// ── CAPABILITY REGISTRY ─────────────────────────────────────────────────────────────────────────────────────────────
+// What Noria can do, stated from the running system and never from marketing. Each item is LIVE (works in production),
+// CONNECTED (works through an outside service, so it is only claimed while that service answers), or PLANNED (designed, not
+// operational: it is listed so nobody mistakes it for a feature). `need` names the runtime check an item depends on.
+const CAPS = [
+  ["Conversation & reasoning", [
+    ["Natural conversation, following instructions, multi-step reasoning", "live", "", "Answers in her own voice; the last several turns of the conversation are kept in view."],
+    ["Task planning through guided documents (business plans, CVs, itineraries, roadmaps, series plans)", "live", "", "Fixed guided flows that ask the right questions, then write the document."],
+    ["Long-context reasoning", "live", "", "Long files are read by picking the most relevant passages, not by holding everything at once."],
+  ]],
+  ["Live information", [
+    ["Live web search, current news and office-holders", "connected", "search", "Open web, Wikipedia and many news feeds, read at the moment of the question."],
+    ["Weather, currency exchange rates, cryptocurrency prices, exact clock, date and holiday calculations", "connected", "feeds", "Read from live data feeds, or calculated exactly."],
+    ["Source-grounded answers, checked before they are shown", "live", "", "Names, dates and figures must appear in the sources, and a second model checks the main claim; when it cannot confirm, she says so."],
+  ]],
+  ["Knowledge & documents", [
+    ["Reading PDF, Word, text, CSV, TSV and Excel files; whole-document search of long files on Noria Pro", "live", "", "The free plan reads the opening pages; Noria Pro searches the whole document. Retrieval is by keywords on the device, not by a vector database."],
+    ["Vector database or semantic knowledge-base construction", "planned", "", "Not built."],
+  ]],
+  ["Memory", [
+    ["Remembering facts you share, on this device; deleting it whenever you like", "live", "", "Stored in the browser, private to the device."],
+    ["Saved conversations under a sign-in, synced across devices", "connected", "accounts", "Optional account; conversations are stored under it."],
+    ["Long-term project memory, task memory and cross-tool memory", "planned", "", "Not built."],
+  ]],
+  ["Research", [
+    ["Deep research: several angles searched, a cited brief written, unsupported sentences removed, real sources listed", "connected", "search", "Noria Pro, a few briefs a day."],
+    ["Automatic detection of contradictions between sources", "planned", "", "Not built as a separate step; the fact-check only catches claims the sources do not support."],
+  ]],
+  ["Images & senses", [
+    ["Understanding photos and images", "connected", "ai", "Noria Pro. Reading the text in a photo also works on the device."],
+    ["Charts and tables drawn from your data or from a request", "live", "", "Drawn in the browser."],
+    ["Creating pictures", "connected", "ai", "Depends on a daily allowance and is not always available; no realistic pictures of real people."],
+  ]],
+  ["Data", [
+    ["Exact spreadsheet analysis: row counts, totals, averages, medians, distinct values, top-N, filters, group-by, correlation", "live", "", "Computed from every row on the device, not estimated by a model."],
+    ["Statistical modelling, forecasting, database access", "planned", "", "Not built."],
+  ]],
+  ["Programming", [
+    ["Writing, explaining and debugging code; designing systems; automation scripts", "live", "", "Written and reviewed by the model; Noria does not run the code."],
+    ["Running code, repository analysis, calling outside APIs for you", "planned", "", "Not built."],
+  ]],
+  ["Creation", [
+    ["Professional writing, translation, marketing and educational material, presentations, proposals", "live", "", ""],
+    ["Exporting to Word, Excel, PowerPoint, PDF and Markdown", "live", "", "From the document view."],
+    ["Voice: speaking answers aloud and listening", "connected", "ai", "Hands-free conversation on Noria Pro."],
+  ]],
+  ["Autonomous action", [
+    ["Autonomous multi-step agents that choose tools, run them in parallel, recover from errors and finish a job alone", "planned", "", "Not built. Noria follows fixed pipelines (decide, retrieve, answer, verify, correct); she does not take actions in other apps, send messages or make purchases."],
+    ["Connections to email, calendars, maps or other accounts", "planned", "", "Not built."],
+  ]],
+];
+async function capabilityReport(env) {
+  const aiUp = await withTimeout(fetch("https://noria-ai.insights-skyglobe.workers.dev/", { signal: AbortSignal.timeout(3500) }).then((r) => r.status < 500).catch(() => false), 4000, false);
+  const have = {
+    search: true, // Wikipedia and the news feeds need no key, so live search never depends on one service
+    feeds: true,
+    ai: aiUp,
+    accounts: aiUp,
+  };
+  const groups = CAPS.map(([area, items]) => ({ area, items: items.map(([name, state, need, note]) => {
+    const up = !need || have[need] !== false;
+    return { name, state: state === "planned" ? "planned" : up ? state : "unavailable", note };
+  }) }));
+  const label = { live: "LIVE", connected: "CONNECTED (working now)", planned: "NOT BUILT YET", unavailable: "TEMPORARILY UNAVAILABLE" };
+  const text = groups.map((g) => g.area + ":\n" + g.items.map((i) => "  - [" + label[i.state] + "] " + i.name + (i.note ? " — " + i.note : "")).join("\n")).join("\n");
+  return { generated: new Date().toISOString(), groups, text };
+}
 // The diagnostic pages (/brain/providers, /imgcheck, /retrieve, /feeds, /models) spend real free-tier calls each time they are opened
 // (model calls, web searches, image tries). They are for the owner, so they need a valid owner / Pro code (?code=…), checked by the
 // accounts worker. Anyone else gets a plain 403 and nothing is spent.
@@ -1699,6 +1766,11 @@ data: ${JSON.stringify({ done: true })}
       const ok = g || gm || o;
       const showKeys = await diagOk(url); // how many keys each provider has is for the owner; everyone else just sees the status
       return new Response(JSON.stringify(showKeys ? { status: ok ? "ok" : "no-key", keys: { cloudflareAI: !!env.AI, groq: g, mistral: mistralKeys(env).length, cerebras: cerebrasKeys(env).length, gemini: gm, openrouter: o } } : { status: ok ? "ok" : "no-key" }), { headers: JSON_H });
+    }
+
+    if (path === "/brain/capabilities") {
+      const rep = await capabilityReport(env);
+      return new Response(JSON.stringify(rep), { headers: JSON_H });
     }
 
     // ── Static assets, served by Cloudflare Pages ──

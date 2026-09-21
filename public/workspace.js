@@ -936,7 +936,9 @@ async function respond(q, opts = {}) {
 
   try {
     const kb = retrieveKnowledge(q)
+    const capNote = CAP_RX.test(q) ? await capabilityNote() : '' // what can you do is answered from the live capability registry
     const systemCommon = memoryContext(mem) +
+      capNote +
       (kb ? `\n\n[BACKGROUND KNOWLEDGE — vetted reference notes. Prefer these where they apply, and follow all safety rules]\n${kb}` : '') +
       DOC_QUALITY + RICH_OUTPUT +
       (opts.system ? '\n\n' + opts.system : '') +
@@ -1100,6 +1102,15 @@ async function runResearch(topic) {
   addFeedback(msgEl, 'Deep research: ' + topic, text)
   if (meta && typeof meta.left === 'number') note('Deep research briefs left today: ' + meta.left)
   convoRecord({ role: 'noria', text, sources: srcs.map((x) => ({ url: x.url })) })
+}
+const CAP_RX = /\b(what (can|do|are) you (do|offer|capable|able)|what (are|is) your (capabilities|features|abilities|skills|powers)|your (capabilities|features|abilities)|what can noria (pro )?do|noria pro (features|capabilities)|what does noria pro|list (of )?(your )?(capabilities|features)|what (else )?can you help)\b/i
+// The real, current state of what Noria can do (from the server's capability registry, which checks its outside services as it answers).
+async function capabilityNote() {
+  try {
+    const r = await fetch('/brain/capabilities', { signal: AbortSignal.timeout(6000) }); if (!r.ok) return ''
+    const j = await r.json(); if (!j || !j.text) return ''
+    return '\n\n[CAPABILITY REGISTRY — the true, current state of what you can do. When asked what you can do, describe EXACTLY these, grouped clearly, in your own warm voice. Present only LIVE and CONNECTED items as things you can do now. Say plainly which items are NOT BUILT YET or TEMPORARILY UNAVAILABLE, and never claim them as working. Do not add capabilities that are not listed, and do not describe yourself as an autonomous agent.]\n' + j.text
+  } catch (_) { return '' }
 }
 async function generateImage(prompt) {
   stop.style.display = 'inline-flex'
