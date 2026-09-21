@@ -708,7 +708,7 @@ const REF_CONTINENTS = ["Africa", "Antarctica", "Asia", "Europe", "North America
 const REF_PILLARS = [["Shahada", "the declaration of faith"], ["Salah", "the five daily prayers"], ["Zakat", "giving to those in need"], ["Sawm", "fasting during Ramadan"], ["Hajj", "the pilgrimage to Mecca, for those who are able"]];
 const numbered = (rows) => rows.map((r, i) => (i + 1) + ". " + r).join("\n");
 const REFS = [
-  { id: "names99", n: 99, rx: /\b(99|ninety[- ]?nine)\s+(beautiful\s+)?names\b|asma+[’']?\s*-?(ul|al)[- ]?husna|\bnames of (allah|god)\b/i,
+  { id: "names99", n: 99, rx: /\b(99|ninety[- ]?nine)\s+(beautiful\s+)?names\b|asma+[’']?\s*-?(ul|al)[- ]?husna|\bnames? of (allah|god)\b|\b(99|ninety[- ]?nine)\s+attributes\b/i,
     title: "The 99 Names of Allah (Asma’ul-Husna)",
     body: () => numbered(REF_NAMES99.map(([a, m]) => "**" + a + "** — " + m)),
     note: "This is the widely used list of 99 attributes (the name “Allah” itself is not counted among them). Traditions differ slightly in which names are included and how they are translated." },
