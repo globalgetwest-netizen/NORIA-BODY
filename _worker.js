@@ -317,6 +317,7 @@ function groundingBlock(results) {
     "when they disagree. Anything described in the past tense here HAS ALREADY HAPPENED as of " +
     "today — never say an event 'has not happened yet' or 'is not yet determined' if the " +
     "results state its outcome. CRITICAL: when the question asks for the latest / current / " +
+    "FICTION RULE: results from fan wikis, film, comic, game or entertainment pages describe an invented world. If the thing asked about is a fictional place, character or office (for example a ruler of an imaginary country), say plainly that it is fictional and describe it only as part of that story — never as a real-world fact. " +
     "most recent / newest state of something, base your answer on the MOST RECENTLY DATED item " +
     "in these results and state that date — never present an older dated item as the current " +
     "situation when a newer one is present. If the results conflict, the newest date wins. " +
@@ -1044,7 +1045,7 @@ async function judgeGrounded(text, live, q, env) {
   try {
     const msg = [{ role: "system", content: "You are a strict fact-checker. Reply with exactly one line: SUPPORTED, or UNSUPPORTED: <the shortest reason>." },
       { role: "user", content: "SOURCES:\n" + String(live.ctx).slice(0, 9000) + "\n\nQUESTION: " + q + "\n\nANSWER TO CHECK:\n" + String(text).slice(0, 1500) +
-        "\n\nJudge strictly. Reply UNSUPPORTED if ANY of these is true: (a) the answer gives a specific name, figure, date, edition, title or event that the SOURCES do not state; (b) it is about an older edition or a different person than the question asks for (the NEWEST one when the question says latest, most recent or current); (c) the thing asked about is fictional, or the sources never mention it, yet the answer describes it as real; (d) it says something is confirmed or reported that the SOURCES do not report. An honest answer that says it could not confirm is SUPPORTED. Otherwise reply SUPPORTED." }];
+        "\n\nJudge strictly. Reply UNSUPPORTED if ANY of these is true: (a) the answer gives a specific name, figure, date, edition, title or event that the SOURCES do not state; (b) it is about an older edition or a different person than the question asks for (the NEWEST one when the question says latest, most recent or current); (c) the thing asked about is fictional (a fan wiki, film, comic or game page counts as fiction, even when it states the facts of the story) or the sources never mention it, yet the answer presents it as real without saying it is fictional; (d) it says something is confirmed or reported that the SOURCES do not report. An honest answer that says it could not confirm is SUPPORTED. Otherwise reply SUPPORTED." }];
     const r = await brainComplete(msg, env, { maxTokens: 60, temperature: 0, timeoutMs: 9000 });
     const t = String(r || "").trim();
     return /^UNSUPPORTED/i.test(t) ? t.replace(/^UNSUPPORTED:?\s*/i, "").slice(0, 160) || "the sources do not state this" : null;
