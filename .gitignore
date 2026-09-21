@@ -2,3 +2,5 @@ node_modules/
 .env
 *.log
 .DS_Store
+noria-ai/wrangler.dev.toml
+noria-ai/.wrangler/

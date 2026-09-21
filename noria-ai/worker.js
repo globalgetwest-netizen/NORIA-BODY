@@ -4,10 +4,11 @@
  * NO API key or secret to store anywhere. CORS-open so the Noria app can call it.
  * The Noria Engine is never involved — this is a separate Body capability.
  */
+import { handleAccounts } from './accounts.js'
 const CORS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'POST, GET, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type, X-Noria-Pro',
+  'Access-Control-Allow-Headers': 'Content-Type, X-Noria-Pro, Authorization',
 }
 
 export default {
@@ -15,6 +16,8 @@ export default {
     if (request.method === 'OPTIONS') return new Response(null, { headers: CORS })
     const url = new URL(request.url)
     try {
+      // Accounts (D1): sign-up, sign-in, profile, preferences and saved conversations. Only reached on /acct/…
+      if (url.pathname.startsWith('/acct/')) return await handleAccounts(request, env, url, json)
       // Noria Pro features (image creation, photo understanding) cost real compute, so they need a valid Pro
       // access code, checked here on the server — not only hidden in the app.
       if ((url.pathname === '/vision' && request.method === 'POST') || (url.pathname === '/image' && (request.method === 'POST' || request.method === 'GET'))) {
@@ -238,6 +241,14 @@ export default {
   // cold-starts (which is what made replies slow after idle).
   async scheduled(event, env, ctx) {
     ctx.waitUntil(fetch('https://noria-body.onrender.com/brain/health').catch(() => {}))
+    // Once an hour: forget expired sessions and old rate-limit rows, so the database only holds what is in use.
+    if (env.DB && new Date(event.scheduledTime).getUTCMinutes() < 10) {
+      const t = Math.floor(Date.now() / 1000)
+      ctx.waitUntil(env.DB.batch([
+        env.DB.prepare('DELETE FROM sessions WHERE expires_at < ?').bind(t),
+        env.DB.prepare('DELETE FROM rate_limits WHERE window_start < ?').bind(t - 3600),
+      ]).catch(() => {}))
+    }
   },
 }
 
