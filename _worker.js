@@ -890,13 +890,13 @@ function liveStrength(q) {
 const NO_LIVE_ANSWER = "I couldn't reach my live sources for that just now, and it is the kind of question where an out-of-date answer would mislead you. I would rather not guess. Please try again in a moment.";
 
 // ── verification ───────────────────────────────────────────────────────────────────────────────────────────────────
-const SC_SKIP = new Set("i,i'm,i've,noria,the,a,an,as,in,on,at,it,it's,he,she,they,we,you,this,that,these,those,here,there,note,source,sources,yes,no,however,also,today,according,based,currently,current,latest,recent,live,web,context,summary,sunday,monday,tuesday,wednesday,thursday,friday,saturday,january,february,march,april,may,june,july,august,september,october,november,december,utc,gmt,and,but,or,so,if,for,from,with,while,since,after,before,during,since,then,when,where,who,what,which,why,how,is,are,was,were,his,her,their,its,one,two,three,mr,mrs,ms,dr,hon,president,minister,prime,foreign,vice,chief,secretary,governor,mayor,ceo".split(","));
+const SC_SKIP = new Set("headlines,headline,news,latest,breaking,update,updates,top,stories,story,key,more,also,overall,meanwhile,finally,first,second,third,next,ghanaian,i,i'm,i've,noria,the,a,an,as,in,on,at,it,it's,he,she,they,we,you,this,that,these,those,here,there,note,source,sources,yes,no,however,also,today,according,based,currently,current,latest,recent,live,web,context,summary,sunday,monday,tuesday,wednesday,thursday,friday,saturday,january,february,march,april,may,june,july,august,september,october,november,december,utc,gmt,and,but,or,so,if,for,from,with,while,since,after,before,during,since,then,when,where,who,what,which,why,how,is,are,was,were,his,her,their,its,one,two,three,mr,mrs,ms,dr,hon,president,minister,prime,foreign,vice,chief,secretary,governor,mayor,ceo".split(","));
 const fold = (t) => String(t || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
 function claimPhrases(text) {
   const clean = String(text || "").replace(/\*\*|__|`|\[\d+\]|\[[^\]]*\]\([^)]*\)|https?:\/\/\S+/g, " ");
   const phrases = new Set(), years = new Set();
   const strip = (w) => w.replace(/^[("'“‘]+|[)"'”’.,;:!?…]+$/g, "");
-  for (const sent of clean.split(/(?<=[.!?])\s+|\n+/)) {
+  for (const line of clean.split(/\n+/)) for (const sent of line.replace(/^\s*(?:[-*\u2022]|\d+[.)])\s+/, "").split(/(?<=[.!?:])\s+|\s[\u2014\u2013-]\s/)) {
     const words = sent.split(/\s+/).filter(Boolean);
     let i = 0;
     while (i < words.length) {
@@ -926,10 +926,13 @@ function verifyAnswer(text, live, q) {
     if (parts.length && !parts.every((w) => hay.includes(w))) bad.push(ph);
   }
   for (const y of years) if (!hay.includes(y)) bad.push(y);
-  return { ok: bad.length < 2 && !years.some((y) => !hay.includes(y)), unsupported: bad };
+  // a short factual answer may not introduce two unsupported names; a long summary of many items is judged by proportion
+  const badNames = bad.filter((x) => !/^(?:19|20)\d{2}$/.test(x)), yearBad = years.some((y) => !hay.includes(y));
+  return { ok: !yearBad && (badNames.length < 2 || badNames.length / Math.max(1, phrases.length) < 0.25), unsupported: bad };
 }
-function fromSources(live) {
-  const rows = (live.sources || []).slice(0, 4).map((r) => "• " + r.title + (r.date ? " (" + String(r.date).slice(0, 16) + ")" : "") + (r.snippet ? ": " + String(r.snippet).replace(/\s+/g, " ").slice(0, 220) : "") + (r.url ? "\n  " + r.url : ""));
+function fromSources(live, news) {
+  const rows = (live.sources || []).slice(0, news ? 6 : 4).map((r) => "• " + r.title + (r.date ? " (" + String(r.date).slice(0, 16) + ")" : "") + (r.snippet ? ": " + String(r.snippet).replace(/\s+/g, " ").slice(0, 220) : "") + (r.url ? "\n  " + r.url : ""));
+  if (news) return "Here is what my live sources are reporting right now:\n\n" + rows.join("\n") + "\n\nTell me which story you want more on and I will look closer.";
   return "I couldn't confirm a precise answer to that from my live sources, and I don't want to guess. This is what they say:\n\n" + rows.join("\n") + "\n\nIf you tell me which part matters most, I can look again.";
 }
 // The answer for a question that was grounded on live sources: draft, verify, correct once, and if it still cannot be
@@ -941,7 +944,7 @@ async function liveAnswer(messages, env, g, q, opts) {
   const strict = addSystem(messages, "\n\nCORRECTION — your draft mentioned things that do not appear in the LIVE WEB CONTEXT above: " + v.unsupported.slice(0, 6).join(", ") +
     ". Rewrite the answer using ONLY names, dates and figures that appear in that context. If the context does not state the answer, say plainly that you could not confirm it. Never mention this correction.");
   try { text = await brainComplete(strict, env, opts); v = verifyAnswer(text, g.live, q); if (v.ok) return { text, verified: true }; } catch (_) {}
-  return { text: fromSources(g.live), verified: false };
+  return { text: fromSources(g.live, NEWS_INTENT.test(String(q || ""))), verified: false, unsupported: v.unsupported };
 }
 // Router-level grounding: when a query needs live facts, fetch the web and fold
 // the results into the system message so every provider in the fallback chain
@@ -1190,8 +1193,8 @@ export default {
         if (g.live) { // a question answered from live sources: verified against them before it is shown
           let r;
           try { r = await liveAnswer(messages, env, g, q, { deep, maxTokens: deep ? 8000 : 2600, temperature: Math.min(temperature, 0.2) }); }
-          catch (_) { r = { text: fromSources(g.live), verified: false }; } // the brain is down: the sources themselves still answer
-          return new Response(JSON.stringify({ answer: r.text, sources: g.live.sources, verified: r.verified }), { headers: JSON_H });
+          catch (_) { r = { text: fromSources(g.live, NEWS_INTENT.test(q)), verified: false }; } // the brain is down: the sources themselves still answer
+          return new Response(JSON.stringify(Object.assign({ answer: r.text, sources: g.live.sources, verified: r.verified }, body.debug ? { unsupported: r.unsupported || [] } : {})), { headers: JSON_H });
         }
         const text = await brainComplete(messages, env, { deep, maxTokens: deep ? 8000 : 2600, temperature });
         return new Response(JSON.stringify(body.debug ? { answer: text, usage: _lastUsage } : { answer: text }), { headers: JSON_H });
