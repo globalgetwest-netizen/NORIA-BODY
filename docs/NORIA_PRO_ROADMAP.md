@@ -110,3 +110,28 @@ Status snapshot: 21 September 2026. Benchmark on that day: 94.7% (54/57) on the 
 - Workers AI: 10,000 neurons a day, shared by vision, embeddings, images and speech. Anything new that uses it competes with what exists.
 - Pages Functions and Workers on the free plan have a small CPU budget per request; long agent loops need to be split across requests, run in the browser, or wait for a paid plan (not planned).
 - Every new capability is added flagged, tested on the benchmark before and after, and marked LIVE in the registry only when it passes.
+
+## Design principles (added 2026-09-21)
+
+- The benchmark **measures** Noria; it does not define her. No fix is written for one benchmark question. Fixes are mechanisms for a whole class of problems. Example: the **Temporal Evidence Resolver** (`temporalIntent` / `temporalIssues` in `_worker.js`) works out whether a question means the newest, this-year, last-year, next or an explicitly named moment, and checks the answer's years against it. It covers sports, elections, releases, holidays and prices, not just one event (`noria-eval/temporal_t.mjs`, 15 cases).
+- The capability registry is the single source of truth. States: `LIVE`, `CONNECTED`, `DEGRADED` (set automatically at runtime, e.g. live search when the open web returns nothing), `REQUIRES_AUTH`, `NOT_BUILT`, `UNSUPPORTED` (refused on purpose). `UNCERTAIN` and `CONFLICT` describe an answer, not a capability: she says she is unsure, or shows the disagreement.
+- Nothing becomes LIVE without the implementation, a runtime path and tests. Noria never says an outside action was done when it was not.
+
+## Orchestrator design (Phase 4, not built)
+
+Objective, then plan, then act, then observe, then verify, then correct or retry, then finish, then remember.
+
+1. **Tool registry**: every tool declares a name, input schema, risk class (`read` or `write`), whether it needs the user's authorisation, and its registry state. The planner may only choose tools that are LIVE or CONNECTED.
+2. **Planner**: a model call turns the objective into a short plan over registry tools (no per-topic workflows; the same planner handles a market report, a visa checklist or a data question). Independent steps are marked parallel.
+3. **Executor**: runs in the **browser**, calling small worker routes one step at a time. Reason: the free plan gives each request a small CPU budget, so a long loop cannot live in one request. Step results are saved (D1) so a task can resume.
+4. **Read-only tools first**: web search, page fetch, calculator, clock, weather, currency, spreadsheet queries (device), document search (device), deep research.
+5. **Observe and verify each step** with the existing verifiers (sources, figures, temporal check, judge). A failed step is retried once, then reported plainly with what is missing.
+6. **Write tools last**, each behind an explicit approval gate and an audit log entry; never chained silently.
+7. **Progress and control** stay visible: the plan is shown, steps stream, the Stop button cancels.
+
+## Decisions needed from the owner
+
+1. **Search keys**: check the Tavily dashboard and add new keys (and optionally a free Brave key) with your usual secret step. Until then live search reports DEGRADED.
+2. **Orchestrator location**: browser-side (free, works today, only while the page is open) or a paid always-on Worker (background and scheduled tasks). The roadmap assumes browser-side unless you decide otherwise.
+3. **First connectors**: email, calendar, maps and cloud storage each need an OAuth app created under your own accounts (for example a Google Cloud project). Which first, if any.
+4. **Vector index**: Cloudflare Vectorize plus embeddings use the same 10,000 neurons a day as vision, voice and images. Accept that trade-off, or keep retrieval keyword-based.
