@@ -770,8 +770,10 @@ async function logicChecked(messages, env, text, opts) {
     _logicDbg = String(j).slice(-300);
     const vd = String(j).match(/VERDICT:\s*(VALID|INVALID)/gi);
     if (!vd || !/INVALID/i.test(vd[vd.length - 1])) return text;
-    const fix = addSystem(messages, "\n\nVERDICT — a logic check found a counter-example: the conclusion does NOT follow from the premises. Answer that it does not follow, and explain briefly with a concrete counter-example in the same terms. Do not mention this note.");
-    return await brainComplete(fix, env, opts);
+    // The persona-carrying model repeats its "yes" when asked to rewrite, so the checker's own worked counter-example is the answer.
+    const why = String(j).replace(/VERDICT:\s*(?:VALID|INVALID)\s*$/i, "").trim().slice(-1400);
+    if (why.length < 40) return text;
+    return "No, the conclusion does not follow from the premises. Here is why:\n\n" + why;
   } catch (e) { _logicDbg = "ERR " + String((e && e.message) || e).slice(0, 200); return text; }
 }
 async function plainVerified(messages, env, opts) {
