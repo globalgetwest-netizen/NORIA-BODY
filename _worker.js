@@ -256,7 +256,15 @@ function rankRelevant(pool, q, fresh) {
   const need = terms.length <= 2 ? 1 : 0.6; // one or two subject words must all appear; longer questions need most of them
   let keep = scored.filter((x) => x.score >= need);
   if (!keep.length) keep = scored.filter((x) => x.web && x.score >= 0.34).slice(0, 3); // the open-web engine ranks by meaning; trust its best few
-  const tier = (x) => (x.score >= 0.99 ? 2 : 1);
+  const recentQ = /\b(most recent|latest|newest|current|currently|last|now|this year|this season|reigning|defending)\b/i.test(String(q || ""));
+  const yr = new Date().getUTCFullYear();
+  const recency = (x) => { // for "the most recent…" questions, a source that mentions this or last year outranks one that only mentions older years
+    if (!recentQ) return 0;
+    const years = (fold((x.r.title || "") + " " + (x.r.snippet || "")).match(/\b(?:19|20)\d{2}\b/g) || []).map(Number);
+    if (years.some((y) => y >= yr - 1)) return 1;
+    return years.length ? -1 : 0;
+  };
+  const tier = (x) => (x.score >= 0.99 ? 2 : 1) + recency(x);
   const newsQ = NEWS_INTENT.test(String(q || ""));
   // Asked for the news: newest first. Asked for a fact (who holds a post, what something is): the reference pages and the
   // open web lead and the freshest news follows them, because a dated headline mentioning the topic must not outrank the
@@ -676,6 +684,59 @@ function mathBlock(q) {
   return "\n\nCOMPUTED EXACTLY BY THE SYSTEM (calculator) — authoritative; do not recompute or round differently.\n- " + expr.replace(/\*/g, " × ").replace(/\//g, " ÷ ").replace(/\^/g, " ^ ") + " = " + val.toLocaleString("en-US", { maximumFractionDigits: 10 }) + "\nState the result plainly.";
 }
 const calcBlock = (q) => calendarBlock(q) || mathBlock(q);
+// ── A question that is ONLY about the clock or the calendar is answered by the clock itself, without a model ─────────
+// "What time is it in London", "what day is it", "how many days until Christmas". A model handed the exact figures still
+// slipped now and then (London an hour out, Christmas 12 days out), so these never go through one: instant and exact.
+function clockParts(now, tz) {
+  const date = new Intl.DateTimeFormat("en-GB", { timeZone: tz, weekday: "long", day: "numeric", month: "long", year: "numeric" }).format(now);
+  const time = new Intl.DateTimeFormat("en-US", { timeZone: tz, hour: "numeric", minute: "2-digit", hour12: true }).format(now).replace(/[\u202f\u00a0]/g, " ");
+  const off = (/\((UTC[^)]*)\)/.exec(fmtTime(now, tz)) || [])[1] || "UTC";
+  return { date, time, off };
+}
+function localYMD(now, tz) {
+  const p = Object.fromEntries(new Intl.DateTimeFormat("en-US", { timeZone: tz, year: "numeric", month: "numeric", day: "numeric" }).formatToParts(now).filter((x) => x.type !== "literal").map((x) => [x.type, +x.value]));
+  return { y: p.year, m: p.month, d: p.day };
+}
+const HOLIDAYS = { "christmas day": [12, 25, "Christmas Day"], "christmas": [12, 25, "Christmas Day"], "boxing day": [12, 26, "Boxing Day"], "new year's eve": [12, 31, "New Year's Eve"], "new years eve": [12, 31, "New Year's Eve"],
+  "new year's day": [1, 1, "New Year's Day"], "new years day": [1, 1, "New Year's Day"], "new year": [1, 1, "New Year's Day"], "valentine's day": [2, 14, "Valentine's Day"], "valentines day": [2, 14, "Valentine's Day"],
+  "halloween": [10, 31, "Halloween"], "labour day": [5, 1, "Labour Day"], "workers' day": [5, 1, "Workers' Day"], "africa day": [5, 25, "Africa Day"], "ghana independence day": [3, 6, "Ghana's Independence Day"],
+  "nigeria independence day": [10, 1, "Nigeria's Independence Day"], "jamhuri day": [12, 12, "Jamhuri Day"] };
+function clockDirect(q, tz) {
+  const raw = String(q || "").trim();
+  if (raw.length > 80) return null;
+  const s = raw.toLowerCase().replace(/[?!.]+$/, "").replace(/\s+/g, " ").trim();
+  const zone = tz && String(tz).includes("/") ? String(tz) : "UTC";
+  const now = new Date();
+  const city = (z) => String(z).split("/").pop().replace(/_/g, " ");
+  // the time (here, or in named places)
+  let m = /^(?:please )?(?:what(?:'s| is)?(?: the)?(?: current| local| exact)? time(?: is it)?(?: right now| now)?|what time is it(?: right now| now)?|current(?: local)? time|time now|tell me the time(?: please)?)(?: (?:in|at|for) (.+?))?(?: right now| now)?$/.exec(s) || /^time (?:right )?(?:now )?in (.+?)(?: right now| now)?$/.exec(s);
+  if (m) {
+    const zones = m[1] ? findPlaces(m[1]) : [];
+    if (m[1] && !zones.length) return null;
+    const list = zones.length ? zones : [{ label: city(zone), tz: zone }];
+    return list.map((z) => { const c = clockParts(now, z.tz); return "It's **" + c.time + "** in " + z.label + " (" + c.off + ") — " + c.date + "."; }).join("\n");
+  }
+  // the day, date, month or year
+  if (/^(?:what(?:'s| is)?(?: the)? (?:day|date)(?: of the week)?(?: is it)?(?: today)?|what day is it(?: today)?|which day is it|what(?:'s| is) today'?s date|today'?s date|what(?:'s| is) the date today)$/.test(s)) {
+    const c = clockParts(now, zone); return /day/.test(s) && !/date/.test(s) ? "Today is **" + c.date.split(",")[0] + "**, " + c.date.replace(/^\w+,?\s*/, "") + "." : "Today is **" + c.date + "**.";
+  }
+  if (/^what year is it(?: now| right now)?$/.test(s)) return "It's **" + localYMD(now, zone).y + "**.";
+  if (/^what month is it(?: now| right now)?$/.test(s)) return "It's **" + new Intl.DateTimeFormat("en-GB", { timeZone: zone, month: "long", year: "numeric" }).format(now) + "**.";
+  // days until a holiday or a date
+  m = /^(?:how many )?days (?:are there |is it |left |do (?:i|we) have )?(?:left )?(?:until|till|to|before) (.+)$/.exec(s) || /^how many days (?:are )?left (?:until|till|to|before) (.+)$/.exec(s);
+  if (m) {
+    const tgt = m[1].replace(/^the /, "").trim(), today = localYMD(now, zone), todayT = Date.UTC(today.y, today.m - 1, today.d);
+    let t = null, label = "";
+    const hol = HOLIDAYS[tgt];
+    if (hol) { t = Date.UTC(today.y, hol[0] - 1, hol[1]); if (t < todayT) t = Date.UTC(today.y + 1, hol[0] - 1, hol[1]); label = hol[2]; }
+    else { const ds = parseDates(tgt); if (ds.length === 1) { t = ds[0].t; label = fmtDate(t); } }
+    if (t === null) return null;
+    const n = Math.round((t - todayT) / 86400000);
+    if (n < 0) return null; // a date in the past is a different question
+    return (n === 0 ? "That is **today**" : n === 1 ? "There is **1 day** until " + label : "There are **" + n + " days** until " + label) + (hol ? " (" + fmtDate(t) + ")" : "") + ". Today is " + fmtDate(todayT) + ".";
+  }
+  return null;
+}
 // A question that is ONLY arithmetic ("what is 17% of 2,340") is answered by the calculator itself. Even with the exact
 // result placed in front of a model, one reply in a few came out wrong (39.78 for 397.8), so a plain sum never goes
 // through a model at all: instant, and correct every time. Anything with other words in it still goes to the model.
@@ -1180,7 +1241,7 @@ export default {
       let body; try { body = await request.json(); } catch (_) { body = {}; }
       let messages = buildMessages(body);
       if (!messages.length) return new Response(JSON.stringify({ error: "empty request" }), { status: 400, headers: JSON_H });
-      const refAns = refDirect(body.query) || mathDirect(body.query);
+      const refAns = refDirect(body.query) || mathDirect(body.query) || clockDirect(body.query, body.tz);
       if (refAns) return new Response(JSON.stringify({ answer: refAns }), { headers: JSON_H });
       const g = await groundMessages(messages, body, env);
       if (g.refuse) return new Response(JSON.stringify({ answer: g.refuse }), { headers: JSON_H });
@@ -1194,7 +1255,7 @@ export default {
           let r;
           try { r = await liveAnswer(messages, env, g, q, { deep, maxTokens: deep ? 8000 : 2600, temperature: Math.min(temperature, 0.2) }); }
           catch (_) { r = { text: fromSources(g.live, NEWS_INTENT.test(q)), verified: false }; } // the brain is down: the sources themselves still answer
-          return new Response(JSON.stringify(Object.assign({ answer: r.text, sources: g.live.sources, verified: r.verified }, body.debug ? { unsupported: r.unsupported || [] } : {})), { headers: JSON_H });
+          return new Response(JSON.stringify(Object.assign({ answer: r.text, sources: g.live.sources, verified: r.verified }, body.debug ? { unsupported: r.unsupported || [], context: g.live.ctx.slice(0, 1500) } : {})), { headers: JSON_H });
         }
         const text = await brainComplete(messages, env, { deep, maxTokens: deep ? 8000 : 2600, temperature });
         return new Response(JSON.stringify(body.debug ? { answer: text, usage: _lastUsage } : { answer: text }), { headers: JSON_H });
@@ -1206,7 +1267,7 @@ export default {
     // ── Brain: streaming (SSE) — translate Groq deltas to the app's {token}/{done} ──
     if (path === "/brain/ask/stream" && request.method === "POST") {
       let body; try { body = await request.json(); } catch (_) { body = {}; }
-      const refAns = refDirect(body.query) || mathDirect(body.query);
+      const refAns = refDirect(body.query) || mathDirect(body.query) || clockDirect(body.query, body.tz);
       if (refAns) return new Response(`data: ${JSON.stringify({ token: refAns })}
 
 data: ${JSON.stringify({ done: true })}
