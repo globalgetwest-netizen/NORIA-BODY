@@ -997,6 +997,7 @@ async function generateImage(prompt) {
   const el = addNoria()
   try {
     const r = await fetch(NORIA_AI + '/image?prompt=' + encodeURIComponent(prompt) + proParam())
+    if (r.status === 429) { let m = ''; try { m = (await r.json()).message || '' } catch (_) {} const e = new Error('image allowance'); e.friendly = m || 'The free image allowance for today is used up. It resets at midnight UTC.'; throw e }
     if (!r.ok) throw new Error('image gen failed (' + r.status + ')')
     const blob = await r.blob()
     if (cancelled) { el.closest('.msg').remove(); return }
@@ -1011,8 +1012,9 @@ async function generateImage(prompt) {
     convoRecord({ role: 'noria', img: thumb || url, cap: prompt })
   } catch (e) {
     el.closest('.msg').classList.add('err')
-    el.textContent = "I couldn't create that image just now. Please try again in a moment."
-    convoRecord({ role: 'err', text: "I couldn't create that image just now. Please try again in a moment." })
+    const failMsg = (e && e.friendly) || "I couldn't create that image just now. Please try again in a moment."
+    el.textContent = failMsg
+    convoRecord({ role: 'err', text: failMsg })
   }
 }
 async function blobToThumb(blob, max) {

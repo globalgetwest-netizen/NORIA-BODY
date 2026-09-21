@@ -65,7 +65,18 @@ export default {
             return new Response(bytes, { headers: { ...CORS, 'Content-Type': type, 'Cache-Control': 'no-store', 'X-Noria-Image-Model': testModel.split('/').pop() } })
           } catch (e) { return json({ model: testModel, error: String((e && e.message) || e).slice(0, 300) }, 502) }
         }
-        const models = String(env.IMAGE_MODELS || '@cf/black-forest-labs/flux-1-schnell').split(',').map((m) => m.trim()).filter(Boolean)
+        const allModels = String(env.IMAGE_MODELS || '@cf/black-forest-labs/flux-1-schnell').split(',').map((m) => m.trim()).filter(Boolean)
+        const codeUsed = (url.searchParams.get('pro') || request.headers.get('X-Noria-Pro') || '').trim().toUpperCase()
+        let led = null
+        try { led = await imageLedger(env, codeUsed) } catch (_) { led = null } // if the ledger is unreachable, images still work (unmetered)
+        if (led) {
+          if (led.used >= led.perUser) return json({ error: 'image_limit', message: 'You have reached today\'s image limit for this account. It resets at midnight UTC.' }, 429)
+          if (led.spent >= led.budget) return json({ error: 'image_budget', message: 'Noria has used today\'s free image allowance. It resets at midnight UTC.' }, 429)
+        }
+        const left = led ? led.budget - led.spent : Infinity
+        // the costly, higher-quality models may use only the first half of the day's budget; after that the cheap model keeps images flowing
+        const models = allModels.filter((m) => { const c = imageCost(env, m); return c <= left && (c <= 500 || !led || led.spent + c <= led.budget * 0.5) })
+        if (!models.length) return json({ error: 'image_budget', message: 'Noria has used today\'s free image allowance. It resets at midnight UTC.' }, 429)
         const styled = (prompt.trim() + '. Natural lighting, sharp focus, fine detail, realistic textures, professional photography quality.').slice(0, 1900)
         for (const model of models) {
           try {
@@ -80,10 +91,11 @@ export default {
             } else if (out instanceof ReadableStream || out instanceof ArrayBuffer || out instanceof Uint8Array) {
               bytes = out; type = 'image/png'
             }
-            if (bytes) return new Response(bytes, { headers: { ...CORS, 'Content-Type': type, 'Cache-Control': 'no-store', 'X-Noria-Image-Model': model.split('/').pop() } })
+            if (bytes) { if (led) { try { await imageCharge(env, led, imageCost(env, model)) } catch (_) {} } return new Response(bytes, { headers: { ...CORS, 'Content-Type': type, 'Cache-Control': 'no-store', 'X-Noria-Image-Model': model.split('/').pop() } }) }
           } catch (_) { /* try the next model, then Stable Diffusion XL */ }
         }
         const img = await env.AI.run('@cf/stabilityai/stable-diffusion-xl-base-1.0', { prompt })
+        if (led) { try { await imageCharge(env, led, imageCost(env, 'stable-diffusion-xl-base-1.0')) } catch (_) {} }
         return new Response(img, { headers: { ...CORS, 'Content-Type': 'image/png', 'Cache-Control': 'no-store', 'X-Noria-Image-Model': 'sdxl' } })
       }
       // Natural neural voice — Deepgram Aura (reliable), MeloTTS fallback.
@@ -234,6 +246,34 @@ function bytesToBase64(buf) {
   return btoa(s)
 }
 
+// ── Free-tier image budget ─────────────────────────────────────────────────────────────────────────────────────────
+// Cloudflare's free AI allowance is 10,000 "neurons" a day for everything (images, photo reading, fallbacks). Images differ
+// hugely in cost, so each is priced (an ESTIMATE, adjustable with IMAGE_COSTS = {"model-name": neurons}), a daily image
+// budget is kept in KV (IMAGE_DAILY_BUDGET, default 6000 — the rest stays free for other features), and each request uses
+// the best model that still fits what is left, sliding down to a cheaper one instead of failing. A per-account daily cap
+// (IMAGE_PER_USER, default 12) stops one person using it all. When the day's budget is gone, people are told so plainly.
+const IMAGE_COST = { 'flux-2-klein-9b': 1500, 'lucid-origin': 2500, 'phoenix-1.0': 2100, 'flux-1-schnell': 150, 'stable-diffusion-xl-base-1.0': 300 }
+const shortModel = (m) => String(m).split('/').pop()
+function imageCost(env, model) {
+  let table = IMAGE_COST
+  try { if (env.IMAGE_COSTS) table = Object.assign({}, IMAGE_COST, JSON.parse(env.IMAGE_COSTS)) } catch (_) {}
+  return Number(table[shortModel(model)]) || 800
+}
+const utcDay = () => new Date().toISOString().slice(0, 10)
+async function shortHash(text) {
+  const d = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text))
+  return [...new Uint8Array(d)].slice(0, 6).map((b) => b.toString(16).padStart(2, '0')).join('')
+}
+async function imageLedger(env, code) {
+  const day = utcDay(), uid = await shortHash(String(code || 'anon'))
+  const spentKey = 'imgspent:' + day, userKey = 'imguser:' + day + ':' + uid
+  const [spent, used] = await Promise.all([env.SYNC.get(spentKey), env.SYNC.get(userKey)])
+  return { spentKey, userKey, spent: Number(spent) || 0, used: Number(used) || 0,
+    budget: Number(env.IMAGE_DAILY_BUDGET) || 6000, perUser: Number(env.IMAGE_PER_USER) || 12 }
+}
+async function imageCharge(env, led, cost) {
+  await Promise.all([env.SYNC.put(led.spentKey, String(led.spent + cost), { expirationTtl: 172800 }), env.SYNC.put(led.userKey, String(led.used + 1), { expirationTtl: 172800 })])
+}
 // Input for an image model: most take { prompt, steps }; the FLUX.2 family takes a multipart form (1024 x 1024).
 function imageInput(model, prompt) {
   if (/flux-2/i.test(model)) {
