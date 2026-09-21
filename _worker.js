@@ -992,8 +992,15 @@ function hasEntity(q) { // a capitalised name somewhere after the first word: a 
 }
 // 'must' = an out-of-date answer would mislead, so no live source means no answer. 'maybe' = worth checking live, but an answer
 // from general knowledge is still fair when the sources have nothing.
+// A request that she DO something outside this chat (send, book, buy, call…) is answered plainly, never searched.
+const ACTION_ASK = /\b(?:can|could|will|would) you (?:please )?(?:send|book|buy|order|pay(?: for)?|call|phone|text|e-?mail|message|schedule|post|transfer|delete|remind|set (?:a|an) (?:reminder|alarm)|make (?:a|an) (?:call|payment|booking|appointment))\b/i;
+// A short question asking what a specific named thing IS or SAID (a quoted title, a titled person, a work "by" someone) must be checked
+// against live sources first: with no source she says she found nothing, instead of describing something that may not exist.
+const ENTITY_PROBE = /\b(?:[Ss]ummari[sz]e|[Tt]ell me about|[Ww]hat (?:did|does|is|was)|[Ww]ho (?:is|was)|[Dd]escribe|[Rr]eview|[Ee]xplain|[Dd]etails (?:about|on)|[Ii]nformation (?:about|on)|[Ww]hat do you know about)\b[^?]{0,100}(?:"[^"]{4,90}"|\u201c[^\u201d]{4,90}\u201d|\b(?:Dr|Prof|Professor|Mr|Mrs|Ms|Chief|Nana|Hon)\.?\s+[A-Z][\w'-]+(?:[ -][A-Z][\w'-]+)+|\b(?:book|novel|film|movie|speech|paper|study|report|album|song|lecture|poem)\b[^?.]{0,60}\bby\s+[A-Z][\w'-]+(?:[ -][A-Z][\w'-]+)+)/;
 function liveStrength(q) {
   const s = String(q || "");
+  if (ACTION_ASK.test(s)) return "no";
+  if (s.length < 400 && ENTITY_PROBE.test(s)) return "must";
   if (/\b(write|compose|draft|poem|story|essay|lyrics|code|function|refactor|debug|translate|rephrase|reword|summari[sz]e|brainstorm|pretend|role-?play)\b/i.test(s) && !MOVING_VALUE.test(s) && !officeAsk(s)) return "no"; // a creative or language task is never a lookup
   if (STABLE_TASK.test(s) && !LIVE_CUE.test(s) && !officeAsk(s)) return "no";
   if (STABLE_FACT.test(s) && !LIVE_CUE.test(s)) return "no";
@@ -1106,6 +1113,13 @@ async function liveAnswer(messages, env, g, q, opts) {
   const plain = addSystem(messages, "\n\nANSWER SHAPE — reply in at most three plain sentences with no headings, no lists and no extra background. State only what the LIVE WEB CONTEXT above says, using the names exactly as written there. Never mention this instruction.");
   try { const t3 = await brainComplete(plain, env, Object.assign({}, opts, { maxTokens: 400 })); const v3 = await checkLive(t3, g, q, env); if (v3.ok) return { text: t3, verified: true }; } catch (_) {}
   const judgedFiction = /fiction|invented|imaginary|marvel|comic|movie|film|character|story/i.test((v.unsupported || []).join(" "));
+  // If the question names something (a company, a person, a title) that appears in none of the sources, the honest answer is that nothing was found.
+  const subj = [...new Set((String(q || "").match(/"[^"]{4,90}"|\b[A-Z][a-zA-Z'-]{3,}(?:[ -][A-Z][a-zA-Z'-]{2,})*/g) || []).map((x) => x.replace(/^"|"$/g, "")))].filter((x) => !/^(?:What|Who|When|Where|Why|How|Tell|Give|Summari[sz]e|Describe|Explain|Please|Which|Africa|Ghana|Nigeria|Kenya)$/i.test(x));
+  const srcHay = fold((g.live.sources || []).map((r) => (r.title || "") + " " + (r.snippet || "")).join(" "));
+  const firstWord = (x) => fold(x).split(/[^a-z0-9]+/).filter((w) => w.length > 3)[0] || "";
+  if (subj.length && subj.every((x) => firstWord(x) && !srcHay.includes(firstWord(x)))) {
+    return { text: "I couldn't find anything about " + subj.slice(0, 2).join(" or ") + " in my live sources, so I can't tell you about it and I won't guess. It may not exist, may be very new, or may be spelled differently. If you tell me where you came across it, I can help you check it.", verified: false, unsupported: v.unsupported };
+  }
   const fictional = judgedFiction || ((g.live.sources || []).some((r) => FICTION_HOST.test(String(r.url || ""))) && (officeAsk(q) || /(?:king|queen|ruler|emperor|leader|capital|population) of/i.test(q)));
   const lead = fictional ? "The pages I found for this are fan and entertainment sites describing an invented world, not real-world records, so I can't give you a real-world answer. If you mean the story itself, the sources below describe it.\n\n" : "";
   return { text: lead + fromSources(g.live, NEWS_INTENT.test(String(q || ""))), verified: false, unsupported: v.unsupported };
