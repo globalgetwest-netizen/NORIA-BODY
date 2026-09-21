@@ -554,6 +554,7 @@ function lazyScript(src) { return _scripts[src] || (_scripts[src] = new Promise(
 const _styles = {}
 function lazyStyle(href) { return _styles[href] || (_styles[href] = new Promise((res) => { const l = document.createElement('link'); l.rel = 'stylesheet'; l.href = href; l.onload = res; l.onerror = res; document.head.appendChild(l) })) }
 
+let dataMod = null, dataTables = [] // the data engine (loaded when a spreadsheet is attached) and the tables held this session
 const NORIA_AI = 'https://noria-ai.insights-skyglobe.workers.dev'
 
 // ── Semantic memory (device-scoped, private, free) ────────────────────────────
@@ -709,6 +710,7 @@ const pagesOf = (chars) => Math.max(1, Math.round(chars / CHARS_PER_PAGE))
 function docCut(a) { const cap = docCap(), n = (a.text || '').length, p = a.info && a.info.pages ? a.info : null; return n > cap || !!(p && p.pages > p.readPages) }
 function readNote(a) {
   if (a.loading || a.preview || !a.text) return ''
+  if (a.dataNote) return ' · ' + a.dataNote
   const n = a.text.length, p = a.info && a.info.pages ? a.info : null
   if (!docCut(a)) return (isPro && n > DOC_SEND ? ' · whole document searched' : ' · read in full') + (p ? ' (' + p.pages + ' pages)' : n > CHARS_PER_PAGE ? ' (~' + pagesOf(n) + ' pages)' : '')
   const total = p ? p.pages : pagesOf(n), read = Math.min(total, pagesOf(Math.min(n, docCap())))
@@ -807,8 +809,21 @@ async function handleFiles(files) {
     attachments.push(a); renderTray(); syncSend()
     try {
       const info = {}
-      a.text = (await extractText(file, info)) || ''; a.info = info
-      if (!a.text.trim()) { a.text = ''; note('I couldn’t find readable text in “' + file.name + '”.') }
+      if (/\.xlsx$/i.test(a.name) && !isPro) { note('Excel files are part of Noria Pro (CSV files work for everyone).'); attachments = attachments.filter((z) => z.id !== a.id); renderTray(); syncSend(); continue }
+      if (isPro && /\.(csv|tsv|xlsx)$/i.test(a.name)) { // a spreadsheet becomes an exact table: every figure is computed from every row, on this device
+        const D = dataMod || (dataMod = await import('./dataeng.js?v=1'))
+        let t = null
+        if (/\.xlsx$/i.test(a.name)) { await lazyScript('https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js'); t = await D.tableFromXLSX(await file.arrayBuffer(), a.name, window.ExcelJS) }
+        else t = D.tableFromCSV(await file.text(), a.name)
+        if (t && t.rows.length) {
+          dataTables = dataTables.filter((x) => x.name !== t.name).concat(t); a.table = t
+          a.text = 'EXACT DATA PROFILE — every figure below was computed by the system from all ' + t.rows.length.toLocaleString('en-US') + ' rows of the file; state these figures as they are and never recompute them.\n\n' + D.profileMarkdown(t, 12)
+          a.info = {}; a.dataNote = t.rows.length.toLocaleString('en-US') + ' rows × ' + t.cols.length + ' columns, analysed exactly'
+        }
+      }
+      if (!a.text) { a.text = (await extractText(file, info)) || ''; a.info = info }
+      if (a.table) { /* profile ready */ }
+      else if (!a.text.trim()) { a.text = ''; note('I couldn’t find readable text in “' + file.name + '”.') }
       else if (!a.preview) readNotice(a)
     } catch (e) {
       note('I couldn’t read “' + file.name + '”. ' + (/tesseract|image/i.test(e.message) ? 'Photo reading is unavailable right now.' : /pdf/i.test(e.message) ? 'PDF reading is unavailable right now.' : ''))
@@ -839,6 +854,19 @@ async function respond(q, opts = {}) {
   convoRecord({ role: 'user', text: shown, files: atts.map((a) => a.name) })
   attachments = []; renderTray()
   input.value = ''; grow()
+
+  // A question about an attached spreadsheet is answered by the data engine: exact figures from every row, no model involved.
+  if (isPro && dataTables.length && !isImageRequest(q)) {
+    const tbl = atts.find((x) => x.table)
+    const ask = (!opts.display && shown === q && tbl && /^Please read the attached/i.test(q)) ? 'summarize the data' : q
+    let ans = null
+    try { const D = dataMod || (dataMod = await import('./dataeng.js?v=1')); ans = D.answerDataQuestion(ask, tbl ? [tbl.table] : dataTables) } catch (_) { ans = null }
+    if (ans) {
+      const el = addNoria(); renderMd(el, ans); addFeedback(el.closest('.msg'), q, ans)
+      if (/\b(chart|graph|plot|bar chart|pie chart|line chart|visuali[sz]e)\b/i.test(q)) maybeChartFromTable(el, q)
+      convoRecord({ role: 'noria', text: ans }); finish(); return
+    }
+  }
 
   // Image generation branch — "draw/create an image of…" (like Gemini).
   if (!atts.length && isImageRequest(q)) {
