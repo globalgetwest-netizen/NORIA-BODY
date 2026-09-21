@@ -1105,7 +1105,8 @@ async function liveAnswer(messages, env, g, q, opts) {
   // third attempt: a short, plain answer (no headings, no lists) — the shape least likely to bring in anything the sources do not say
   const plain = addSystem(messages, "\n\nANSWER SHAPE — reply in at most three plain sentences with no headings, no lists and no extra background. State only what the LIVE WEB CONTEXT above says, using the names exactly as written there. Never mention this instruction.");
   try { const t3 = await brainComplete(plain, env, Object.assign({}, opts, { maxTokens: 400 })); const v3 = await checkLive(t3, g, q, env); if (v3.ok) return { text: t3, verified: true }; } catch (_) {}
-  const fictional = (g.live.sources || []).some((r) => FICTION_HOST.test(String(r.url || ""))) && (officeAsk(q) || /(?:king|queen|ruler|emperor|leader|capital|population) of/i.test(q));
+  const judgedFiction = /fiction|invented|imaginary|marvel|comic|movie|film|character|story/i.test((v.unsupported || []).join(" "));
+  const fictional = judgedFiction || ((g.live.sources || []).some((r) => FICTION_HOST.test(String(r.url || ""))) && (officeAsk(q) || /(?:king|queen|ruler|emperor|leader|capital|population) of/i.test(q)));
   const lead = fictional ? "The pages I found for this are fan and entertainment sites describing an invented world, not real-world records, so I can't give you a real-world answer. If you mean the story itself, the sources below describe it.\n\n" : "";
   return { text: lead + fromSources(g.live, NEWS_INTENT.test(String(q || ""))), verified: false, unsupported: v.unsupported };
 }
@@ -1121,7 +1122,7 @@ const CAPS = [
   ]],
   ["Live information", [
     ["Live web search, current news and office-holders", "connected", "search", "Open web, Wikipedia and many news feeds, read at the moment of the question."],
-    ["Weather, currency exchange rates, cryptocurrency prices, exact clock, date and holiday calculations", "connected", "feeds", "Read from live data feeds, or calculated exactly."],
+    ["Weather, currency exchange rates, cryptocurrency prices, exact clock, date and holiday calculations", "connected", "feeds", "Read from live data feeds, or calculated exactly. Stock-market prices have no dedicated feed; they come only from web search and may lag."],
     ["Source-grounded answers, checked before they are shown", "live", "", "Names, dates and figures must appear in the sources, and a second model checks the main claim; when it cannot confirm, she says so."],
   ]],
   ["Knowledge & documents", [
