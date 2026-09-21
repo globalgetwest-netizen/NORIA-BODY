@@ -7,7 +7,7 @@
 import { Brain, toSpeech } from './brain.js'
 import { noriaSystem } from './persona.js'
 import { initMemory, memoryContext, applyMemoryUpdate, forgetMemory } from './memory.js'
-import { retrieveKnowledge } from './knowledge.js?v=3'
+import { retrieveKnowledge } from './knowledge.js?v=4'
 import { NoriaPresenceEngine } from './noria-presence.js'
 
 const $ = (id) => document.getElementById(id)
