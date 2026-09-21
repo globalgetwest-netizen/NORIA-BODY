@@ -1001,6 +1001,8 @@ function liveStrength(q) {
   const s = String(q || "");
   if (ACTION_ASK.test(s)) return "no";
   if (s.length < 400 && ENTITY_PROBE.test(s)) return "must";
+  // a puzzle with its own numbers ("a bat and a ball cost 1.10 in total…") is worked out, not looked up; a market or rate word keeps it a lookup
+  if (mathWordProblem(s) && !LIVE_CUE.test(s) && !officeAsk(s) && !/(bitcoin|btc|stock|share price|gold|oil|exchange|rate|dollar|cedi|euro|pound|crypto|market|today|now|current|latest)/i.test(s)) return "no";
   if (/\b(write|compose|draft|poem|story|essay|lyrics|code|function|refactor|debug|translate|rephrase|reword|summari[sz]e|brainstorm|pretend|role-?play)\b/i.test(s) && !MOVING_VALUE.test(s) && !officeAsk(s)) return "no"; // a creative or language task is never a lookup
   if (STABLE_TASK.test(s) && !LIVE_CUE.test(s) && !officeAsk(s)) return "no";
   if (STABLE_FACT.test(s) && !LIVE_CUE.test(s)) return "no";
@@ -1063,7 +1065,7 @@ function verifyAnswer(text, live, q) {
   if (RECENT_EVENT_Q.test(String(q || ""))) {
     const ay = (String(text).replace(/(?:dated|as of|source:?)[^,.;)]{0,40}/gi, " ").replace(/\d{4}-\d{2}-\d{2}/g, " ").match(/\b(?:19|20)\d{2}\b/g) || []).map(Number), cy = new Date().getUTCFullYear();
     const ctxNew = (String(live.ctx).match(/\b(?:19|20)\d{2}\b/g) || []).some((y) => Number(y) >= cy - 1);
-    if (ay.length && ctxNew && ay.every((y) => y <= cy - 2)) { stale = true; bad.push("an older edition (" + ay[0] + ") instead of the most recent one"); }
+    if (ay.length && ay.every((y) => y <= cy - 2)) /* named only old years: with no recent year in the sources there is no evidence it is the newest either */ { stale = true; bad.push("an older edition (" + ay[0] + ") instead of the most recent one"); }
   }
   return { ok: !stale && !yearBad && !badNums.length && (badNames.length < 2 || badNames.length / Math.max(1, phrases.length) < 0.25), unsupported: bad };
 }
