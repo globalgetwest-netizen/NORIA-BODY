@@ -1037,9 +1037,15 @@ function verifyAnswer(text, live, q) {
     if (parts.length && !parts.every((w) => hay.includes(w))) bad.push(ph);
   }
   for (const y of years) if (!hay.includes(y)) bad.push(y);
+  // A figure the sources never state (a net worth, a population, a price) is the model's memory, which stops before today.
+  // Three or more digits (not a year) must appear in the sources, the question, the clock or a tool result.
+  const hayNum = hay.replace(/(\d),(?=\d{3})/g, "$1");
+  const badNums = [...new Set((String(text).replace(/(\d),(?=\d{3})/g, "$1").replace(/\[\d+\]/g, " ").match(/\d+(?:\.\d+)?/g) || [])
+    .filter((n) => n.replace(".", "").length >= 3 && !(/^(?:19|20)\d{2}$/.test(n)) && !hayNum.includes(n)))];
+  for (const n of badNums) bad.push(n);
   // a short factual answer may not introduce two unsupported names; a long summary of many items is judged by proportion
   const recentYear = new Date().getUTCFullYear() - 1; // "in office since 2022" is history the model may know; a claim about this or last year must be in the sources
-  const badNames = bad.filter((x) => !/^(?:19|20)\d{2}$/.test(x)), yearBad = years.some((y) => Number(y) >= recentYear && !hay.includes(y));
+  const badNames = bad.filter((x) => !/^(?:19|20)\d{2}$/.test(x) && !/^\d+(?:\.\d+)?$/.test(x)), yearBad = years.some((y) => Number(y) >= recentYear && !hay.includes(y));
   // "Who won the most recent …": an answer that names only an OLD year while the sources hold a newer one is the model's memory
   // talking (the previous edition), or a mix of old and new. It is treated as unsupported so the answer is redone from the sources.
   let stale = false;
@@ -1048,7 +1054,7 @@ function verifyAnswer(text, live, q) {
     const ctxNew = (String(live.ctx).match(/\b(?:19|20)\d{2}\b/g) || []).some((y) => Number(y) >= cy - 1);
     if (ay.length && ctxNew && ay.every((y) => y <= cy - 2)) { stale = true; bad.push("an older edition (" + ay[0] + ") instead of the most recent one"); }
   }
-  return { ok: !stale && !yearBad && (badNames.length < 2 || badNames.length / Math.max(1, phrases.length) < 0.25), unsupported: bad };
+  return { ok: !stale && !yearBad && !badNums.length && (badNames.length < 2 || badNames.length / Math.max(1, phrases.length) < 0.25), unsupported: bad };
 }
 const RECENT_EVENT_Q = /\b(?:most recent|latest|last|current|newest)\b[^?.]{0,60}\b(?:won|winner|champion|champions|final|edition|tournament|cup|league|title|election|season)\b|\bwho won\b[^?.]{0,40}\b(?:last|latest|most recent|recent)\b/i;
 function fromSources(live, news) {
@@ -1067,7 +1073,7 @@ async function judgeGrounded(text, live, q, env) {
   try {
     const msg = [{ role: "system", content: "You are a strict fact-checker. Reply with exactly one line: SUPPORTED, or UNSUPPORTED: <the shortest reason>." },
       { role: "user", content: "SOURCES:\n" + String(live.ctx).slice(0, 9000) + "\n\nQUESTION: " + q + "\n\nANSWER TO CHECK:\n" + String(text).slice(0, 1500) +
-        "\n\nJudge the answer's MAIN claim (the direct answer to the question), not its minor extra detail. Reply UNSUPPORTED only if: (a) the main claim is not stated by the SOURCES; (b) it is about an older edition or a different person than the question asks for (the NEWEST one when the question says latest, most recent or current); (c) the thing asked about is fictional (a fan wiki, film, comic or game page counts as fiction, even when it states the facts of the story) or the sources never mention it, yet the answer presents it as real without saying it is fictional; (d) it says something is confirmed that the SOURCES do not report; or (e) the source describes a DIFFERENT event or thing that merely shares words with the question (another sport, another competition, another person or place with a similar name), so the answer is about the wrong subject. Use your own general knowledge to recognise a fictional place, office or character even when the sources do not say so. An honest answer that says it could not confirm is SUPPORTED. Otherwise reply SUPPORTED." }];
+        "\n\nJudge the answer's MAIN claim (the direct answer to the question), not its minor extra detail. Reply UNSUPPORTED only if: (a) the main claim is not stated by the SOURCES; (b) it is about an older edition or a different person than the question asks for (the NEWEST one when the question says latest, most recent or current); (c) the thing asked about is fictional (a fan wiki, film, comic or game page counts as fiction, even when it states the facts of the story) or the sources never mention it, yet the answer presents it as real without saying it is fictional; (d) it says something is confirmed that the SOURCES do not report; or (f) the question is about now (today, this week, latest, current) and the answer presents sources that carry no date, or an old date, as if they were current; or (e) the source describes a DIFFERENT event or thing that merely shares words with the question (another sport, another competition, another person or place with a similar name), so the answer is about the wrong subject. Use your own general knowledge to recognise a fictional place, office or character even when the sources do not say so. An honest answer that says it could not confirm is SUPPORTED. Otherwise reply SUPPORTED." }];
     const r = await brainComplete(msg, env, { maxTokens: 120, temperature: 0, timeoutMs: 12000, skipGroq: true }); // a different model from the one that wrote the answer
     const t = String(r || "").trim(); _judgeDbg = t.slice(0, 200) || "(empty)";
     return /^UNSUPPORTED/i.test(t) ? t.replace(/^UNSUPPORTED:?\s*/i, "").slice(0, 160) || "the sources do not state this" : null;
@@ -1237,7 +1243,7 @@ async function groundMessages(messages, body, env) {
   const sysIdx = out.findIndex((m) => m.role === "system");
   if (sysIdx >= 0) out[sysIdx] = { role: "system", content: out[sysIdx].content + block };
   else out.unshift({ role: "system", content: block.trim() });
-  return { messages: out, grounded: true, live: top.length ? { ctx: block, sources: top.map((r) => ({ title: r.title, url: r.url || "", snippet: r.snippet || "", date: r.date || r.pub || "" })) } : null };
+  return { messages: out, grounded: true, live: top.length ? { ctx: block, extra: tools.join(""), sources: top.map((r) => ({ title: r.title, url: r.url || "", snippet: r.snippet || "", date: r.date || r.pub || "" })) } : null };
 }
 // KEY ROTATION + PROVIDER FALLBACK — so free quota effectively never hits zero.
 // Add capacity at $0 by supplying comma-separated keys and/or more providers:
