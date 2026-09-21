@@ -832,6 +832,11 @@ async function respond(q, opts = {}) {
       const el = addNoria(); const note = 'Creating images is part of Noria Pro. You can unlock it with an early-access code — I’m happy to help with anything else in the meantime.'
       el.textContent = note; convoRecord({ role: 'noria', text: note }); finish(); openPro('Creating images is part of Noria Pro.'); return
     }
+    if (realPersonImage(q)) { // says why, and offers what does help — it is not a bare refusal
+      const el = addNoria()
+      const note = 'I don’t create realistic pictures of real people. An AI-made face would only be a stranger with their name attached, and that can mislead. For the real person, the official website or a news photo is the reliable source. I can make an illustration of a leader in general, a scene, a flag-themed poster or anything else you have in mind — just tell me what you would like.'
+      el.textContent = note; convoRecord({ role: 'user', text: q }); convoRecord({ role: 'noria', text: note }); finish(); return
+    }
     await generateImage(cleanImagePrompt(q)); finish(); return
   }
 
@@ -988,8 +993,17 @@ function reveal(el, text) {
 // ── Image generation (Cloudflare Workers AI / SDXL) ───────────────────────────
 function isImageRequest(q) {
   const s = q.toLowerCase().trim()
-  return /\b(draw|paint|sketch|render|generate|create|make|design|produce|imagine|show me)\b[^.?!]*\b(image|picture|photo|photograph|art|artwork|illustration|drawing|painting|logo|poster|wallpaper|portrait|scene|design|icon)\b/.test(s) ||
-    /^(an?\s+)?(image|picture|photo|drawing|painting|illustration|logo|portrait)\s+of\s+/.test(s)
+  return /\b(draw|paint|sketch|render|generate|create|make|design|produce|imagine|show me|show us|give me|get me|send me|i want|i need|i'd like|can you (?:show|give|make|draw|create|generate)|could you (?:show|give|make|draw|create|generate)|let me see|display)\b[^.?!]*\b(image|images|picture|pictures|pic|photo|photos|photograph|art|artwork|illustration|drawing|painting|logo|poster|wallpaper|portrait|scene|icon)\b/.test(s) ||
+    /^(an?\s+)?(image|picture|photo|drawing|painting|illustration|logo|portrait)\s+of\s+/.test(s) ||
+    /^(please\s+)?(can you |could you |i want you to )?(draw|paint|sketch|illustrate)\s+(me\s+)?(an?|the|some|my)\s+\w+/.test(s)
+}
+// A picture request that points at a real person: a role held by someone ("the president of Ghana"), a pronoun for someone just
+// discussed ("a photo of him"), or a full name written with capitals ("a picture of Nana Addo").
+function realPersonImage(q) {
+  const s = String(q || '')
+  if (/\b(president|vice[- ]president|prime minister|minister|governor|mayor|senator|king|queen|emperor|chancellor|speaker|chief justice|ceo|chairman)\b[^.?!]{0,20}\b(of|for|in)\s+(?:the\s+)?[A-Z][a-z]/.test(s)) return true
+  if (/\b(of|for)\s+(him|her|them|his|hers)\b|\b(his|her)\s+(image|picture|photo|portrait|face)\b|\b(him|her)\s*$/i.test(s)) return true
+  return /\b(?:of|for|showing)\s+(?:the\s+)?(?:(?:Mr|Mrs|Ms|Dr|Prof|President|Nana|Hon|Chief|Sir|Dame)\.?\s+)?[A-Z][a-z]+\s+(?:[A-Z][a-z]+\s+)?[A-Z][a-z]{2,}\b/.test(s.replace(/^\s*(?:please\s+)?/i, ''))
 }
 function cleanImagePrompt(q) {
   const p = q.replace(/^\s*(please\s+)?(can you\s+|could you\s+|i want you to\s+|i'd like you to\s+)?(draw|paint|sketch|render|generate|create|make|design|produce|imagine|show me)\s+(me\s+)?(an?\s+|the\s+|some\s+)?(image|picture|photo|photograph|art|artwork|illustration|drawing|painting|logo|poster|wallpaper|portrait)\s*(of\s+|showing\s+|depicting\s+|with\s+)?/i, '').trim()

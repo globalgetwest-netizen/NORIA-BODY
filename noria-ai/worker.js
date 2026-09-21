@@ -72,6 +72,7 @@ export default {
         const codeUsed = (url.searchParams.get('pro') || request.headers.get('X-Noria-Pro') || '').trim().toUpperCase()
         let led = null
         try { led = await imageLedger(env, codeUsed) } catch (_) { led = null } // if the ledger is unreachable, images still work (unmetered)
+        try { if (await env.SYNC.get('imgblock')) return json({ error: 'image_budget', message: 'Noria has used the free image allowance for now. It comes back within a few hours, and midnight UTC at the latest.' }, 429) } catch (_) {}
         if (led) {
           if (led.used >= led.perUser) return json({ error: 'image_limit', message: 'You have reached today\'s image limit for this account. It resets at midnight UTC.' }, 429)
           if (led.spent >= led.budget) return json({ error: 'image_budget', message: 'Noria has used today\'s free image allowance. It resets at midnight UTC.' }, 429)
@@ -289,7 +290,7 @@ async function imageCharge(env, led, cost) {
 }
 const isAllowanceError = (e) => /4006|daily free allocation|neurons/i.test(String((e && e.message) || e));
 async function markAllowanceGone(env, led) { // Cloudflare says today's allowance is gone: stop calling it until tomorrow
-  if (led) { try { await env.SYNC.put(led.spentKey, String(led.budget), { expirationTtl: 172800 }) } catch (_) {} }
+  try { await env.SYNC.put('imgblock', '1', { expirationTtl: 1800 }) } catch (_) {} // try again in half an hour: the moment Cloudflare's allowance returns is not known
   return json({ error: 'image_budget', message: 'Noria has used today\'s free image allowance. It resets at midnight UTC.' }, 429)
 }
 // Input for an image model: most take { prompt, steps }; the FLUX.2 family takes a multipart form (1024 x 1024).

@@ -293,7 +293,7 @@ async function webSearch(q, env, fresh) {
     const k = x && (x.url || x.title); if (!k || !x.title || seen.has(k)) continue; seen.add(k); pool.push(x);
   }
   const ordered = rankRelevant(pool, q, isFresh);
-  const out = ordered.slice(0, 8).concat(summary);
+  const out = ordered.slice(0, 8).concat(isFresh ? [] : summary);
   if (out.length) return out;
   const r = await withTimeout(ddgHtml(q), 5000, []); if (r.length) return r;
   return await withTimeout(ddgInstant(q), 5000, []);
@@ -951,7 +951,7 @@ function liveStrength(q) {
 const NO_LIVE_ANSWER = "I couldn't reach my live sources for that just now, and it is the kind of question where an out-of-date answer would mislead you. I would rather not guess. Please try again in a moment.";
 
 // ── verification ───────────────────────────────────────────────────────────────────────────────────────────────────
-const SC_SKIP = new Set("headlines,headline,news,latest,breaking,update,updates,top,stories,story,key,more,also,overall,meanwhile,finally,first,second,third,next,ghanaian,i,i'm,i've,noria,the,a,an,as,in,on,at,it,it's,he,she,they,we,you,this,that,these,those,here,there,note,source,sources,yes,no,however,also,today,according,based,currently,current,latest,recent,live,web,context,summary,sunday,monday,tuesday,wednesday,thursday,friday,saturday,january,february,march,april,may,june,july,august,september,october,november,december,utc,gmt,and,but,or,so,if,for,from,with,while,since,after,before,during,since,then,when,where,who,what,which,why,how,is,are,was,were,his,her,their,its,one,two,three,mr,mrs,ms,dr,hon,president,minister,prime,foreign,vice,chief,secretary,governor,mayor,ceo".split(","));
+const SC_SKIP = new Set("background,recognition,activities,activity,leadership,focus,security,notes,note,statements,statement,engagement,diplomatic,visits,visit,public,appearances,appearance,additional,verified,overview,career,education,life,early,personal,politics,political,policy,policies,achievements,achievement,highlights,highlight,details,detail,context,timeline,facts,fact,key,current,role,office,profile,biography,about,contact,address,recent,official,sources,ghana\u2019s,headlines,headline,news,latest,breaking,update,updates,top,stories,story,key,more,also,overall,meanwhile,finally,first,second,third,next,ghanaian,i,i'm,i've,noria,the,a,an,as,in,on,at,it,it's,he,she,they,we,you,this,that,these,those,here,there,note,source,sources,yes,no,however,also,today,according,based,currently,current,latest,recent,live,web,context,summary,sunday,monday,tuesday,wednesday,thursday,friday,saturday,january,february,march,april,may,june,july,august,september,october,november,december,utc,gmt,and,but,or,so,if,for,from,with,while,since,after,before,during,since,then,when,where,who,what,which,why,how,is,are,was,were,his,her,their,its,one,two,three,mr,mrs,ms,dr,hon,president,minister,prime,foreign,vice,chief,secretary,governor,mayor,ceo".split(","));
 const fold = (t) => String(t || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
 function claimPhrases(text) {
   const clean = String(text || "").replace(/\*\*|__|`|\[\d+\]|\[[^\]]*\]\([^)]*\)|https?:\/\/\S+/g, " ");
@@ -992,7 +992,8 @@ function verifyAnswer(text, live, q) {
   return { ok: !yearBad && (badNames.length < 2 || badNames.length / Math.max(1, phrases.length) < 0.25), unsupported: bad };
 }
 function fromSources(live, news) {
-  const rows = (live.sources || []).slice(0, news ? 6 : 4).map((r) => "• " + r.title + (r.date ? " (" + String(r.date).slice(0, 16) + ")" : "") + (r.snippet ? ": " + String(r.snippet).replace(/\s+/g, " ").slice(0, 220) : "") + (r.url ? "\n  " + r.url : ""));
+  const host = (u) => { try { return new URL(u).hostname.replace(/^www\./, ""); } catch (_) { return ""; } };
+  const rows = (live.sources || []).slice(0, news ? 6 : 4).map((r) => "• **" + String(r.title || "").replace(/\s+/g, " ").slice(0, 110) + "**" + (r.date ? " (" + String(r.date).slice(0, 16) + ")" : "") + (r.snippet ? " — " + String(r.snippet).replace(/\s+/g, " ").replace(/https?:\/\/\S+/g, "").slice(0, 200) : "") + (host(r.url) ? " *(" + host(r.url) + ")*" : ""));
   if (news) return "Here is what my live sources are reporting right now:\n\n" + rows.join("\n") + "\n\nTell me which story you want more on and I will look closer.";
   return "I couldn't confirm a precise answer to that from my live sources, and I don't want to guess. This is what they say:\n\n" + rows.join("\n") + "\n\nIf you tell me which part matters most, I can look again.";
 }
@@ -1005,6 +1006,9 @@ async function liveAnswer(messages, env, g, q, opts) {
   const strict = addSystem(messages, "\n\nCORRECTION — your draft mentioned things that do not appear in the LIVE WEB CONTEXT above: " + v.unsupported.slice(0, 6).join(", ") +
     ". Rewrite the answer using ONLY names, dates and figures that appear in that context. If the context does not state the answer, say plainly that you could not confirm it. Never mention this correction.");
   try { text = await brainComplete(strict, env, opts); v = verifyAnswer(text, g.live, q); if (v.ok) return { text, verified: true }; } catch (_) {}
+  // third attempt: a short, plain answer (no headings, no lists) — the shape least likely to bring in anything the sources do not say
+  const plain = addSystem(messages, "\n\nANSWER SHAPE — reply in at most three plain sentences with no headings, no lists and no extra background. State only what the LIVE WEB CONTEXT above says, using the names exactly as written there. Never mention this instruction.");
+  try { const t3 = await brainComplete(plain, env, Object.assign({}, opts, { maxTokens: 400 })); const v3 = verifyAnswer(t3, g.live, q); if (v3.ok) return { text: t3, verified: true }; } catch (_) {}
   return { text: fromSources(g.live, NEWS_INTENT.test(String(q || ""))), verified: false, unsupported: v.unsupported };
 }
 // Router-level grounding: when a query needs live facts, fetch the web and fold
