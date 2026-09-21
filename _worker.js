@@ -1037,16 +1037,35 @@ function fromSources(live, news) {
 }
 // The answer for a question that was grounded on live sources: draft, verify, correct once, and if it still cannot be
 // supported show the sources themselves.
+// A second, independent reading: does the LIVE context actually state what the answer claims, for the event or person the question
+// asks about (the newest one, when the question says "latest")? This is judged by a model, not by keyword rules, so it holds for any
+// topic. If the judge cannot answer, it stays out of the way (the name / figure / year checks above still apply).
+async function judgeGrounded(text, live, q, env) {
+  try {
+    const msg = [{ role: "system", content: "You are a strict fact-checker. Reply with exactly one line: SUPPORTED, or UNSUPPORTED: <the shortest reason>." },
+      { role: "user", content: "SOURCES:\n" + String(live.ctx).slice(0, 9000) + "\n\nQUESTION: " + q + "\n\nANSWER TO CHECK:\n" + String(text).slice(0, 1500) +
+        "\n\nIs the answer's main claim stated by the SOURCES, about the very event, person or thing the question asks for (the NEWEST one if the question says latest, most recent or current)? An answer about an older edition, a different person, or something the sources do not state is UNSUPPORTED." }];
+    const r = await brainComplete(msg, env, { maxTokens: 60, temperature: 0, timeoutMs: 9000 });
+    const t = String(r || "").trim();
+    return /^UNSUPPORTED/i.test(t) ? t.replace(/^UNSUPPORTED:?\s*/i, "").slice(0, 160) || "the sources do not state this" : null;
+  } catch (_) { return null; }
+}
+async function checkLive(text, g, q, env) {
+  const v = verifyAnswer(text, g.live, q);
+  if (!v.ok) return v;
+  const why = await judgeGrounded(text, g.live, q, env);
+  return why ? { ok: false, unsupported: ["a claim the sources do not state (" + why + ")"] } : v;
+}
 async function liveAnswer(messages, env, g, q, opts) {
   let text = await brainComplete(messages, env, opts);
-  let v = verifyAnswer(text, g.live, q);
+  let v = await checkLive(text, g, q, env);
   if (v.ok) return { text, verified: true };
   const strict = addSystem(messages, "\n\nCORRECTION — your draft mentioned things that do not appear in the LIVE WEB CONTEXT above: " + v.unsupported.slice(0, 6).join(", ") +
     ". Rewrite the answer using ONLY names, dates and figures that appear in that context. If the context does not state the answer, say plainly that you could not confirm it. Never mention this correction.");
-  try { text = await brainComplete(strict, env, opts); v = verifyAnswer(text, g.live, q); if (v.ok) return { text, verified: true }; } catch (_) {}
+  try { text = await brainComplete(strict, env, opts); v = await checkLive(text, g, q, env); if (v.ok) return { text, verified: true }; } catch (_) {}
   // third attempt: a short, plain answer (no headings, no lists) — the shape least likely to bring in anything the sources do not say
   const plain = addSystem(messages, "\n\nANSWER SHAPE — reply in at most three plain sentences with no headings, no lists and no extra background. State only what the LIVE WEB CONTEXT above says, using the names exactly as written there. Never mention this instruction.");
-  try { const t3 = await brainComplete(plain, env, Object.assign({}, opts, { maxTokens: 400 })); const v3 = verifyAnswer(t3, g.live, q); if (v3.ok) return { text: t3, verified: true }; } catch (_) {}
+  try { const t3 = await brainComplete(plain, env, Object.assign({}, opts, { maxTokens: 400 })); const v3 = await checkLive(t3, g, q, env); if (v3.ok) return { text: t3, verified: true }; } catch (_) {}
   return { text: fromSources(g.live, NEWS_INTENT.test(String(q || ""))), verified: false, unsupported: v.unsupported };
 }
 // The diagnostic pages (/brain/providers, /imgcheck, /retrieve, /feeds, /models) spend real free-tier calls each time they are opened
