@@ -24,15 +24,16 @@ export function buildPlannerMessages(objective, catalog, todayISO) {
     "You produce a PLAN as JSON only (no prose, no code fences).\n\n" +
     "Rules:\n" +
     "- Break the objective into at most 10 tasks. Each task: id (t1, t2, …), description (one clear sentence), tools (names taken ONLY from the TOOL CATALOG; use [] for a step that is only reasoning or writing), " +
-    "requires_info (what must be known or found first), depends_on (ids of tasks that must finish first), verification (how the result will be checked).\n" +
+    "requires_info (what must be known or found first), depends_on (ids of tasks that must finish first), verification (how the result will be checked), " +
+    "inputs (for each tool the task uses, the exact input to give it, using the field names in that tool's \"takes\" list and only values that come from the objective; never invent a value).\n" +
     "- Prefer the MOST SPECIFIC tool whose description matches the task (for example a tool built for spreadsheets over a general reader plus a calculator). Use a tool only when the task needs it.\n" +
     "- Choose tools only from the catalog. If the objective needs a capability the catalog does not have, do not invent a tool: put it in missing_capabilities.\n" +
     "- Tools with risk \"write\" change something outside Noria (send, book, save, post). Include such a step only if the objective really asks for it.\n" +
     "- Independent tasks should not depend on each other, so they can run in parallel. Verification of important facts is a separate task or part of the task.\n" +
     "- Today is " + todayISO + ".\n\n" +
     "Return exactly this JSON shape:\n" +
-    "{\"tasks\":[{\"id\":\"t1\",\"description\":\"\",\"tools\":[],\"requires_info\":[],\"depends_on\":[],\"verification\":[]}],\"verification_requirements\":[],\"expected_result\":\"\",\"missing_capabilities\":[{\"need\":\"\",\"reason\":\"\"}]}\n\n" +
-    "TOOL CATALOG:\n" + JSON.stringify(catalog.map((t) => ({ name: t.name, does: t.description, state: t.state, risk: t.risk }))) ;
+    "{\"tasks\":[{\"id\":\"t1\",\"description\":\"\",\"tools\":[],\"requires_info\":[],\"depends_on\":[],\"verification\":[],\"inputs\":{\"tool.name\":{\"field\":\"value\"}}}],\"verification_requirements\":[],\"expected_result\":\"\",\"missing_capabilities\":[{\"need\":\"\",\"reason\":\"\"}]}\n\n" +
+    "TOOL CATALOG:\n" + JSON.stringify(catalog.map((t) => ({ name: t.name, does: t.description, takes: t.input || [], state: t.state, risk: t.risk }))) ;
   return [{ role: "system", content: system }, { role: "user", content: "OBJECTIVE: " + String(objective || "").slice(0, 1200) }];
 }
 
@@ -105,6 +106,9 @@ export function validatePlan(raw, objective, catalog, opts = {}) {
       usable.push(name);
     }
     t.tools = usable;
+    // proposed inputs: only for tools the task really uses, plain values only (the executor still validates them against the tool's schema)
+    const rawTask = raw.tasks.find((x, i) => x && (str(x.id, 12).replace(/[^a-zA-Z0-9_-]/g, "") || "t" + (i + 1)) === t.id) || {}, rawIn = rawTask.inputs;
+    if (rawIn && typeof rawIn === "object") { t.input = {}; for (const n of usable) { const o = rawIn[n]; if (o && typeof o === "object" && !Array.isArray(o)) { const clean = {}; for (const [k, v] of Object.entries(o).slice(0, 8)) if (["string", "number", "boolean"].includes(typeof v)) clean[str(k, 40)] = typeof v === "string" ? str(v, 300) : v; if (Object.keys(clean).length) t.input[n] = clean; } } if (!Object.keys(t.input).length) delete t.input; }
     if (t.blocked_by.length) t.status = "blocked";
     else if (t.approval_required) t.status = "proposed_only"; // never runnable by the planner: it needs an explicit approval gate
     if (!t.verification.length) t.verification = [...new Set(t.tools.map((n) => byName.get(n).verify).filter((v) => v && v !== "schema" && v !== "user"))].map((v) => ({ sources: "answer must be supported by the sources", exact: "result is computed exactly", temporal: "dates in the result match the moment asked about", schema: "" , user: "" }[v])).filter(Boolean);
