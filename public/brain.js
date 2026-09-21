@@ -190,12 +190,18 @@ export class Brain {
     else if (ground === true) payload.ground = true // 'auto' → omit → server uses serverNeedsWeb
     let res
     try {
-      res = await fetch('/brain/ask/stream', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-        signal: ac.signal,
-      })
+      // one quiet retry if the server briefly fails (a 5xx from a momentary platform limit), so a hiccup never reaches the person
+      for (let attempt = 0; attempt < 2; attempt++) {
+        res = await fetch('/brain/ask/stream', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+          signal: ac.signal,
+        })
+        if (res.status < 500 || attempt) break
+        try { await res.body.cancel() } catch (_) {}
+        await new Promise((r) => setTimeout(r, 700))
+      }
     } catch (e) { clearTimeout(to); throw new Error(ac.signal.aborted ? 'aborted' : 'Brain unreachable') }
     if (!res.ok || !res.body) { clearTimeout(to); throw new Error('Brain unreachable (' + res.status + ')') }
     const reader = res.body.getReader()
