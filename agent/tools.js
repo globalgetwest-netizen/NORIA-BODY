@@ -16,9 +16,9 @@
 //
 // States follow the capability registry. UNCERTAIN and CONFLICT describe an answer, not a tool.
 
-export const REGISTRY_VERSION = "2026-09-21.1";
+export const REGISTRY_VERSION = "2026-09-21.2";
 
-const T = (o) => Object.assign({ auth: "none", permissions: ["read"], state: "live", need: null, risk: "read", timeoutMs: 10000, retry: { max: 0, backoffMs: 0 }, verify: "schema", runtime: ["server"] }, o);
+const T = (o) => Object.assign({ id: o.name, version: "1.0.0", dependencies: [], provider: "noria", tests: [], alternatives: [], auth: "none", permissions: ["read"], state: "live", need: null, risk: "read", timeoutMs: 10000, retry: { max: 0, backoffMs: 0 }, verify: "schema", runtime: ["server"] }, o);
 
 export const TOOLS = [
   // ── information (read-only) ──
@@ -83,13 +83,38 @@ export const TOOLS = [
     output: { response: { type: "object" } }, state: "not_built", auth: "oauth", permissions: ["write", "network"], risk: "write", verify: "schema" }),
 ];
 
+
+// ── canonical record details: provider, what it depends on, the tests that cover it, and what may replace it when it fails ──
+// tests: file names in noria-eval/ (automated) or "manual: ..." (checked by hand, not repeatable). A tool may be LIVE only if it lists a test.
+const META = {
+  "web.search":       { provider: "search provider registry (tavily, brave, wikipedia, news feeds)", dependencies: ["search"], tests: ["search_layer_t.mjs", "worker_int_t.mjs", "temporal_t.mjs", "bench.mjs (current)"] },
+  "research.deep":    { provider: "search provider registry + model", dependencies: ["search", "models"], tests: ["manual: research_live.py"] },
+  "clock.now":        { provider: "worker (calculated)", tests: ["clockdirect_t.mjs", "bench.mjs (current)"] },
+  "calc.math":        { provider: "worker (calculated)", tests: ["bench.mjs (math)", "live-check-2.mjs"] },
+  "weather.get":      { provider: "Open-Meteo", dependencies: ["feeds"] },
+  "fx.rate":          { provider: "open exchange-rate feed", dependencies: ["feeds"], tests: ["bench.mjs (current: exchange rate)"] },
+  "crypto.price":     { provider: "Binance, CoinGecko", dependencies: ["feeds"], tests: ["broad.mjs (manual review)"] },
+  "reference.list":   { provider: "worker (verified library)", tests: ["live-check.mjs", "live-check-2.mjs"] },
+  "doc.read":         { provider: "browser (pdf.js, mammoth-style parsers)", tests: ["manual: 60-page contract, 3 of 3 questions", "rag_t.mjs (offline retrieval module, not connected)"] },
+  "data.query":       { provider: "browser (dataeng.js)", tests: ["manual: 1,200-row file checked against pandas (data/test-data.mjs)"] },
+  "memory.device":    { provider: "browser (localStorage)", tests: ["manual: browser"] },
+  "vision.describe":  { provider: "noria-ai worker (Cloudflare Workers AI)", dependencies: ["ai"] },
+  "image.generate":   { provider: "noria-ai worker (Cloudflare Workers AI)", dependencies: ["ai"] },
+  "speech.speak":     { provider: "noria-ai worker", dependencies: ["ai"] },
+  "doc.export":       { provider: "browser (docx, ExcelJS, PptxGenJS, pdfmake)", tests: ["manual: browser"] },
+  "chart.draw":       { provider: "browser (Chart.js)", tests: ["manual: browser"] },
+  "knowledge.search": { provider: "public/rag.js (not connected)", dependencies: ["ai"] },
+};
+for (const t of TOOLS) Object.assign(t, META[t.name] || {});
 const STATES = ["live", "connected", "degraded", "requires_auth", "not_built", "unsupported"];
 const AUTHS = ["none", "pro", "account", "oauth"];
 
 // A tool declaration must have every field; this is run by the tests and by the server at start-up.
 export function validateTool(t) {
   const p = [];
-  for (const k of ["name", "description", "input", "output", "auth", "permissions", "state", "risk", "timeoutMs", "retry", "verify", "runtime"]) if (t[k] === undefined || t[k] === null || t[k] === "") p.push("missing " + k);
+  for (const k of ["id", "name", "description", "input", "output", "auth", "permissions", "state", "risk", "timeoutMs", "retry", "verify", "runtime", "version", "provider", "dependencies", "tests", "alternatives"]) if (t[k] === undefined || t[k] === null || t[k] === "") p.push("missing " + k);
+  if (t.state === "live" && !(t.tests || []).length) p.push("a LIVE tool must list at least one test");
+  if (t.id !== t.name) p.push("id must equal name");
   if (!/^[a-z]+\.[a-z_]+$/.test(t.name || "")) p.push("name must look like group.action");
   if (!STATES.includes(t.state)) p.push("bad state " + t.state);
   if (!AUTHS.includes(t.auth)) p.push("bad auth " + t.auth);
@@ -113,6 +138,16 @@ export function toolState(tool, health = {}) {
 export const USABLE = new Set(["live", "connected", "degraded"]);
 export function listTools(health = {}) {
   return TOOLS.map((t) => Object.assign({}, t, { available: toolState(t, health) }));
+}
+// Two different numbers are reported everywhere, and they mean different things:
+//   tools               executable units the agent can call (this registry)
+//   capability items    user-facing statements about what Noria can do, grouped by area (CAPS in the worker); several items can rest on one tool
+export function registrySummary(health = {}) {
+  const tools = listTools(health), by = {};
+  for (const t of tools) by[t.available] = (by[t.available] || 0) + 1;
+  const cov = { automated: 0, manual_only: 0, none: 0 };
+  for (const t of tools) { const a = t.tests.some((x) => !/^manual:/i.test(x)); const m = t.tests.length > 0; if (a) cov.automated++; else if (m) cov.manual_only++; else cov.none++; }
+  return { tools: tools.length, by_state: by, test_coverage: cov, note: "tools are executable units; capability items are user-facing statements and are counted separately (see /brain/capabilities)" };
 }
 export function findTool(name) { return TOOLS.find((t) => t.name === name) || null; }
 

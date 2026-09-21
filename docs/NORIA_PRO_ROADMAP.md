@@ -14,7 +14,7 @@ Status snapshot: 21 September 2026. Benchmark on that day: 94.7% (54/57) on the 
 |---|---|---|---|
 | 1 | Advanced reasoning engine | PARTIAL | Strong models first; logic-form checker; arithmetic re-check. No general chain-of-thought verifier. |
 | 2 | Dynamic agent planner | PARTIAL | Read-only planner built (`agent/planner.js`, `POST /brain/plan`, Noria Pro): plan only, nothing executes. Executor not built. |
-| 3 | Multi-step autonomous execution | NOT BUILT | Phase 4. Fixed pipelines only today (decide, retrieve, answer, verify, correct). |
+| 3 | Multi-step autonomous execution | NOT BUILT | A permissioned executor is built and tested in DRY-RUN only (`agent/executor.js`, 55 checks): it touches nothing and live execution is refused. Real use is not authorised. Fixed pipelines remain what Noria uses. |
 | 4 | Parallel tool execution | PARTIAL | Searches run in parallel inside the pipeline; no general parallel tool runner. |
 | 5 | Live web / search | LIVE | Tavily, Wikipedia, 16 news feeds, per-source timeouts, relevance ranking. |
 | 6 | Deep research | LIVE | Noria Pro, 3 briefs a day; unsupported sentences removed. |
@@ -57,10 +57,10 @@ Status snapshot: 21 September 2026. Benchmark on that day: 94.7% (54/57) on the 
 | 43 | Multi-source consensus | PARTIAL | |
 | 44–50 | Browser, website, email, calendar, maps, cloud storage, external API / MCP | NOT BUILT | Phase 5. Each needs the user's authorisation (`REQUIRES_AUTH`) and approval gates first. |
 | 51 | Authentication / permissions | LIVE | Accounts (PBKDF2, hashed sessions, reset). No role model. |
-| 52 | Human approval gates | NOT BUILT | Phase 4, before any tool that acts. |
+| 52 | Human approval gates | PARTIAL | Built into the dry-run executor and tested (denied, approved, missing approver, authorisation still required). No acting tool exists to gate yet. |
 | 53–56 | Scheduling, recurring tasks, background jobs, queues | NOT BUILT | Phase 4/7. Free-plan limits apply. |
 | 57 | Retry / recovery | LIVE | Provider fallback; client retries once on 5xx. |
-| 58 | Rollback / idempotency | NOT BUILT | Needed with the first acting tool. |
+| 58 | Rollback / idempotency | PARTIAL | Idempotency (a step never runs twice) is built and tested in the dry-run executor. Rollback is not built. |
 | 59 | Execution tracing | PARTIAL | Debug fields on request. |
 | 60 | Tool-health monitoring | PARTIAL | Public `/brain/tools` (25 tools with state), `/brain/search/providers` (per-provider health, quota) and `/brain/capabilities`. |
 | 61–62 | Capability discovery / self-description | LIVE | Registry in `_worker.js`; Noria answers from it. |
@@ -82,7 +82,7 @@ Status snapshot: 21 September 2026. Benchmark on that day: 94.7% (54/57) on the 
 | 86 | Secure sandbox | NOT BUILT | |
 | 87 | Privacy controls | PARTIAL | Delete and export account data; device memory can be cleared. |
 | 88 | Permission-aware memory | NOT BUILT | |
-| 89 | Audit logs | NOT BUILT | |
+| 89 | Audit logs | PARTIAL | Hash-chained, tamper-evident log inside the dry-run executor (change, removal and reordering are detected; safe under parallel writes). Not persisted anywhere yet. |
 | 90 | Safety / policy | LIVE | Persona rules; output guard for private instructions. |
 | 91 | Evaluation framework | LIVE | `bench.mjs`, `audit.mjs`, `live-check*.mjs`. |
 | 92 | Regression testing | PARTIAL | Scripts exist; run by hand after every deploy. Automate: Phase 7. |
@@ -148,3 +148,13 @@ Built, deployed and tested (all in `agent/` and `public/rag.js`; 135 offline che
 Not built: executor (sequential and parallel runs, observation, retry, cancellation, approval gates), a runtime abstraction for browser and server execution, embeddings service, persistent knowledge store, long-term memory, code sandbox, and every connector.
 
 Runtime abstraction (for the executor): one contract, two runtimes. `run(step, tool, input, signal) -> { ok, output, observation, ms }`. The browser runtime calls the worker routes and runs the device tools; the server runtime is the same loop inside a Worker or a job. The planner, registry and verifiers do not change between them.
+
+## Executor status (dry-run milestone)
+
+`agent/executor.js`, `agent/runtime.js`, `agent/audit.js`; 55 checks in `noria-eval/executor_t.mjs`. Not wired into any route or the app.
+
+Gates in order, each audited: registry, availability, input schema, permission and runtime, risk and approval, idempotency, execute (timeout, cancellation, retry policy), observe (instruction-like text in a tool result is removed and reported; results can never add steps), verify (schema, sources, exact, temporal), recover (retry, registered alternative, or stop honestly). Runs read-only same-level tasks in parallel up to a limit; write tools never run without approval; the engine refuses any mode but dry-run and any runtime that can touch the real world (`LIVE_EXECUTION_AUTHORISED = false`).
+
+Tested: sequential and dependent tasks, parallel-safe groups and the parallelism cap, blocked tools and blocked dependents, permission failures (not retried), approval (none, denied, granted, still needs authorisation), timeout, cancellation (mid-run and before start), retry (transient, non-retryable, bounded), provider failure with alternative tool, verification failure, partial completion, dependency cycles, duplicate execution across runs, audit tamper detection and audit under parallel load, hostile text in tool output, unregistered tools, bad input.
+
+Registry counts, made explicit: **tools** are executable units (`/brain/tools`, 25); **capability items** are user-facing statements (`/brain/capabilities`, counted separately, with a note saying so). Test coverage is reported per tool: a tool marked LIVE must list a test.

@@ -159,17 +159,18 @@ function minWindow(toks, qset) {
 }
 export function overlapReranker(query, cands) {
   const q = [...new Set(tokenize(query))]; if (!q.length) return cands;
-  const df = new Map(); for (const c of cands) for (const t of new Set(tokenize(c.chunk.text))) df.set(t, (df.get(t) || 0) + 1);
+  const info = cands.map((c) => { const toks = tokenize(c.chunk.text); return { c, toks, set: new Set(toks) }; }); // each passage is tokenised once
+  const df = new Map(); for (const x of info) for (const t of x.set) df.set(t, (df.get(t) || 0) + 1);
   const weight = (t) => 1 + Math.log(1 + cands.length / (df.get(t) || 0.5));
-  const total = q.reduce((a, t) => a + weight(t), 0);
-  const scored = cands.map((c) => {
-    const toks = tokenize(c.chunk.text), set = new Set(toks); let cover = 0; for (const t of q) if (set.has(t)) cover += weight(t);
-    const w = minWindow(toks, new Set(q)); const prox = w.matched > 1 ? w.matched / Math.max(w.matched, w.span / 2.5) : 0.4; // how tightly the question's words sit together
-    return { chunk: c.chunk, score: c.score * (0.6 + cover / total) * (0.7 + 0.6 * prox) };
+  const total = q.reduce((a, t) => a + weight(t), 0), qset = new Set(q);
+  const scored = info.map((x) => {
+    let cover = 0; for (const t of q) if (x.set.has(t)) cover += weight(t);
+    const w = minWindow(x.toks, qset), prox = w.matched > 1 ? w.matched / Math.max(w.matched, w.span / 2.5) : 0.4; // how tightly the question's words sit together
+    return { chunk: x.c.chunk, set: x.set, score: x.c.score * (0.6 + cover / total) * (0.7 + 0.6 * prox) };
   }).sort((a, b) => b.score - a.score);
   const kept = [];
-  for (const c of scored) { const words = new Set(tokenize(c.chunk.text)); const dup = kept.some((k) => { const kw = new Set(tokenize(k.chunk.text)); let inter = 0; for (const w of words) if (kw.has(w)) inter++; return inter / Math.max(1, Math.min(words.size, kw.size)) > 0.9; }); kept.push(dup ? Object.assign({}, c, { score: c.score * 0.5 }) : c); }
-  return kept.sort((a, b) => b.score - a.score);
+  for (const c of scored) { const dup = kept.some((k) => { let inter = 0; for (const w of c.set) if (k.set.has(w)) inter++; return inter / Math.max(1, Math.min(c.set.size, k.set.size)) > 0.9; }); kept.push(dup ? Object.assign({}, c, { score: c.score * 0.5 }) : c); }
+  return kept.sort((a, b) => b.score - a.score).map((k) => ({ chunk: k.chunk, score: k.score }));
 }
 
 // ── context selection ─────────────────────────────────────────────────────────────────────────────────────────────

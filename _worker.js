@@ -1,5 +1,5 @@
 import { runProviders, searchHealth } from "./agent/search.js";
-import { TOOLS, REGISTRY_VERSION, listTools, plannerCatalog } from "./agent/tools.js";
+import { TOOLS, REGISTRY_VERSION, listTools, plannerCatalog, registrySummary } from "./agent/tools.js";
 import { buildPlannerMessages, extractJson, validatePlan } from "./agent/planner.js";
 // Cloudflare Pages (Advanced Mode) — Noria's front door AND her brain, served
 // entirely from Cloudflare's edge. The workspace UI is static assets (instant,
@@ -1234,7 +1234,7 @@ const CAPS = [
     ["A read-only task planner: turns a goal into an auditable plan (tasks, tools, dependencies, order, checks, and what is missing) without executing anything", "connected", "", "Noria Pro. It shows the plan; it does not carry it out."],
   ]],
   ["Autonomous action", [
-    ["Autonomous multi-step agents that choose tools, run them in parallel, recover from errors and finish a job alone", "not_built", "", "Not built. Noria follows fixed pipelines (decide, retrieve, answer, verify, correct); she does not take actions in other apps, send messages or make purchases."],
+    ["Autonomous multi-step agents that choose tools, run them in parallel, recover from errors and finish a job alone", "not_built", "", "Not built for real use. A permissioned executor exists and is tested in dry-run mode only (it touches nothing and every action is simulated); live execution is not authorised. Noria follows fixed pipelines (decide, retrieve, answer, verify, correct); she does not take actions in other apps, send messages or make purchases."],
     ["Connections to email, calendars, maps or other accounts", "not_built", "", "Not built."],
   ]],
 ];
@@ -1256,7 +1256,8 @@ async function capabilityReport(env) {
   }) }));
   const label = { live: "LIVE", connected: "CONNECTED (working now)", degraded: "DEGRADED (works, but weaker right now)", requires_auth: "REQUIRES YOUR AUTHORISATION", not_built: "NOT BUILT YET", unsupported: "NOT SUPPORTED (by policy or design)" };
   const text = groups.map((g) => g.area + ":\n" + g.items.map((i) => "  - [" + label[i.state] + "] " + i.name + (i.note ? " — " + i.note : "")).join("\n")).join("\n");
-  return { generated: new Date().toISOString(), groups, text };
+  const flat = groups.flatMap((g) => g.items), by_state = {}; for (const it of flat) by_state[it.state] = (by_state[it.state] || 0) + 1;
+  return { generated: new Date().toISOString(), counts: { capability_items: flat.length, by_state, note: "capability items are user-facing statements about what Noria can do, grouped by area; they are not the same thing as the executable tools in /brain/tools (a tool can support several items, and some items need no tool)" }, groups, text };
 }
 // The diagnostic pages (/brain/providers, /imgcheck, /retrieve, /feeds, /models) spend real free-tier calls each time they are opened
 // (model calls, web searches, image tries). They are for the owner, so they need a valid owner / Pro code (?code=…), checked by the
@@ -1853,8 +1854,8 @@ data: ${JSON.stringify({ done: true })}
     // ── the tool registry, search-provider status and the read-only planner ──
     if (path === "/brain/tools") {
       const h = await toolHealth(env);
-      const tools = listTools(h).map((t) => ({ name: t.name, description: t.description, state: t.available, risk: t.risk, auth: t.auth, permissions: t.permissions, runtime: t.runtime, timeoutMs: t.timeoutMs, retry: t.retry, verify: t.verify, input: t.input, output: t.output }));
-      return new Response(JSON.stringify({ version: REGISTRY_VERSION, generated: new Date().toISOString(), health: { search: h.search, feeds: h.feeds, ai: h.ai, accounts: h.accounts }, tools }), { headers: JSON_H });
+      const tools = listTools(h).map((t) => ({ id: t.id, name: t.name, version: t.version, provider: t.provider, dependencies: t.dependencies, tests: t.tests, alternatives: t.alternatives, description: t.description, state: t.available, risk: t.risk, auth: t.auth, permissions: t.permissions, runtime: t.runtime, timeoutMs: t.timeoutMs, retry: t.retry, verify: t.verify, input: t.input, output: t.output }));
+      return new Response(JSON.stringify({ version: REGISTRY_VERSION, generated: new Date().toISOString(), summary: registrySummary(h), health: { search: h.search, feeds: h.feeds, ai: h.ai, accounts: h.accounts }, tools }), { headers: JSON_H });
     }
     if (path === "/brain/search/providers") {
       const h = await toolHealth(env);
