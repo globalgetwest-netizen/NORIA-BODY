@@ -1018,8 +1018,17 @@ function verifyAnswer(text, live, q) {
   // a short factual answer may not introduce two unsupported names; a long summary of many items is judged by proportion
   const recentYear = new Date().getUTCFullYear() - 1; // "in office since 2022" is history the model may know; a claim about this or last year must be in the sources
   const badNames = bad.filter((x) => !/^(?:19|20)\d{2}$/.test(x)), yearBad = years.some((y) => Number(y) >= recentYear && !hay.includes(y));
-  return { ok: !yearBad && (badNames.length < 2 || badNames.length / Math.max(1, phrases.length) < 0.25), unsupported: bad };
+  // "Who won the most recent …": an answer that names only an OLD year while the sources hold a newer one is the model's memory
+  // talking (the previous edition), or a mix of old and new. It is treated as unsupported so the answer is redone from the sources.
+  let stale = false;
+  if (RECENT_EVENT_Q.test(String(q || ""))) {
+    const ay = (String(text).match(/\b(?:19|20)\d{2}\b/g) || []).map(Number), cy = new Date().getUTCFullYear();
+    const ctxNew = (String(live.ctx).match(/\b(?:19|20)\d{2}\b/g) || []).some((y) => Number(y) >= cy - 1);
+    if (ay.length && ctxNew && ay.every((y) => y <= cy - 2)) { stale = true; bad.push("an older edition (" + ay[0] + ") instead of the most recent one"); }
+  }
+  return { ok: !stale && !yearBad && (badNames.length < 2 || badNames.length / Math.max(1, phrases.length) < 0.25), unsupported: bad };
 }
+const RECENT_EVENT_Q = /\b(?:most recent|latest|last|current|newest)\b[^?.]{0,60}\b(?:won|winner|champion|champions|final|edition|tournament|cup|league|title|election|season)\b|\bwho won\b[^?.]{0,40}\b(?:last|latest|most recent|recent)\b/i;
 function fromSources(live, news) {
   const host = (u) => { try { return new URL(u).hostname.replace(/^www\./, ""); } catch (_) { return ""; } };
   const rows = (live.sources || []).slice(0, news ? 6 : 4).map((r) => "• **" + String(r.title || "").replace(/\s+/g, " ").slice(0, 110) + "**" + (r.date ? " (" + String(r.date).slice(0, 16) + ")" : "") + (r.snippet ? " — " + String(r.snippet).replace(/\s+/g, " ").replace(/https?:\/\/\S+/g, "").slice(0, 200) : "") + (host(r.url) ? " *(" + host(r.url) + ")*" : ""));
@@ -1076,6 +1085,26 @@ async function researchPlan(query, env) {
     return { title: (j && j.title ? String(j.title) : query).slice(0, 120), questions: qs.length >= 2 ? qs : fallback };
   } catch (_) { return { title: query.slice(0, 120), questions: fallback }; }
 }
+// Sentence-by-sentence guard for a long brief: any sentence that carries a figure or a name the numbered sources do not contain is
+// removed (it came from the model's memory, which stops before today). Headings, and lines without a claim, are left alone.
+function dropUnsupportedSentences(text, live) {
+  const hay = fold(live.ctx + " " + nowBlock("UTC")).replace(/(\d),(\d)/g, "$1$2");
+  const dropped = [];
+  const keep = (sent) => {
+    const nums = (sent.replace(/\[\d+\]/g, "").replace(/(\d),(\d)/g, "$1$2").match(/\d+(?:\.\d+)?/g) || []).filter((n) => n.length >= 2 || /%/.test(sent));
+    if (nums.some((n) => !hay.includes(n))) return false;
+    const v = verifyAnswer(sent, live, "");
+    return !(v.unsupported || []).some((x) => !/^(?:19|20)\d{2}$/.test(x)) ;
+  };
+  const out = String(text).split(/\r?\n/).map((line) => {
+    if (/^\s*(#|\||---|\*Note)/.test(line) || !line.trim()) return line;
+    const m = /^(\s*(?:[-*]|\d+[.)])\s+)?(.*)$/.exec(line);
+    const lead = m[1] || "", body = m[2];
+    const sents = body.split(/(?<=[.!?])\s+(?=[A-Z*"(])/), kept = sents.filter((x) => { const ok = keep(x); if (!ok) dropped.push(x); return ok; });
+    return kept.length ? lead + kept.join(" ") : null;
+  }).filter((l) => l !== null);
+  return { text: out.join("\n").replace(/\n{3,}/g, "\n\n"), dropped };
+}
 async function runResearch(query, env, send) {
   send({ progress: "Planning the research…" });
   const plan = await researchPlan(query, env);
@@ -1101,10 +1130,12 @@ async function runResearch(query, env, send) {
       if (v2.ok || v2.unsupported.length < v.unsupported.length) { text = t2; v = v2; verified = v2.ok; }
     } catch (_) {}
   }
+  // whatever the model still added from memory (a figure or name the sources lack) is cut out sentence by sentence
+  const cut = dropUnsupportedSentences(text, live); text = cut.text; if (cut.dropped.length) verified = true; // what remains is supported line by line
   // web addresses come only from the real sources
   text = String(text).replace(/\[([^\]\n]+)\]\((https?:\/\/[^)\s]+)\)/g, "$1").replace(/(^|[\s(])(https?:\/\/[^\s)\]>"']+)/g, "$1");
   const list = top.map((r, i) => "[" + (i + 1) + "] " + String(r.title).replace(/\s+/g, " ").slice(0, 120) + (r.date ? " (" + String(r.date).slice(0, 16) + ")" : "") + (r.url ? " — " + r.url : "")).join("\n\n");
-  text += "\n\n## Sources\n\n" + list + (verified ? "" : "\n\n*Note: a few names or figures in this brief could not be matched line-by-line to the sources above (" + v.unsupported.slice(0, 5).join(", ") + "). Please check them before relying on them.*");
+  text += "\n\n## Sources\n\n" + list + (cut.dropped.length ? "\n\n*Note: " + cut.dropped.length + " statement" + (cut.dropped.length > 1 ? "s" : "") + " that the sources above do not support " + (cut.dropped.length > 1 ? "were" : "was") + " removed from this brief.*" : "") + (verified ? "" : "\n\n*Note: a few names or figures in this brief could not be matched line-by-line to the sources above (" + v.unsupported.slice(0, 5).join(", ") + "). Please check them before relying on them.*");
   return { title: plan.title, text, sources: live.sources, verified };
 }
 
