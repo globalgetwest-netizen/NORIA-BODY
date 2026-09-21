@@ -37,12 +37,22 @@ export function validateInput(schema, input) {
   }
   return errs;
 }
-// Inputs come from the task (task.input[tool]) or, for a dry run, are built from the task description so the gates can be exercised.
-export function buildInput(tool, task) {
-  const given = task.input && task.input[tool.name];
-  if (given) return given;
-  const out = {};
-  for (const [k, spec] of Object.entries(tool.input || {})) if (spec.required) out[k] = spec.type === "file" ? { name: "simulated-file" } : spec.type === "object" ? {} : spec.type === "number" ? 1 : spec.type === "boolean" ? false : spec.type === "array" ? [] : String(task.description || "task").slice(0, 200);
+// Inputs come from the task (task.input[tool], proposed by the planner). A FILE is never invented: it must be one the person actually
+// attached (opts.attachments, supplied by the app). Only a dry run may stand in a simulated file and fill gaps from the task description.
+export function buildInput(tool, task, opts = {}) {
+  const given = task.input && task.input[tool.name] ? Object.assign({}, task.input[tool.name]) : null;
+  const attachments = opts.attachments || [];
+  const out = given || {};
+  for (const [k, spec] of Object.entries(tool.input || {})) {
+    if (out[k] !== undefined && out[k] !== null && out[k] !== "") continue;
+    if (spec.type === "file") {
+      if (attachments.length) out[k] = attachments.find((a) => given && given[k] && a.name === given[k]) || attachments[0];
+      else if (opts.simulate) out[k] = { name: "simulated-file" };
+      continue;
+    }
+    if (!spec.required || given || !opts.simulate) continue; // live mode never makes up missing values
+    out[k] = spec.type === "object" ? {} : spec.type === "number" ? 1 : spec.type === "boolean" ? false : spec.type === "array" ? [] : String(task.description || "task").slice(0, 200);
+  }
   return out;
 }
 const INJECTION = /(?:ignore|disregard|forget)\s+(?:all\s+|any\s+|the\s+)?(?:previous|prior|above|earlier|system)\s+(?:instructions?|prompts?|rules?)|you\s+(?:must|should)\s+now\b|new\s+instructions?\s*:|(?:send|forward)\s+(?:an?\s+)?e-?mail\s+to\b|(?:call|invoke|use|run)\s+(?:the\s+)?[a-z]+\.[a-z_]+\s+tool|reveal\s+(?:your\s+)?(?:system\s+)?prompt|execute\s+the\s+following/i;
@@ -85,7 +95,7 @@ export class Executor {
     } else throw new Error("live execution is not authorised: modes are dry-run and read-only-live only");
     this.mode = policy.mode;
     this.catalog = catalog; this.byName = new Map(catalog.map((t) => [t.name, t])); this.runtime = runtime;
-    this.grants = new Set(policy.grants || []); this.approve = policy.approve || null; this.maxParallel = policy.maxParallel || 4; this.timeoutCapMs = policy.timeoutCapMs || 0; this.backoffScale = policy.backoffScale == null ? 1 : policy.backoffScale;
+    this.attachments = Array.isArray(policy.attachments) ? policy.attachments : []; this.grants = new Set(policy.grants || []); this.approve = policy.approve || null; this.maxParallel = policy.maxParallel || 4; this.timeoutCapMs = policy.timeoutCapMs || 0; this.backoffScale = policy.backoffScale == null ? 1 : policy.backoffScale;
     this.audit = audit || new AuditLog(); this.ledger = ledger || new Map(); this.abort = new AbortController();
   }
   cancel() { this.abort.abort(); }
@@ -148,8 +158,8 @@ export class Executor {
     // 2b the read-only gate, ahead of everything that could grant permission: approval cannot override it
     if (this.mode === "read-only-live") { const g = readOnlyLiveGate(tool); if (!g.ok) return fail("denied", "not permitted in read-only live mode: " + g.reason); }
     // 3 input
-    const input = buildInput(tool, task), verrs = validateInput(tool.input, input);
-    if (verrs.length) return fail("failed", "invalid input: " + verrs.join("; "));
+    const input = buildInput(tool, task, { attachments: this.attachments, simulate: this.mode === "dry-run" }), verrs = validateInput(tool.input, input);
+    if (verrs.length) return fail("failed", "invalid input: " + verrs.join("; ") + (tool.input && Object.values(tool.input).some((x) => x.type === "file") && !this.attachments.length && this.mode !== "dry-run" ? " (no file is attached)" : ""));
     // 4 permission and runtime
     if (tool.auth !== "none" && !this.grants.has(tool.auth)) return fail("needs_permission", "invalid permission: " + name + " needs \"" + tool.auth + "\" authorisation, which has not been granted");
     if (!this.runtime.supports(tool)) return fail("failed", "no runtime available for " + name + " (it runs in: " + tool.runtime.join(", ") + ")");
