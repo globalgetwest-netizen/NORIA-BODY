@@ -1156,9 +1156,23 @@ async function judgeGrounded(text, live, q, env) {
 // must say the subject is fiction; presenting a story's facts as real-world facts is the error to catch.
 const FICTION_HOST = /(?:fandom\.com|wikia\.|imdb\.com|rottentomatoes\.com|screenrant\.com|cbr\.com|comicbook\.com|marvel\.com|disney(?:plus)?\.com|tvtropes\.org)/i;
 const SAYS_FICTION = /\b(?:fiction|fictional|fictitious|imaginary|invented|marvel|comic|movie|film|character|story|black panther|not a real)\b/i;
+// Who holds an office changes, so a name given as the CURRENT holder must be backed by a source that (1) mentions that person and (2) shows recent evidence:
+// a year from last year or this year in its text, or a date within the last 14 months. A name that appears only in old or undated pages is memory, not evidence.
+function officeEvidenceIssue(q, text, live) {
+  if (!officeAsk(String(q || ""))) return "";
+  const cy = new Date().getUTCFullYear(), now = Date.now();
+  const names = [...new Set(claimPhrases(text).phrases.filter((p) => /^[A-Z]/.test(p) && p.split(/\s+/).length >= 2 && !/^(?:The|As|Today|According|Based|Prime|Foreign|Vice|President|Minister)\b/.test(p)))];
+  if (!names.length) return "";
+  const recentYear = (t) => (fold(t).match(/\b(?:19|20)\d{2}\b/g) || []).some((y) => Number(y) >= cy - 1);
+  const recentDate = (d) => { const t = Date.parse(d || ""); return t && now - t < 430 * 86400000; };
+  const PAST = /\b(?:former|formerly|ex-|served as|was the|(?:19|20)\d{2}\s*[–—-]\s*(?:19|20)\d{2}|from (?:19|20)\d{2} to (?:19|20)\d{2}|until (?:19|20)\d{2}|left office)\b/i; // a page that describes the person in the past tense is evidence of a FORMER holder
+  const ok = (live.sources || []).some((r) => { const body = fold((r.title || "") + " " + (r.snippet || "")); return !PAST.test(body) && names.some((n) => fold(n).split(/\s+/).every((w) => body.includes(w))) && (recentYear(body) || recentDate(r.date)); });
+  return ok ? "" : "the person named as current is not backed by any recent source (" + names.slice(0, 2).join(", ") + ")";
+}
 async function checkLive(text, g, q, env) {
   const v = verifyAnswer(text, g.live, q);
   if (!v.ok) return v;
+  const oe = officeEvidenceIssue(q, text, g.live); if (oe) return { ok: false, unsupported: [oe] };
   const fic = (g.live.sources || []).slice(0, 9).filter((r) => FICTION_HOST.test(String(r.url || ""))).length;
   if (fic >= 1 && (officeAsk(q) || /(?:king|queen|ruler|emperor|leader|capital|population) of/i.test(q)) && !SAYS_FICTION.test(text) && !/could not confirm|couldn.t confirm|not certain/i.test(text)) return { ok: false, unsupported: ["a fictional subject presented as real (the sources are fan or entertainment pages); say it is fiction"] };
   const why = await judgeGrounded(text, g.live, q, env);
