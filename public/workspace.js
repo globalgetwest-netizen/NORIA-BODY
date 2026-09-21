@@ -986,6 +986,7 @@ async function respond(q, opts = {}) {
     // Any document — guide chip or typed in chat — must come out finished: strip any
     // placeholder scaffolding from a document-like answer.
     let display = stripUnverifiedLinks(cleanMeta(acc), q + ' ' + attBlock + ' ' + webBlock, sources)
+    if (/IDENTITY & DISCRETION|PRESENCE & CONFIDENCE|HANDLING QUESTIONS ABOUT YOURSELF|YOUR HIGHEST DUTY IS TRUTH|SAFETY IS NON-NEGOTIABLE/i.test(display)) display = 'I keep my inner instructions private, but I am glad to tell you what I can help with and how I work. What would you like to do?' // Noria's own instructions stay private, even if a model quotes their titles
     // Nothing came back: a busy moment usually clears in seconds, so she quietly tries once more, and only then says so.
     if (!display.trim() && !cancelled && q.length < 20000) {
       await new Promise((r) => setTimeout(r, 2500))
