@@ -17,7 +17,8 @@
 //
 // Health store: { get(key) -> object|null, put(key, object, ttlSeconds) }. In the worker it is Cloudflare's Cache API.
 
-const QUOTA_STATUS = new Set([401, 402, 403, 429]);
+// 401/403 bad or revoked key, 402 payment, 429 rate limit, 432/433 Tavily "plan limit exceeded" / "pay-as-you-go limit exceeded"
+const QUOTA_STATUS = new Set([401, 402, 403, 429, 432, 433]);
 const now = () => Date.now();
 
 export function validateProvider(p) {
@@ -99,7 +100,7 @@ export async function searchHealth(providers, env, store) {
     let enabled = false; try { enabled = !!p.enabled(env); } catch (_) {}
     const h = store ? await store.get("health/search/" + p.id).catch(() => null) : null;
     let state = !enabled ? "not_configured" : !h ? "unknown" : h.quotaUntil && h.quotaUntil > now() ? "quota" : h.ok ? (now() - h.t < 3600000 ? "ok" : "unknown") : "failing";
-    rows.push({ id: p.id, kind: p.kind, enabled, state, lastOk: h ? !!h.ok : null, lastResults: h ? h.n : null, lastCheck: h ? new Date(h.t).toISOString() : null, error: h && !h.ok ? h.error : "" });
+    rows.push({ id: p.id, kind: p.kind, enabled, state, lastOk: h ? !!h.ok : null, lastResults: h ? h.n : null, lastCheck: h ? new Date(h.t).toISOString() : null, error: h && !h.ok ? h.error : "", httpStatus: h && !h.ok && h.status ? h.status : 0 });
   }
   // the open web counts as available when at least one web/official provider is fine, or has not been tried yet
   const webRows = rows.filter((r) => (r.kind === "web" || r.kind === "official") && r.enabled);
