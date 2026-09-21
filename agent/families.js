@@ -96,9 +96,14 @@ export const FAMILIES = [
     C("prod-projects", "Notes, tasks and projects", "none", "none", [], [], "Not built."),
   ] },
   { id: "long-term", name: "Long-term intelligence", capabilities: [
-    C("lt-project", "Projects with objectives, tasks and progress", "architecture", "none", [], [], "Designed (docs/NORIA_PRO_GENERAL_ARCHITECTURE.md); nothing persists between sessions."),
-    C("lt-memory", "Project, task and decision memory", "architecture", "none", [], [], "Designed only. Conversation sync exists for signed-in users."),
-    C("lt-continue", "Continuing an objective as new information arrives", "none", "none", [], [], "Needs persistent task graphs and background execution."),
+    C("lt-project", "Projects with objectives, tasks and progress", "foundation", "component", ["route:/graph/op", "app:agent/graph-store.js"], ["graph_t.mjs", "graph_api_t.mjs"], "Store, state machine and runner are built and tested on a local D1 and SQLite; no screen, not connected to the planner route, and never run in production with a real account."),
+    C("lt-graph", "Persistent task graphs with a state machine", "foundation", "component", ["app:agent/graph.js", "app:agent/graph-store.js"], ["graph_t.mjs"], "Tested offline and over HTTP on a local D1; production has the tables and the routes but no real use yet."),
+    C("lt-dataflow", "Data flowing from one step to the next", "foundation", "component", ["app:agent/graph.js"], ["graph_t.mjs", "calc_t.mjs"], "Plans can reference earlier outputs, memory and artifacts; the planner is told how, but a real planner run using it has not been checked."),
+    C("lt-resume", "Resuming after an interruption without repeating work", "foundation", "component", ["app:agent/graph-runner.js", "app:agent/graph-store.js"], ["graph_t.mjs", "graph_api_t.mjs"], "Lease recovery and a persistent idempotency ledger are tested with simulated crashes; not yet exercised by a real interrupted run."),
+    C("lt-artifacts", "Versioned artifacts produced by steps", "foundation", "component", ["app:agent/graph-store.js"], ["graph_t.mjs"], "Only text and JSON up to 200 KB; no tool produces one yet."),
+    C("lt-memory", "Project memory and decisions (viewable, correctable, deletable)", "foundation", "component", ["app:agent/graph-store.js"], ["graph_t.mjs", "graph_api_t.mjs"], "Keyword retrieval only; nothing writes to it automatically yet."),
+    C("lt-history", "A persistent, tamper-evident history linked to tasks and attempts", "foundation", "component", ["app:agent/graph-store.js"], ["graph_t.mjs"], "Detects changes and removals; not signed, so it cannot prove who made the database."),
+    C("lt-continue", "Continuing an objective as new information arrives", "architecture", "none", [], [], "Schedules can be stored and read; nothing revises a graph from new information or runs in the background."),
     C("lt-knowledge", "Knowledge bases with hybrid retrieval", "foundation", "component", ["tool:knowledge.search", "app:rag.js"], ["rag_t.mjs"], "Written and tested offline; not connected to an embedding service or the production document path."),
   ] },
   { id: "reliability", name: "Reliability and control", capabilities: [
@@ -135,6 +140,19 @@ export function validateFamilies(families, toolStates, fileExists) {
   return problems;
 }
 
+// Plain language for every capability, so "Target: true" can never be misread as "Noria has this". The three facts are shown as words.
+const IMPL_TEXT = { none: "Not built", architecture: "Designed only", foundation: "Foundation built, not usable yet", partial: "Usable, with limits", yes: "Built and usable" };
+const VER_TEXT = { none: "Not tested", component: "Parts tested in isolation", read_only: "Exercised in the real runtime, reading only", real_runtime: "Exercised end to end in the real environment" };
+export function explainCapability(c) {
+  const has = ["partial", "yes"].includes(c.implemented);
+  return {
+    target_capability: "Target capability: what Noria is meant to become. This is NOT a claim that Noria has it.",
+    implemented: IMPL_TEXT[c.implemented],
+    verified: VER_TEXT[c.verified],
+    today: has ? "Noria has this today" + (c.gap ? ", with limits: " + c.gap : ".") : "Noria does NOT have this today" + (c.implemented === "none" ? "." : c.implemented === "architecture" ? " (only designed)." : " (a foundation exists but it is not usable yet)."),
+  };
+}
+export function explainFamilies(families) { return families.map((f) => ({ ...f, capabilities: f.capabilities.map((c) => ({ ...c, plain: explainCapability(c) })) })); }
 // The summary shown to the owner: how many of the target capabilities are implemented, and how many verified, at each level.
 export function summarizeFamilies(families) {
   const all = families.flatMap((f) => f.capabilities), by = (key, levels) => Object.fromEntries(levels.map((l) => [l, all.filter((c) => c[key] === l).length]));

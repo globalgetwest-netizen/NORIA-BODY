@@ -4,7 +4,8 @@
  * NO API key or secret to store anywhere. CORS-open so the Noria app can call it.
  * The Noria Engine is never involved — this is a separate Body capability.
  */
-import { handleAccounts } from './accounts.js'
+import { handleAccounts, authed } from './accounts.js'
+import { handleGraph } from './graph-api.js'
 const CORS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'POST, GET, OPTIONS',
@@ -18,6 +19,8 @@ export default {
     try {
       // Accounts (D1): sign-up, sign-in, profile, preferences and saved conversations. Only reached on /acct/…
       if (url.pathname.startsWith('/acct/')) return await handleAccounts(request, env, url, json, ctx)
+      // Projects and persistent task graphs (D1, signed-in users only). Only reached on /graph/…
+      if (url.pathname.startsWith('/graph/')) return await handleGraph(request, env, url, json, await authed(request, env))
       // Noria Pro features (image creation, photo understanding) cost real compute, so they need a valid Pro
       // access code, checked here on the server — not only hidden in the app.
       if ((url.pathname === '/vision' && request.method === 'POST') || (url.pathname === '/image' && (request.method === 'POST' || request.method === 'GET'))) {

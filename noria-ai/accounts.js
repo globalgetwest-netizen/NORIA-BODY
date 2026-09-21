@@ -1,3 +1,4 @@
+import { graphDeleteStatements } from './graph-api.js'
 /**
  * NORIA ACCOUNTS — people, profiles, preferences and saved conversations, kept in Cloudflare D1 (SQLite at the edge).
  *
@@ -95,7 +96,7 @@ async function newSession(env, userId, request) {
     .bind(await sha256b64(token), userId, t, t + SESSION_DAYS * 86400, t, (request.headers.get('User-Agent') || '').slice(0, 120)).run()
   return token
 }
-async function authed(request, env) {
+export async function authed(request, env) {
   const h = request.headers.get('Authorization') || ''
   const m = /^Bearer\s+([A-Za-z0-9_-]{40,60})$/.exec(h)
   if (!m) return null
@@ -273,6 +274,7 @@ export async function handleAccounts(request, env, url, json, ctx) {
     const u = await env.DB.prepare('SELECT pw_hash FROM users WHERE id = ?').bind(me.userId).first()
     if (!u || !(await verifyPassword(String(body.password || ''), u.pw_hash))) return json({ error: 'Your password is not right.' }, 403)
     await env.DB.batch([
+      ...graphDeleteStatements(env.DB, me.userId), // projects, task graphs, artifacts, memory and history are deleted with the account
       env.DB.prepare('DELETE FROM convos WHERE user_id = ?').bind(me.userId),
       env.DB.prepare('DELETE FROM sessions WHERE user_id = ?').bind(me.userId),
       env.DB.prepare('DELETE FROM profiles WHERE user_id = ?').bind(me.userId),

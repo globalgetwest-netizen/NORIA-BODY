@@ -126,6 +126,9 @@ export class Executor {
     return { state, mode: this.mode, dry_run: this.mode === "dry-run", tasks, counts: { done, total: tasks.length }, side_effects: Array.isArray(this.runtime.touched) ? this.runtime.touched.length : 0, side_effect_report: typeof this.runtime.report === "function" ? this.runtime.report() : null, audit: { records: this.audit.records.length, chain: await this.audit.verify() } };
   }
 
+  // Runs ONE task through every gate (the persistent runner calls this; execute() calls it for a whole plan). results: { key: { status, output } }.
+  async runOne(plan, task, results) { return this.runTask(plan, task, results); }
+
   async runTask(plan, task, results) {
     const planId = plan.audit && plan.audit.planId, base = { plan: planId, task: task.id };
     if (this.abort.signal.aborted) return { status: "cancelled", notes: ["cancelled before start"] };
@@ -163,19 +166,22 @@ export class Executor {
     // 4 permission and runtime
     if (tool.auth !== "none" && !this.grants.has(tool.auth)) return fail("needs_permission", "invalid permission: " + name + " needs \"" + tool.auth + "\" authorisation, which has not been granted");
     if (!this.runtime.supports(tool)) return fail("failed", "no runtime available for " + name + " (it runs in: " + tool.runtime.join(", ") + ")");
-    // 5 risk and approval
+    // 5 idempotency (BEFORE approval: something that already ran, or may have run, is never re-approved or run again)
+    const key = await keyOf([planId, task.id, name, JSON.stringify(input)].join("|"));
+    const prior = await this.ledger.get(key), ctxL = { objectiveId: planId, taskKey: task.id, tool: name };
+    if (prior && prior.started && tool.risk === "write") return fail("uncertain_outcome", "an earlier attempt at " + name + " started and did not record how it ended: it may already have happened, so it is not run again until a person confirms");
+    if (prior && prior.ok) { await this.log(Object.assign({ event: "deduplicated", tool: name, key }, base)); return { ok: true, status: "done", tool: name, output: prior.output, deduplicated: true, attempts: 0, notes: ["already executed: not run again"] }; }
+    // 6 risk and approval
     if (tool.risk === "write" || task.approval_required) {
       if (!this.approve) return Object.assign(await this.awaiting(name, base, "approval is required and no approver is configured"), { ok: false });
       const ap = await this.approve({ plan: planId, task: task.id, tool: name, risk: tool.risk, input });
+      if (ap && ap.pending) return Object.assign(await this.awaiting(name, base, "waiting for approval"), { ok: false });
       await this.log(Object.assign({ event: ap && ap.approved ? "approved" : "approval_denied", tool: name, by: ap && ap.by || "unknown", reason: ap && ap.reason || "" }, base));
       if (!ap || !ap.approved) return { ok: false, status: "denied_by_user", tool: name, notes: ["approval was not given"], error: "approval was not given" };
     }
-    // 6 idempotency
-    const key = await keyOf([planId, task.id, name, JSON.stringify(input)].join("|"));
-    const prior = this.ledger.get(key);
-    if (prior && prior.ok) { await this.log(Object.assign({ event: "deduplicated", tool: name, key }, base)); return { ok: true, status: "done", tool: name, output: prior.output, deduplicated: true, attempts: 0, notes: ["already executed: not run again"] }; }
     // 7 to 10: execute, observe, verify, recover
     const maxAttempts = 1 + Math.min(2, (tool.retry && tool.retry.max) || 0);
+    await this.ledger.set(key, { started: true }, ctxL); // written BEFORE the tool runs: if the runner dies now, the resume can tell
     let lastError = "", lastRetryable = false, attempts = 0;
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       attempts = attempt;
@@ -194,7 +200,7 @@ export class Executor {
         if (found.length) await this.log(Object.assign({ event: "injection_suspected", tool: name, removed: found.length, sample: found[0] }, base));
         // 9 verify
         const problem = (VERIFIERS[tool.verify] || VERIFIERS.schema)(tool, output);
-        if (!problem) { this.ledger.set(key, { ok: true, output }); await this.log(Object.assign({ event: "completed", tool: name, attempts, verified: tool.verify }, base)); return { ok: true, status: "done", tool: name, output, attempts, notes: found.length ? ["instruction-like text in the tool result was removed"] : [] }; }
+        if (!problem) { await this.ledger.set(key, { ok: true, output }, ctxL); await this.log(Object.assign({ event: "completed", tool: name, attempts, verified: tool.verify }, base)); return { ok: true, status: "done", tool: name, output, attempts, notes: found.length ? ["instruction-like text in the tool result was removed"] : [] }; }
         await this.log(Object.assign({ event: "verification_failed", tool: name, method: tool.verify, detail: problem }, base));
         lastError = "verification failed: " + problem; lastRetryable = true;
       } else { lastError = r.error || "tool failed"; lastRetryable = r.retryable !== false; await this.log(Object.assign({ event: "tool_failed", tool: name, detail: lastError, retryable: lastRetryable }, base)); }

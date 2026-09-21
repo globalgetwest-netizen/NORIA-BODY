@@ -2,7 +2,7 @@ import { runProviders, searchHealth, probeUnknown } from "./agent/search.js";
 import { TOOLS, REGISTRY_VERSION, listTools, plannerCatalog, registrySummary, canUse } from "./agent/tools.js";
 import { readOnlyLiveGate } from "./agent/gate.js";
 import { safeCalc } from "./agent/calc.js";
-import { FAMILIES, validateFamilies, summarizeFamilies } from "./agent/families.js";
+import { FAMILIES, validateFamilies, summarizeFamilies, explainFamilies } from "./agent/families.js";
 import { validateInput, sanitizeOutput } from "./agent/executor.js";
 import { buildPlannerMessages, extractJson, validatePlan } from "./agent/planner.js";
 // Cloudflare Pages (Advanced Mode) — Noria's front door AND her brain, served
@@ -1942,7 +1942,7 @@ data: ${JSON.stringify({ done: true })}
     // Target / Implemented / Verified for every capability family. The tests measure the machine; they do not define what Noria can do.
     if (path === "/brain/families") {
       const states = Object.fromEntries(TOOLS.map((x) => [x.name, x.state]));
-      return new Response(JSON.stringify({ generated: new Date().toISOString(), summary: summarizeFamilies(FAMILIES), rule_violations: validateFamilies(FAMILIES, states, null), families: FAMILIES }), { headers: JSON_H });
+      return new Response(JSON.stringify({ generated: new Date().toISOString(), summary: summarizeFamilies(FAMILIES), rule_violations: validateFamilies(FAMILIES, states, null), labels: { target: "Target capability (what Noria is meant to become; NOT a claim that Noria has it)", implemented: "Implemented (what has actually been built)", verified: "Verified (what has actually been tested for real)" }, families: explainFamilies(FAMILIES) }), { headers: JSON_H });
     }
     if (path === "/brain/search/providers") {
       const h = await toolHealth(env, { probe: true });
