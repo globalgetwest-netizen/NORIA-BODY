@@ -253,7 +253,7 @@ function rankRelevant(pool, q, fresh) {
     const hit = wordRe.filter((re) => re.test(hay)).length;
     return { r, i, score: hit / terms.length, t: Date.parse(r.date || r.pub || "") || 0, web: r.src === "web" };
   });
-  const need = terms.length <= 3 ? 1 : 0.6; // one or two subject words must all appear; longer questions need most of them
+  const need = terms.length <= 2 ? 1 : 0.6; // one or two subject words must all appear; longer questions need most of them
   // A news headline is matched by keywords alone (no meaning-based ranking behind it), so it must contain EVERY subject word: an item
   // about cricket's "Africa Cup" is not about the "Africa Cup of Nations", however fresh it is.
   let keep = scored.filter((x) => x.score >= (x.r.src === "news" ? 0.99 : need));
