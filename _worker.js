@@ -759,6 +759,7 @@ const mathWordProblem = (q) => ((String(q || "").match(/\d+(?:[.,]\d+)?/g) || []
 // A deduction question ("all A are B, some B are C: can we conclude…?") is answered, then the argument's form is judged separately by a
 // different model at temperature 0 (VALID = the conclusion holds in every case). If the answer says yes but the argument is invalid,
 // the answer is redone with the verdict stated. The check never blocks: if the judge cannot answer, the first answer stands.
+let _logicDbg = "";
 async function logicChecked(messages, env, text, opts) {
   try {
     const user = String((messages.filter((m) => m.role === "user").pop() || {}).content || "");
@@ -766,11 +767,12 @@ async function logicChecked(messages, env, text, opts) {
     if (!said) return text; // "no" is the safe direction: an argument that is invalid is wrongly accepted, not wrongly refused, in these slips
     const j = await brainComplete([{ role: "system", content: "You are a logic checker. Try to build a small concrete situation (for example, named groups of people or things) in which every premise is true and the conclusion is false. Think briefly, then end with a last line that is exactly VERDICT: INVALID (such a situation exists) or VERDICT: VALID (no such situation can exist)." },
       { role: "user", content: user.slice(0, 1200) }], env, { maxTokens: 900, temperature: 0, skipGroq: true, timeoutMs: 25000 });
+    _logicDbg = String(j).slice(-300);
     const vd = String(j).match(/VERDICT:\s*(VALID|INVALID)/gi);
     if (!vd || !/INVALID/i.test(vd[vd.length - 1])) return text;
     const fix = addSystem(messages, "\n\nVERDICT — a logic check found a counter-example: the conclusion does NOT follow from the premises. Answer that it does not follow, and explain briefly with a concrete counter-example in the same terms. Do not mention this note.");
     return await brainComplete(fix, env, opts);
-  } catch (_) { return text; }
+  } catch (e) { _logicDbg = "ERR " + String((e && e.message) || e).slice(0, 200); return text; }
 }
 async function plainVerified(messages, env, opts) {
   let text = await brainComplete(messages, env, opts);
@@ -1439,7 +1441,7 @@ export default {
           return new Response(JSON.stringify(Object.assign({ answer: r.text, sources: g.live.sources, verified: r.verified }, body.debug ? { unsupported: r.unsupported || [], context: g.live.ctx.slice(0, 1500) } : {})), { headers: JSON_H });
         }
         const text = await plainVerified(messages, env, { deep, maxTokens: deep ? 8000 : 2600, temperature });
-        return new Response(JSON.stringify(body.debug ? { answer: text, usage: _lastUsage } : { answer: text }), { headers: JSON_H });
+        return new Response(JSON.stringify(body.debug ? { answer: text, usage: _lastUsage, logic: _logicDbg } : { answer: text }), { headers: JSON_H });
       } catch (e) {
         return new Response(JSON.stringify({ error: e.message }), { status: 503, headers: JSON_H });
       }
