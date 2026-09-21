@@ -19,7 +19,7 @@ export default {
       // access code, checked here on the server — not only hidden in the app.
       if ((url.pathname === '/vision' && request.method === 'POST') || (url.pathname === '/image' && (request.method === 'POST' || request.method === 'GET'))) {
         const code = (url.searchParams.get('pro') || request.headers.get('X-Noria-Pro') || '').trim().toUpperCase()
-        if (!(await validCode(code, env.PRO_KEY))) return json({ error: 'Noria Pro required' }, 402)
+        if (!(await validCode(code, env.PRO_KEY, env.OWNER_KEY))) return json({ error: 'Noria Pro required' }, 402)
       }
       // See a photo: raw image bytes in the body, question in ?prompt=
       if (url.pathname === '/vision' && request.method === 'POST') {
@@ -214,7 +214,7 @@ export default {
       // Noria Pro license check — stateless HMAC-signed codes (no database).
       if (url.pathname === '/pro/check') {
         const code = (url.searchParams.get('code') || '').trim().toUpperCase()
-        return json({ pro: await validCode(code, env.PRO_KEY) })
+        return json({ pro: await validCode(code, env.PRO_KEY, env.OWNER_KEY) })
       }
       return new Response('Noria AI capability worker', { headers: CORS })
     } catch (e) {
@@ -288,7 +288,16 @@ async function hmacHex(key, msg) {
   const sig = await crypto.subtle.sign('HMAC', k, enc.encode(msg))
   return [...new Uint8Array(sig)].map((b) => b.toString(16).padStart(2, '0')).join('')
 }
-async function validCode(code, key) {
+// The owner's own key (a secret set with `wrangler secret put OWNER_KEY`, at least 8 characters) unlocks Pro as well.
+// Compared without an early exit, and matched case-insensitively because the app upper-cases every code it sends.
+function isOwnerKey(code, owner) {
+  const o = String(owner || '').trim().toUpperCase(), c = String(code || '').trim().toUpperCase()
+  if (o.length < 8 || c.length !== o.length) return false
+  let d = 0; for (let i = 0; i < o.length; i++) d |= o.charCodeAt(i) ^ c.charCodeAt(i)
+  return d === 0
+}
+async function validCode(code, key, owner) {
+  if (isOwnerKey(code, owner)) return true
   if (!key) return false
   const m = code.match(/^NORIA-([A-Z0-9]{4,16})-([A-F0-9]{6})$/)
   if (!m) return false
