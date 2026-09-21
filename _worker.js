@@ -240,7 +240,7 @@ async function tavilySearch(q, key) {
 const RANK_GENERIC = new Set("price cost worth latest current currently news today tonight recent recently now right still this that week month year many much people live new about tell what who which where when does have has been the and for are was were with from into than then his her their they them will would could should can you your our not but all any one two more most some such only over very also just only who's whos won win wins winner winners champion champions get got give show find list name named called".split(" "));
 const stem = (w) => w.replace(/(ies)$/, "y").replace(/(es|s)$/, "");
 function distinctiveTerms(q) {
-  const words = fold(toSearchQuery(q)).split(/[^a-z0-9]+/).filter((w) => w.length > 2 && !RANK_GENERIC.has(w));
+  const words = fold(toSearchQuery(q)).split(/[^a-z0-9]+/).filter((w) => w.length > 2 && !RANK_GENERIC.has(w) && !/^(?:19|20)\d{2}$/.test(w)); // a year the search added is not a subject word
   return [...new Set(words.map(stem))];
 }
 const NEWS_INTENT = /\b(news|headlines?|happened|happening|breaking|this week|today|yesterday|latest on|updates?)\b/i;
