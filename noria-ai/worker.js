@@ -92,9 +92,10 @@ export default {
               bytes = out; type = 'image/png'
             }
             if (bytes) { if (led) { try { await imageCharge(env, led, imageCost(env, model)) } catch (_) {} } return new Response(bytes, { headers: { ...CORS, 'Content-Type': type, 'Cache-Control': 'no-store', 'X-Noria-Image-Model': model.split('/').pop() } }) }
-          } catch (_) { /* try the next model, then Stable Diffusion XL */ }
+          } catch (e) { if (isAllowanceError(e)) return await markAllowanceGone(env, led) /* else: try the next model, then Stable Diffusion XL */ }
         }
-        const img = await env.AI.run('@cf/stabilityai/stable-diffusion-xl-base-1.0', { prompt })
+        let img
+        try { img = await env.AI.run('@cf/stabilityai/stable-diffusion-xl-base-1.0', { prompt }) } catch (e) { if (isAllowanceError(e)) return await markAllowanceGone(env, led); throw e }
         if (led) { try { await imageCharge(env, led, imageCost(env, 'stable-diffusion-xl-base-1.0')) } catch (_) {} }
         return new Response(img, { headers: { ...CORS, 'Content-Type': 'image/png', 'Cache-Control': 'no-store', 'X-Noria-Image-Model': 'sdxl' } })
       }
@@ -273,6 +274,11 @@ async function imageLedger(env, code) {
 }
 async function imageCharge(env, led, cost) {
   await Promise.all([env.SYNC.put(led.spentKey, String(led.spent + cost), { expirationTtl: 172800 }), env.SYNC.put(led.userKey, String(led.used + 1), { expirationTtl: 172800 })])
+}
+const isAllowanceError = (e) => /4006|daily free allocation|neurons/i.test(String((e && e.message) || e));
+async function markAllowanceGone(env, led) { // Cloudflare says today's allowance is gone: stop calling it until tomorrow
+  if (led) { try { await env.SYNC.put(led.spentKey, String(led.budget), { expirationTtl: 172800 }) } catch (_) {} }
+  return json({ error: 'image_budget', message: 'Noria has used today\'s free image allowance. It resets at midnight UTC.' }, 429)
 }
 // Input for an image model: most take { prompt, steps }; the FLUX.2 family takes a multipart form (1024 x 1024).
 function imageInput(model, prompt) {
