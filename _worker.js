@@ -254,7 +254,9 @@ function rankRelevant(pool, q, fresh) {
     return { r, i, score: hit / terms.length, t: Date.parse(r.date || r.pub || "") || 0, web: r.src === "web" };
   });
   const need = terms.length <= 2 ? 1 : 0.6; // one or two subject words must all appear; longer questions need most of them
-  let keep = scored.filter((x) => x.score >= need);
+  // A news headline is matched by keywords alone (no meaning-based ranking behind it), so it must contain EVERY subject word: an item
+  // about cricket's "Africa Cup" is not about the "Africa Cup of Nations", however fresh it is.
+  let keep = scored.filter((x) => x.score >= (x.r.src === "news" ? 0.99 : need));
   if (!keep.length) keep = scored.filter((x) => x.web && x.score >= 0.34).slice(0, 3); // the open-web engine ranks by meaning; trust its best few
   const recentQ = /\b(most recent|latest|newest|current|currently|last|now|this year|this season|reigning|defending)\b/i.test(String(q || ""));
   const yr = new Date().getUTCFullYear();
