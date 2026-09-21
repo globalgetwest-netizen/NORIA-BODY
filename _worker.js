@@ -172,9 +172,11 @@ async function fetchFeed(u) {
 }
 // Is this a general "what's the news" ask (no specific topic to search on)?
 function isGeneralNews(q) {
+  // "the news" / "top headlines today" with no subject. A subject ("news in Ghana", "news about MTN") makes it a topical search.
   const s = String(q || "");
-  return /\b(top|latest|current|today'?s?|breaking)?\s*(news|headlines?)\b/i.test(s) &&
-    !/\b(about|on|regarding|of the|for)\b/i.test(s) && s.split(/\s+/).length <= 8;
+  if (!/\b(news|headlines?)\b/i.test(s)) return false;
+  const rest = toSearchQuery(s).toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 2 && !/^(top|latest|current|todays?|today|breaking|news|headlines?|the|and|for|what|whats|any|there|are|has|have|recent|new|happening|going|give|show|tell|please)$/.test(w));
+  return rest.length === 0;
 }
 async function newsSearch(q) {
   const lists = await Promise.all(NEWS_FEEDS.map(fetchFeed));
