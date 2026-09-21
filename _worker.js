@@ -253,7 +253,7 @@ function rankRelevant(pool, q, fresh) {
     const hit = wordRe.filter((re) => re.test(hay)).length;
     return { r, i, score: hit / terms.length, t: Date.parse(r.date || r.pub || "") || 0, web: r.src === "web" };
   });
-  const need = terms.length <= 2 ? 1 : 0.6; // one or two subject words must all appear; longer questions need most of them
+  const need = terms.length <= 3 ? 1 : 0.6; // one or two subject words must all appear; longer questions need most of them
   // A news headline is matched by keywords alone (no meaning-based ranking behind it), so it must contain EVERY subject word: an item
   // about cricket's "Africa Cup" is not about the "Africa Cup of Nations", however fresh it is.
   let keep = scored.filter((x) => x.score >= (x.r.src === "news" ? 0.99 : need));
@@ -1062,13 +1062,14 @@ function fromSources(live, news) {
 // A second, independent reading: does the LIVE context actually state what the answer claims, for the event or person the question
 // asks about (the newest one, when the question says "latest")? This is judged by a model, not by keyword rules, so it holds for any
 // topic. If the judge cannot answer, it stays out of the way (the name / figure / year checks above still apply).
+let _judgeDbg = "";
 async function judgeGrounded(text, live, q, env) {
   try {
     const msg = [{ role: "system", content: "You are a strict fact-checker. Reply with exactly one line: SUPPORTED, or UNSUPPORTED: <the shortest reason>." },
       { role: "user", content: "SOURCES:\n" + String(live.ctx).slice(0, 9000) + "\n\nQUESTION: " + q + "\n\nANSWER TO CHECK:\n" + String(text).slice(0, 1500) +
         "\n\nJudge the answer's MAIN claim (the direct answer to the question), not its minor extra detail. Reply UNSUPPORTED only if: (a) the main claim is not stated by the SOURCES; (b) it is about an older edition or a different person than the question asks for (the NEWEST one when the question says latest, most recent or current); (c) the thing asked about is fictional (a fan wiki, film, comic or game page counts as fiction, even when it states the facts of the story) or the sources never mention it, yet the answer presents it as real without saying it is fictional; (d) it says something is confirmed that the SOURCES do not report; or (e) the source describes a DIFFERENT event or thing that merely shares words with the question (another sport, another competition, another person or place with a similar name), so the answer is about the wrong subject. Use your own general knowledge to recognise a fictional place, office or character even when the sources do not say so. An honest answer that says it could not confirm is SUPPORTED. Otherwise reply SUPPORTED." }];
-    const r = await brainComplete(msg, env, { maxTokens: 60, temperature: 0, timeoutMs: 9000 });
-    const t = String(r || "").trim();
+    const r = await brainComplete(msg, env, { maxTokens: 120, temperature: 0, timeoutMs: 12000, skipGroq: true }); // a different model from the one that wrote the answer
+    const t = String(r || "").trim(); _judgeDbg = t.slice(0, 200) || "(empty)";
     return /^UNSUPPORTED/i.test(t) ? t.replace(/^UNSUPPORTED:?\s*/i, "").slice(0, 160) || "the sources do not state this" : null;
   } catch (_) { return null; }
 }
@@ -1440,7 +1441,7 @@ export default {
           let r;
           try { r = await liveAnswer(messages, env, g, q, { deep, maxTokens: deep ? 8000 : 2600, temperature: Math.min(temperature, 0.2) }); }
           catch (_) { r = { text: fromSources(g.live, NEWS_INTENT.test(q)), verified: false }; } // the brain is down: the sources themselves still answer
-          return new Response(JSON.stringify(Object.assign({ answer: r.text, sources: g.live.sources, verified: r.verified }, body.debug ? { unsupported: r.unsupported || [], context: g.live.ctx.slice(0, 1500) } : {})), { headers: JSON_H });
+          return new Response(JSON.stringify(Object.assign({ answer: r.text, sources: g.live.sources, verified: r.verified }, body.debug ? { judge: _judgeDbg, unsupported: r.unsupported || [], context: g.live.ctx.slice(0, 1500) } : {})), { headers: JSON_H });
         }
         const text = await plainVerified(messages, env, { deep, maxTokens: deep ? 8000 : 2600, temperature });
         return new Response(JSON.stringify(body.debug ? { answer: text, usage: _lastUsage, logic: _logicDbg } : { answer: text }), { headers: JSON_H });
