@@ -764,9 +764,10 @@ async function logicChecked(messages, env, text, opts) {
     const user = String((messages.filter((m) => m.role === "user").pop() || {}).content || "");
     const said = /^\W*(?:yes|you can|we can|it does|that follows|correct)/i.test(String(text).trim());
     if (!said) return text; // "no" is the safe direction: an argument that is invalid is wrongly accepted, not wrongly refused, in these slips
-    const j = await brainComplete([{ role: "system", content: "You are a logic checker. Look for a counter-example: a situation where every premise is true and the conclusion is false. Reply with exactly one word: VALID (no such situation can exist) or INVALID (such a situation exists)." },
-      { role: "user", content: user.slice(0, 1200) }], env, { maxTokens: 300, temperature: 0, skipGroq: true, timeoutMs: 15000 });
-    if (!/\bINVALID\b/i.test(String(j))) return text;
+    const j = await brainComplete([{ role: "system", content: "You are a logic checker. Try to build a small concrete situation (for example, named groups of people or things) in which every premise is true and the conclusion is false. Think briefly, then end with a last line that is exactly VERDICT: INVALID (such a situation exists) or VERDICT: VALID (no such situation can exist)." },
+      { role: "user", content: user.slice(0, 1200) }], env, { maxTokens: 900, temperature: 0, skipGroq: true, timeoutMs: 25000 });
+    const vd = String(j).match(/VERDICT:\s*(VALID|INVALID)/gi);
+    if (!vd || !/INVALID/i.test(vd[vd.length - 1])) return text;
     const fix = addSystem(messages, "\n\nVERDICT — a logic check found a counter-example: the conclusion does NOT follow from the premises. Answer that it does not follow, and explain briefly with a concrete counter-example in the same terms. Do not mention this note.");
     return await brainComplete(fix, env, opts);
   } catch (_) { return text; }
@@ -1061,7 +1062,7 @@ async function judgeGrounded(text, live, q, env) {
   try {
     const msg = [{ role: "system", content: "You are a strict fact-checker. Reply with exactly one line: SUPPORTED, or UNSUPPORTED: <the shortest reason>." },
       { role: "user", content: "SOURCES:\n" + String(live.ctx).slice(0, 9000) + "\n\nQUESTION: " + q + "\n\nANSWER TO CHECK:\n" + String(text).slice(0, 1500) +
-        "\n\nJudge strictly. Reply UNSUPPORTED if ANY of these is true: (a) the answer gives a specific name, figure, date, edition, title or event that the SOURCES do not state; (b) it is about an older edition or a different person than the question asks for (the NEWEST one when the question says latest, most recent or current); (c) the thing asked about is fictional (a fan wiki, film, comic or game page counts as fiction, even when it states the facts of the story) or the sources never mention it, yet the answer presents it as real without saying it is fictional; (d) it says something is confirmed or reported that the SOURCES do not report. An honest answer that says it could not confirm is SUPPORTED. Otherwise reply SUPPORTED." }];
+        "\n\nJudge the answer's MAIN claim (the direct answer to the question), not its minor extra detail. Reply UNSUPPORTED only if: (a) the main claim is not stated by the SOURCES; (b) it is about an older edition or a different person than the question asks for (the NEWEST one when the question says latest, most recent or current); (c) the thing asked about is fictional (a fan wiki, film, comic or game page counts as fiction, even when it states the facts of the story) or the sources never mention it, yet the answer presents it as real without saying it is fictional; or (d) it says something is confirmed that the SOURCES do not report. An honest answer that says it could not confirm is SUPPORTED. Otherwise reply SUPPORTED." }];
     const r = await brainComplete(msg, env, { maxTokens: 60, temperature: 0, timeoutMs: 9000 });
     const t = String(r || "").trim();
     return /^UNSUPPORTED/i.test(t) ? t.replace(/^UNSUPPORTED:?\s*/i, "").slice(0, 160) || "the sources do not state this" : null;
