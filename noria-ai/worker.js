@@ -12,12 +12,12 @@ const CORS = {
 }
 
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     if (request.method === 'OPTIONS') return new Response(null, { headers: CORS })
     const url = new URL(request.url)
     try {
       // Accounts (D1): sign-up, sign-in, profile, preferences and saved conversations. Only reached on /acct/…
-      if (url.pathname.startsWith('/acct/')) return await handleAccounts(request, env, url, json)
+      if (url.pathname.startsWith('/acct/')) return await handleAccounts(request, env, url, json, ctx)
       // Noria Pro features (image creation, photo understanding) cost real compute, so they need a valid Pro
       // access code, checked here on the server — not only hidden in the app.
       if ((url.pathname === '/vision' && request.method === 'POST') || (url.pathname === '/image' && (request.method === 'POST' || request.method === 'GET'))) {
@@ -179,7 +179,7 @@ export default {
         await env.SYNC.put('code:' + eh, JSON.stringify({ code, tries: 0 }), { expirationTtl: 600 })
         await env.SYNC.put('rl:' + eh, '1', { expirationTtl: 60 })
         const sent = await sendLoginEmail(env, email, code)
-        return json({ ok: true, sent, ...(sent ? {} : { devCode: code }) }) // devCode only in test mode (no email provider yet)
+        return json({ ok: true, sent, ...(sent || env.DEV_MODE !== '1' ? {} : { devCode: code }) }) // the code is shown ONLY in local test mode, never in production
       }
       if (url.pathname === '/auth/verify' && request.method === 'POST') {
         let b; try { b = await request.json() } catch { return json({ error: 'bad request' }, 400) }
@@ -247,6 +247,7 @@ export default {
       ctx.waitUntil(env.DB.batch([
         env.DB.prepare('DELETE FROM sessions WHERE expires_at < ?').bind(t),
         env.DB.prepare('DELETE FROM rate_limits WHERE window_start < ?').bind(t - 3600),
+        env.DB.prepare('DELETE FROM reset_tokens WHERE expires_at < ?').bind(t),
       ]).catch(() => {}))
     }
   },

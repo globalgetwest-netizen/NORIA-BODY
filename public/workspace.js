@@ -1292,6 +1292,13 @@ function suggestMemory(text) {
 })()
 
 // ── Conversations: real, saved, searchable (per device) ───────────────────────
+// Accounts: sign-in, password reset, and conversations kept in the account. Loaded on the side, so a problem there can never stop the chat.
+let acct = null
+import('./account.js?v=1').then((m) => {
+  acct = m
+  m.initAccount({ getConvos: () => convos, setConvos: (arr) => { convos = arr; saveStore(); renderConvos() } })
+  const btn = $('moreAcct'); if (btn) btn.addEventListener('click', () => { setMore(false); m.openAccount('signin') })
+}).catch(() => {})
 const CKEY = 'noria.convos.v1'
 const convosEl = $('convos'), searchEl = $('search')
 let convos = []
@@ -1318,6 +1325,7 @@ function convoRecord(msg) {
   if (msg.role === 'user' && !c.titled) { c.title = titleFrom(msg.text); c.titled = true }
   c.updated = Date.now()
   saveStore(); renderConvos()
+  if (acct) acct.convoChanged(c.id) // signed in: the conversation is also saved to the account a moment later
 }
 function clearThread() { thread.querySelectorAll('.msg').forEach((n) => n.remove()); if (empty) empty.style.display = 'block'; stream.classList.add('is-empty'); brain.history = [] }
 function newConversation() { currentId = null; clearThread(); renderConvos(); closeDrawer(); input.focus() }
@@ -1353,6 +1361,7 @@ function openConversation(id) {
 }
 function deleteConversation(id) {
   convos = convos.filter((c) => c.id !== id); saveStore()
+  if (acct) acct.convoDeleted(id)
   if (currentId === id) newConversation(); else renderConvos()
 }
 function groupLabel(ts) {

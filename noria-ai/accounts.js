@@ -11,12 +11,15 @@
  *  - Login always does the full hash work, even for an address that has no account, so timing does not reveal who is registered.
  *  - Sign-in attempts are counted per address and per network address (in D1), and locked for 15 minutes after too many failures.
  *  - Session tokens are 256-bit random values; only their SHA-256 is stored, so a leaked database gives no working session.
- *  - Saved conversations are opaque text to this server: the app is expected to encrypt them on the device (the server never
- *    needs to read them), and the `encrypted` flag records which ones are.
+ *  - Saved conversations belong to the signed-in account and are kept on the server, so they are there on every device and after a
+ *    password reset (they are not tied to the password). Only the owner's session can read them; the owner can export or erase them.
+ *  - Password reset: an emailed link with a 256-bit token, stored only as a hash, valid 30 minutes, usable once; using it signs every
+ *    device out. Asking for a link never reveals whether an address has an account.
  */
 const ITER_DEFAULT = 100000 // the most Workers allow for PBKDF2
 const SESSION_DAYS = 30
 const MAX_CONVOS = 500, MAX_PAYLOAD = 250 * 1024, MAX_USER_BYTES = 10 * 1024 * 1024, MAX_PREFS = 8 * 1024
+const RESET_MINUTES = 30
 const COMMON = new Set(['password', 'password1', 'password123', '1234567890', '12345678910', 'qwertyuiop', 'iloveyou12', 'abcdefghij', '0123456789', 'letmein123', 'welcome123', 'admin12345', 'noria12345'])
 
 // ── small helpers ──────────────────────────────────────────────────────────────────────────────────────────────────
@@ -51,6 +54,25 @@ function passwordProblem(p) {
   return ''
 }
 const clientIp = (request) => request.headers.get('CF-Connecting-IP') || 'unknown'
+
+// ── email (Resend or Brevo — whichever key is set as a secret; both have free plans) ───────────────────────────────
+async function sendEmail(env, to, subject, text, html) {
+  const from = env.MAIL_FROM || 'Noria <noria@skyglobegroup.com>'
+  try {
+    if (env.RESEND_KEY) {
+      const r = await fetch('https://api.resend.com/emails', { method: 'POST', headers: { Authorization: 'Bearer ' + env.RESEND_KEY, 'Content-Type': 'application/json' }, body: JSON.stringify({ from, to: [to], subject, text, html }) })
+      return r.ok
+    }
+    if (env.BREVO_KEY) {
+      const m = from.match(/^(.*)<(.+)>$/)
+      const sender = m ? { name: m[1].trim() || 'Noria', email: m[2].trim() } : { name: 'Noria', email: from }
+      const r = await fetch('https://api.brevo.com/v3/smtp/email', { method: 'POST', headers: { 'api-key': env.BREVO_KEY, 'Content-Type': 'application/json' }, body: JSON.stringify({ sender, to: [{ email: to }], subject, textContent: text, htmlContent: html }) })
+      return r.ok
+    }
+  } catch (_) {}
+  return false
+}
+const mailShell = (inner) => `<div style="font-family:-apple-system,Segoe UI,Roboto,sans-serif;max-width:460px;margin:0 auto;padding:24px;color:#1A1712"><div style="font-weight:700;font-size:20px;margin-bottom:14px">✦ Noria</div>${inner}</div>`
 
 // ── rate limiting in D1 (fixed 15-minute windows) ──────────────────────────────────────────────────────────────────
 const WINDOW = 15 * 60
@@ -92,7 +114,7 @@ async function userView(env, userId) {
 }
 
 // ── the routes ─────────────────────────────────────────────────────────────────────────────────────────────────────
-export async function handleAccounts(request, env, url, json) {
+export async function handleAccounts(request, env, url, json, ctx) {
   const path = url.pathname
   if (!path.startsWith('/acct/')) return null
   if (!env.DB) return json({ error: 'Accounts are not switched on yet.' }, 503)
@@ -128,6 +150,51 @@ export async function handleAccounts(request, env, url, json) {
     if (!ok) { await Promise.all([hit(env, eKey), hit(env, iKey)]); return json({ error: 'Email or password is not right.' }, 401) }
     await clearHits(env, eKey)
     return json({ ok: true, token: await newSession(env, u.id, request), user: await userView(env, u.id) })
+  }
+
+  // forgotten password: ask for a link, then choose a new password with it
+  if (path === '/acct/reset/request' && request.method === 'POST') {
+    const said = { ok: true, message: 'If there is an account for that email, we have sent a link to reset the password. It works for ' + RESET_MINUTES + ' minutes.' }
+    const email = String(body.email || '').trim().toLowerCase()
+    if (!validEmail(email)) return json(said) // the answer never depends on whether the address has an account
+    const ipKey = 'reset:ip:' + await sha256b64(clientIp(request)), eKey = 'reset:e:' + await sha256b64(email)
+    if (await limited(env, ipKey, 8)) return json({ error: 'Too many requests. Please try again later.' }, 429)
+    await hit(env, ipKey)
+    if (await limited(env, eKey, 3)) return json(said) // at most three emails per address per 15 minutes; silently
+    await hit(env, eKey)
+    const u = await env.DB.prepare('SELECT id FROM users WHERE email = ?').bind(email).first()
+    if (!u) return json(said)
+    const token = b64(crypto.getRandomValues(new Uint8Array(32))), t = now()
+    await env.DB.batch([
+      env.DB.prepare('DELETE FROM reset_tokens WHERE user_id = ?').bind(u.id), // a new request cancels older links
+      env.DB.prepare('INSERT INTO reset_tokens (token_hash, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)').bind(await sha256b64(token), u.id, t, t + RESET_MINUTES * 60),
+    ])
+    const link = (env.APP_URL || 'https://noria.africa') + '/?reset=' + token
+    const text = 'Someone asked to reset the password for your Noria account. To choose a new password, open this link within ' + RESET_MINUTES + ' minutes:\n\n' + link + '\n\nIf you did not ask for this, ignore this email — your password stays as it is.'
+    const html = mailShell('<p style="margin:0 0 14px">Someone asked to reset the password for your Noria account.</p><p style="margin:0 0 18px"><a href="' + link + '" style="background:#0B1F3A;color:#fff;text-decoration:none;padding:12px 20px;border-radius:9px;display:inline-block;font-weight:600">Choose a new password</a></p><p style="margin:0;color:#7A7264;font-size:13px">The link works once, for ' + RESET_MINUTES + ' minutes. If you did not ask for this, ignore this email — your password stays as it is.</p>')
+    const send = sendEmail(env, email, 'Reset your Noria password', text, html) // sent in the background so the reply takes the same time either way
+    if (ctx && ctx.waitUntil) ctx.waitUntil(send); else await send
+    return json(env.DEV_MODE === '1' ? Object.assign({ devToken: token }, said) : said) // the token is returned ONLY in local test mode
+  }
+  if (path === '/acct/reset/confirm' && request.method === 'POST') {
+    const token = String(body.token || '')
+    const problem = passwordProblem(body.password); if (problem) return json({ error: problem }, 400)
+    const ipKey = 'resetc:ip:' + await sha256b64(clientIp(request))
+    if (await limited(env, ipKey, 10)) return json({ error: 'Too many attempts. Please try again later.' }, 429)
+    await hit(env, ipKey)
+    if (!/^[A-Za-z0-9_-]{40,60}$/.test(token)) return json({ error: 'This reset link is not valid. Please ask for a new one.' }, 400)
+    const row = await env.DB.prepare('SELECT r.user_id AS uid, r.expires_at AS exp, u.email AS email FROM reset_tokens r JOIN users u ON u.id = r.user_id WHERE r.token_hash = ?').bind(await sha256b64(token)).first()
+    if (!row || row.exp < now()) return json({ error: 'This reset link has expired or was already used. Please ask for a new one.' }, 400)
+    const pw = await hashPassword(body.password, Number(env.PBKDF2_ITER) || ITER_DEFAULT)
+    await env.DB.batch([
+      env.DB.prepare('UPDATE users SET pw_hash = ?, updated_at = ? WHERE id = ?').bind(pw, now(), row.uid),
+      env.DB.prepare('DELETE FROM sessions WHERE user_id = ?').bind(row.uid),        // every device is signed out
+      env.DB.prepare('DELETE FROM reset_tokens WHERE user_id = ?').bind(row.uid),    // the link (and any other) is used up
+      env.DB.prepare('DELETE FROM rate_limits WHERE k = ?').bind('login:e:' + await sha256b64(row.email)), // a lock from earlier wrong tries no longer applies
+    ])
+    const note = sendEmail(env, row.email, 'Your Noria password was changed', 'The password for your Noria account was just changed. If this was not you, reset it again straight away and contact us.', mailShell('<p style="margin:0">The password for your Noria account was just changed.</p><p style="margin:12px 0 0;color:#7A7264;font-size:13px">If this was not you, reset it again straight away.</p>'))
+    if (ctx && ctx.waitUntil) ctx.waitUntil(note); else await note
+    return json({ ok: true })
   }
 
   // everything below needs a valid session

@@ -45,3 +45,11 @@ CREATE TABLE IF NOT EXISTS rate_limits (
   count         INTEGER NOT NULL,
   window_start  INTEGER NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS reset_tokens (
+  token_hash  TEXT PRIMARY KEY,        -- SHA-256 of the emailed token; single use, 30 minutes
+  user_id     TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  created_at  INTEGER NOT NULL,
+  expires_at  INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_reset_user ON reset_tokens(user_id);

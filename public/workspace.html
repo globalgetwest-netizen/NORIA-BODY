@@ -326,6 +326,12 @@
   .pm-codebox button{flex:none;padding:0 16px;border-radius:10px;border:0;background:var(--ink);color:var(--paper);font-weight:600;cursor:pointer}
   .pm-soon{margin:0 0 18px;padding:11px 14px;border-radius:12px;background:var(--sunk);border:1px solid var(--line);text-align:left;font-size:.82rem;line-height:1.5;color:var(--muted)}
   .pm-soon b{display:block;font-size:.66rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--faint);margin-bottom:2px}
+  .acct-modal{max-width:420px;text-align:left} .acct-modal .pm-title,.acct-modal .pm-sub{text-align:center}
+  .acct-modal .pm-sub{margin:6px auto 16px}
+  .acct-note{margin:0 0 10px;font-size:.88rem;line-height:1.5;color:var(--ink-2)} .acct-note.dim{color:var(--muted);font-size:.82rem}
+  .acct-row{display:flex;gap:8px;margin-top:8px} .acct-btn{flex:1;height:42px;border-radius:11px;border:1px solid var(--line-2);background:var(--raise);color:var(--ink);font:inherit;font-weight:600;font-size:.88rem;cursor:pointer}
+  .acct-btn:hover{border-color:var(--accent-line);background:var(--paper-2)} .acct-btn.danger{color:var(--danger)} .acct-btn.danger:hover{border-color:var(--danger)}
+  .acct-link{margin:4px 0 0;font-size:.84rem;color:var(--muted);text-align:center} .acct-link a{color:var(--accent-2);font-weight:600;text-decoration:none} .acct-link a:hover{text-decoration:underline}
   .pm-msg a{color:var(--accent-2);font-weight:600;text-decoration:none} .pm-msg a:hover{text-decoration:underline}
   /* Noria Pro card: the details scroll if the screen is short, but the button and the access-code link are
      pinned to the bottom, so they are always in view (even at ~640px tall). */
@@ -385,6 +391,7 @@
       <button class="icobtn more" id="moreBtn" type="button" aria-label="More" aria-haspopup="menu" aria-expanded="false"><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="19" cy="12" r="1.7"/></svg></button>
     </div>
     <div class="moremenu" id="moreMenu" role="menu" aria-label="More">
+      <button type="button" role="menuitem" id="moreAcct"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3.4"/><path d="M5 20a7 7 0 0 1 14 0"/></svg>Account</button>
       <button type="button" role="menuitem" id="moreNew"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>New conversation</button>
       <a role="menuitem" href="/avatar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l9 5v10l-9 5-9-5V7z"/><path d="M12 12l9-5M12 12v10M12 12L3 7"/></svg>View Noria in 3D</a>
     </div>
@@ -489,6 +496,16 @@
     <div class="pm-msg" id="guideMsg"></div>
   </div>
 </div>
+<div class="promodal-wrap" id="acctModal" hidden>
+  <div class="promodal acct-modal" role="dialog" aria-modal="true" aria-label="Your account">
+    <button class="pm-close" id="acctClose" type="button" aria-label="Close"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+    <h2 class="pm-title" id="acctTitle">Sign in</h2>
+    <p class="pm-sub" id="acctSub"></p>
+    <div class="guide-fields" id="acctBody"></div>
+    <button class="pm-cta" id="acctCta" type="button">Sign in</button>
+    <div class="pm-msg" id="acctMsg"></div>
+  </div>
+</div>
 <div class="canvas-backdrop" id="canvasBackdrop" hidden></div>
 <aside class="canvas" id="canvas" hidden aria-label="Document">
   <div class="canvas-head">
@@ -512,6 +529,6 @@
   <div class="vm-caption" id="vmCaption"></div>
   <button class="vm-end" id="vmEnd" type="button">End</button>
 </div>
-<script type="module" src="workspace.js?v=64"></script>
+<script type="module" src="workspace.js?v=65"></script>
 </body>
 </html>
