@@ -1011,6 +1011,18 @@ async function liveAnswer(messages, env, g, q, opts) {
   try { const t3 = await brainComplete(plain, env, Object.assign({}, opts, { maxTokens: 400 })); const v3 = verifyAnswer(t3, g.live, q); if (v3.ok) return { text: t3, verified: true }; } catch (_) {}
   return { text: fromSources(g.live, NEWS_INTENT.test(String(q || ""))), verified: false, unsupported: v.unsupported };
 }
+// The diagnostic pages (/brain/providers, /imgcheck, /retrieve, /feeds, /models) spend real free-tier calls each time they are opened
+// (model calls, web searches, image tries). They are for the owner, so they need a valid owner / Pro code (?code=…), checked by the
+// accounts worker. Anyone else gets a plain 403 and nothing is spent.
+async function diagOk(url) {
+  const c = (url.searchParams.get("code") || "").trim().toUpperCase();
+  if (!c) return false;
+  try {
+    const r = await fetch("https://noria-ai.insights-skyglobe.workers.dev/pro/check?code=" + encodeURIComponent(c), { signal: AbortSignal.timeout(4000) });
+    const j = await r.json(); return !!j.pro;
+  } catch (_) { return false; }
+}
+const DIAG_DENIED = () => new Response(JSON.stringify({ error: "Owner access only." }), { status: 403, headers: JSON_H });
 // Router-level grounding: when a query needs live facts, fetch the web and fold
 // the results into the system message so every provider in the fallback chain
 // reasons over the same fresh context. `ground` in the request body forces it on
@@ -1378,6 +1390,7 @@ data: ${JSON.stringify({ done: true })}
     }
     // ── Which models the brain provider currently offers (names only) — so the fallback chain can be kept valid ──
     if (path === "/brain/models") {
+      if (!(await diagOk(url))) return DIAG_DENIED();
       const k = groqKeys(env)[0];
       if (!k) return new Response(JSON.stringify({ error: "no key" }), { status: 503, headers: JSON_H });
       const r = await fetch("https://api.groq.com/openai/v1/models", { headers: { Authorization: "Bearer " + k }, signal: AbortSignal.timeout(8000) }).catch(() => null);
@@ -1386,6 +1399,7 @@ data: ${JSON.stringify({ done: true })}
     }
     // ── Which live news feeds answer from here? (a check for the retrieval engine; names, counts and timings only) ──
     if (path === "/brain/feeds") {
+      if (!(await diagOk(url))) return DIAG_DENIED();
       const rows = await Promise.all(NEWS_FEEDS.map(async (u) => {
         const t = Date.now();
         const items = await fetchFeed(u);
@@ -1396,6 +1410,7 @@ data: ${JSON.stringify({ done: true })}
     }
     // ── Retrieval check: what the engine would hand the model for a question (no model is called) ──
     if (path === "/brain/retrieve") {
+      if (!(await diagOk(url))) return DIAG_DENIED();
       const q = (url.searchParams.get("q") || "").trim();
       if (!q) return new Response(JSON.stringify({ error: "no query" }), { status: 400, headers: JSON_H });
       const t = Date.now();
@@ -1406,6 +1421,7 @@ data: ${JSON.stringify({ done: true })}
     // ── Does each brain provider actually answer? One tiny request each (about 10 tokens) — reports status only, never a key ──
     // ── Does Gemini's image model answer on the free keys? One call per model, reports status and size only ──
     if (path === "/brain/imgcheck") {
+      if (!(await diagOk(url))) return DIAG_DENIED();
       const k = geminiKeys(env)[0];
       if (!k) return new Response(JSON.stringify({ error: "no gemini key" }), { headers: JSON_H });
       const out = [];
@@ -1424,6 +1440,7 @@ data: ${JSON.stringify({ done: true })}
       return new Response(JSON.stringify({ results: out }), { headers: JSON_H });
     }
     if (path === "/brain/providers" && url.searchParams.get("cerebras")) {
+      if (!(await diagOk(url))) return DIAG_DENIED();
       // Which Cerebras models can these keys use? List them, then try each with one tiny request (status only).
       const k = cerebrasKeys(env)[0];
       if (!k) return new Response(JSON.stringify({ error: "no cerebras key" }), { headers: JSON_H });
@@ -1438,6 +1455,7 @@ data: ${JSON.stringify({ done: true })}
       return new Response(JSON.stringify({ listed: ids.length, tried: res }), { headers: JSON_H });
     }
     if (path === "/brain/providers") {
+      if (!(await diagOk(url))) return DIAG_DENIED();
       const ping = async (name, fn) => { const t = Date.now(); try { const r = await fn(); return { name, ok: !!r, ms: Date.now() - t }; } catch (e) { return { name, ok: false, ms: Date.now() - t, error: String(e.message || e).replace(/\s+/g, " ").slice(0, 110) }; } };
       const m = [{ role: "user", content: "Reply with the single word: ok" }], o = { maxTokens: 40, temperature: 0 };
       const jobs = [];
@@ -1455,7 +1473,8 @@ data: ${JSON.stringify({ done: true })}
     if (path === "/brain/health") {
       const g = groqKeys(env).length, gm = geminiKeys(env).length, o = openrouterKeys(env).length;
       const ok = g || gm || o;
-      return new Response(JSON.stringify({ status: ok ? "ok" : "no-key", keys: { cloudflareAI: !!env.AI, groq: g, mistral: mistralKeys(env).length, cerebras: cerebrasKeys(env).length, gemini: gm, openrouter: o } }), { headers: JSON_H });
+      const showKeys = await diagOk(url); // how many keys each provider has is for the owner; everyone else just sees the status
+      return new Response(JSON.stringify(showKeys ? { status: ok ? "ok" : "no-key", keys: { cloudflareAI: !!env.AI, groq: g, mistral: mistralKeys(env).length, cerebras: cerebrasKeys(env).length, gemini: gm, openrouter: o } } : { status: ok ? "ok" : "no-key" }), { headers: JSON_H });
     }
 
     // ── Static assets, served by Cloudflare Pages ──
