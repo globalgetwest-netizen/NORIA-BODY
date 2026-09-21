@@ -1089,7 +1089,7 @@ async function runResearch(query, env, send) {
   const ctx = "SOURCES (numbered; cite them as [n]):\n" + top.map((r, i) => "[" + (i + 1) + "] " + r.title + (r.date ? " [dated " + String(r.date).slice(0, 16) + "]" : "") + " — " + String(r.snippet || "").replace(/\s+/g, " ").slice(0, 380) + (r.url ? " (" + r.url + ")" : "")).join("\n");
   const today = new Date().toISOString().slice(0, 10);
   const system = "You are Noria writing a research brief for a busy professional. Today is " + today + ". Use ONLY the numbered sources below: every factual sentence must end with its source number in square brackets, like [3] or [2][5]. Never state a fact, name, number or date that the sources do not contain; if the sources do not cover something the reader would expect, say so under 'Gaps and uncertainty'. Where sources disagree, say so and prefer the newer one. Write in clear, plain language.\n\nStructure (use these markdown headings): # (the title) ; ## Summary (5 bullet points) ; then one ## section for each angle of the question with substance, comparisons and figures where the sources give them ; ## Key figures (a table, only if the sources give numbers) ; ## Gaps and uncertainty ; ## What this means / next steps. Aim for a thorough brief of roughly 1,500 to 2,500 words, as long as the sources support and no longer. Do not write a 'Sources' section (it is added for you) and do not write any web addresses.\n\n" + ctx;
-  const opts = { skipGroq: true, maxTokens: 6500, temperature: 0.3 };
+  const opts = { skipGroq: true, maxTokens: 6500, temperature: 0.3, timeoutMs: 110000 };
   let text = await brainComplete([{ role: "system", content: system }, { role: "user", content: "Write the research brief on: " + query + "\nReport title: " + plan.title }], env, opts);
   const live = { ctx, sources: top.map((r) => ({ title: r.title, url: r.url || "", snippet: r.snippet || "", date: r.date || "" })) };
   let v = verifyAnswer(text, live, query), verified = v.ok;
@@ -1186,7 +1186,7 @@ async function openaiCompatible(url, key, models, messages, opts, extraHeaders) 
       method: "POST",
       headers: Object.assign({ "Content-Type": "application/json", Authorization: "Bearer " + key }, extraHeaders || {}),
       body: JSON.stringify({ model, messages, max_tokens: opts.maxTokens ?? 8000, temperature: opts.temperature ?? 0.4, stream: false }),
-      signal: AbortSignal.timeout(20000), // a provider that stalls is skipped, never waited on
+      signal: AbortSignal.timeout(opts.timeoutMs || 20000), // a provider that stalls is skipped, never waited on (long writing asks for more time)
     });
     if (r.ok) {
       const d = await r.json();
@@ -1212,7 +1212,7 @@ async function geminiComplete(key, env, messages, opts) {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ system_instruction: system ? { parts: [{ text: system }] } : undefined, contents, generationConfig: { maxOutputTokens: opts.maxTokens ?? 8000, temperature: opts.temperature ?? 0.4 } }),
-      signal: AbortSignal.timeout(20000),
+      signal: AbortSignal.timeout(opts.timeoutMs || 20000),
     });
     if (r.ok) {
       const d = await r.json();
@@ -1379,8 +1379,10 @@ export default {
       const stream = new ReadableStream({
         async start(controller) {
           const enc = new TextEncoder(); const send = (o) => { try { controller.enqueue(enc.encode(sse(o))); } catch (_) {} };
+          const beat = setInterval(() => { try { controller.enqueue(enc.encode(": still working\n\n")); } catch (_) {} }, 8000); // keeps the connection open while the brief is written
           try { const r = await runResearch(query, env, send); send({ token: r.text }); send({ done: true, title: r.title, sources: r.sources, verified: r.verified, left: q.left }); }
-          catch (e) { send({ error: "I could not finish that research just now. Please try again in a moment." }); }
+          catch (e) { send(Object.assign({ error: "I could not finish that research just now. Please try again in a moment." }, b.debug ? { detail: String((e && e.message) || e).slice(0, 400) } : {})); }
+          clearInterval(beat);
           try { controller.close(); } catch (_) {}
         },
       });
