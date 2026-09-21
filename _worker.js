@@ -241,19 +241,27 @@ function distinctiveTerms(q) {
   const words = fold(toSearchQuery(q)).split(/[^a-z0-9]+/).filter((w) => w.length > 2 && !RANK_GENERIC.has(w));
   return [...new Set(words.map(stem))];
 }
+const NEWS_INTENT = /\b(news|headlines?|happened|happening|breaking|this week|today|yesterday|latest on|updates?)\b/i;
 function rankRelevant(pool, q, fresh) {
   const terms = distinctiveTerms(q);
   if (!terms.length) return fresh ? recencySort(pool) : pool;
+  const wordRe = terms.map((t) => new RegExp("\\b" + t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))); // a term must start a word: "gold" is not "Ashgold"
   const scored = pool.map((r, i) => {
     const hay = fold((r.title || "") + " " + (r.snippet || "") + " " + (r.url || ""));
-    const hit = terms.filter((t) => hay.includes(t)).length;
+    const hit = wordRe.filter((re) => re.test(hay)).length;
     return { r, i, score: hit / terms.length, t: Date.parse(r.date || r.pub || "") || 0, web: r.src === "web" };
   });
   const need = terms.length <= 2 ? 1 : 0.6; // one or two subject words must all appear; longer questions need most of them
   let keep = scored.filter((x) => x.score >= need);
   if (!keep.length) keep = scored.filter((x) => x.web && x.score >= 0.34).slice(0, 3); // the open-web engine ranks by meaning; trust its best few
   const tier = (x) => (x.score >= 0.99 ? 2 : 1);
-  keep.sort((a, b) => (tier(b) - tier(a)) || (fresh ? (b.t - a.t) : 0) || (a.i - b.i));
+  const newsQ = NEWS_INTENT.test(String(q || ""));
+  // Asked for the news: newest first. Asked for a fact (who holds a post, what something is): the reference pages and the
+  // open web lead and the freshest news follows them, because a dated headline mentioning the topic must not outrank the
+  // page that actually states the answer.
+  const klass = (x) => (newsQ ? (x.r.src === "news" ? 0 : x.r.src === "web" ? 1 : 2) : (x.r.src === "web" ? 0 : x.r.src === "wiki" ? 1 : 2));
+  keep.sort((a, b) => (tier(b) - tier(a)) || (klass(a) - klass(b)) || (fresh ? (b.t - a.t) : 0) || (a.i - b.i));
+  if (newsQ) { let w = 0; keep = keep.filter((x) => x.r.src !== "wiki" || ++w <= 2); } // a news question does not need more than two encyclopedia pages
   return keep.map((x) => x.r);
 }
 async function webSearch(q, env, fresh) {
