@@ -247,7 +247,7 @@ const NEWS_INTENT = /\b(news|headlines?|happened|happening|breaking|this week|to
 function rankRelevant(pool, q, fresh) {
   const terms = distinctiveTerms(q);
   if (!terms.length) return fresh ? recencySort(pool) : pool;
-  const wordRe = terms.map((t) => new RegExp("\\b" + t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))); // a term must start a word: "gold" is not "Ashgold"
+  const wordRe = terms.map((t) => new RegExp("\\b" + (t.length >= 7 ? t.slice(0, t.length - 2) : t).replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))); // a term must start a word: "gold" is not "Ashgold"
   const scored = pool.map((r, i) => {
     const hay = fold((r.title || "") + " " + (r.snippet || "") + " " + String(r.url || "").replace(/^https?:\/\/[^/]+/i, "")); // the site's own name is not evidence about the subject (nation.africa is a newspaper, not "Nations")
     const hit = wordRe.filter((re) => re.test(hay)).length;
