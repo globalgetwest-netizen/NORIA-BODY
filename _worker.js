@@ -716,7 +716,7 @@ const REFS = [
     title: "The 66 books of the Bible",
     body: () => "**Old Testament (39)**\n" + numbered(REF_BIBLE_OT) + "\n\n**New Testament (27)**\n" + numbered(REF_BIBLE_NT),
     note: "This is the Protestant canon of 66 books. Catholic Bibles have 73, adding Tobit, Judith, 1 and 2 Maccabees, Wisdom, Sirach and Baruch; Orthodox Bibles include still more." },
-  { id: "africa", n: 54, rx: /\b(countries|nations|capitals?)\b.{0,30}\bafrica\b|\bafrica(n)?\b.{0,30}\b(countries|nations|capitals?)\b/i,
+  { id: "africa", n: 54, rx: /\b(countries|capitals?)\b.{0,30}\bafrica(n)?\b|\bafrica(n)?\b.{0,30}\b(countries|capitals?)\b|\b54\s+(african\s+)?(countries|nations)\b/i,
     title: "The 54 countries of Africa and their capitals",
     body: () => numbered(REF_AFRICA.map(([c, k]) => "**" + c + "** — " + k)),
     note: "These are the 54 sovereign states of Africa recognised by the United Nations. Western Sahara, a disputed territory, is not counted. Some countries have more than one seat of government; the one listed is the official capital, with the exceptions shown." },
@@ -743,7 +743,9 @@ const REFS = [
 const REF_OK = REFS.filter((r) => { const c = r.id === "bible" ? REF_BIBLE_OT.length + REF_BIBLE_NT.length : r.body().split("\n").filter((l) => /^\d+\. /.test(l)).length; return c === r.n || (r.id === "nigeria" && c === 36); });
 const REF_DIRECT_NO = /\b(explain|why|meaning|meanings|history|compare|difference|translate|arabic|essay|summari[sz]e|first|last|which|who|how many|number|#\d|\d+(st|nd|rd|th)|tell me about|describe|pdf|word|excel|table)\b/i;
 const REF_LIST_VERB = /\b(list|give|show|name|write|recite|what are|tell me|share|provide|all|full|complete)\b/i;
-function refMatch(q) { q = String(q || ""); return REF_OK.find((r) => r.rx.test(q)) || null; }
+// A question about a match, a winner, the news or "the latest" is about the live world, never a fixed list, even if it shares a word with one.
+const REF_NEWSY = /\b(won|win|wins|winner|winners|champion|champions|cup|match|score|final|news|latest|recent|recently|president|today|yesterday|now|current|currently)\b/i;
+function refMatch(q) { q = String(q || ""); if (REF_NEWSY.test(q) && !/\b(list|all|every)\b/i.test(q)) return null; return REF_OK.find((r) => r.rx.test(q)) || null; }
 // A plain "list the 99 names" is answered straight from the library.
 function refDirect(q) {
   q = String(q || "").trim();
