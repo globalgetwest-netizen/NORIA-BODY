@@ -797,6 +797,14 @@ function nowBlock(tz) {
 // evening now" only drags in other cities' times and confuses the answer.
 const CLOCK_Q = /\b(what|which)\s+(day|date|month|year|time)\b|\b(what'?s|what is|tell me|give me)\s+(the\s+)?(time|date|day)\b|\bhours?\s+(until|till|left|to)\b|\bis it (still\s+)?(morning|afternoon|evening|night|late|early)\b|\b(morning|afternoon|evening|night)\s+(or|now)\b|\btoday'?s date\b|\bcurrent (time|date|day)\b|\btime (now|please)\b|\bwhat'?s the day\b/i;
 const CLOCK_NOT = /\b(news|weather|price|score|president|prime minister|who|won|happen|happened|stock|rate|holiday|schedule|flight|open|opens|close|closes)\b/i;
+// Who holds an office or title today is the clearest case of a fact that goes stale. Such a question is ALWAYS checked
+// against live sources on the server (whatever the app already fetched), the search is aimed at the current year, and if
+// the sources do not answer, Noria says so plainly. She never falls back on memory, which stops before today.
+const OFFICE_ROLE = "president|vice[- ]president|prime minister|deputy prime minister|minister|foreign minister|finance minister|governor|deputy governor|mayor|ceo|chief executive|chairman|chairperson|speaker|chief justice|head of state|king|queen|leader|secretary[- ]general|secretary of state|ambassador|inspector[- ]general|director[- ]general|attorney[- ]general|commissioner|senator|premier|chancellor|emir|monarch";
+const OFFICE_Q = new RegExp("\\b(who\\s+(is|are|was|'s)|who's)\\b[^?.!]{0,60}\\b(" + OFFICE_ROLE + ")\\b|\\b(current|present|new|incumbent|sitting)\\s+(" + OFFICE_ROLE + ")\\b|\\b(" + OFFICE_ROLE + ")\\s+of\\s+[a-z]", "i");
+const OFFICE_NOT = /\b(write|essay|poem|story|history of|first|founder|founded|how to become|salary|requirements|qualifications|powers of|role of|duties)\b/i;
+const officeAsk = (q) => OFFICE_Q.test(q) && !OFFICE_NOT.test(q);
+const NO_OFFICE_ANSWER = "I couldn't check who currently holds that office just now, because my live sources didn't answer. I would rather not give you a name from memory that might be out of date. Please try again in a moment.";
 // Router-level grounding: when a query needs live facts, fetch the web and fold
 // the results into the system message so every provider in the fallback chain
 // reasons over the same fresh context. `ground` in the request body forces it on
@@ -818,12 +826,18 @@ async function groundMessages(messages, body, env) {
     if (!/\b(news|headline|happen|happened|stock|score|scores|president|prime minister|who is|who won)\b/i.test(q)) return { messages, grounded: true };
   }
   if (CLOCK_Q.test(q) && !CLOCK_NOT.test(q)) return { messages, grounded: true }; // the clock line above is the whole answer
-  const want = body.ground === true || (body.ground !== false && serverNeedsWeb(q));
+  const office = officeAsk(q);
+  const want = office || body.ground === true || (body.ground !== false && serverNeedsWeb(q));
   if (!want || !q) return { messages, grounded: false };
-  const queries = await withTimeout(planSearchQueries(q, env), 4000, [q]);
+  const queries = office ? [q.replace(/[?!.]+$/, "") + " " + new Date().getUTCFullYear()] : await withTimeout(planSearchQueries(q, env), 4000, [q]);
   const lists = await Promise.all(queries.map((x) => withTimeout(webSearch(x, env), 7000, [])));
   const seen = new Set(), results = [];
   for (const list of lists) for (const r of list || []) { const k = r && (r.url || r.title); if (k && !seen.has(k)) { seen.add(k); results.push(r); } }
+  if (office && !results.length) { // one more try, with the plain question, before giving up
+    const again = await withTimeout(webSearch(q.replace(/[?!.]+$/, ""), env), 7000, []);
+    for (const r of again || []) { const k = r && (r.url || r.title); if (k && !seen.has(k)) { seen.add(k); results.push(r); } }
+    if (!results.length) return { messages, grounded: true, refuse: NO_OFFICE_ANSWER };
+  }
   const block = groundingBlock(results.slice(0, 7)) || noLiveBlock();
   const out = messages.slice();
   const sysIdx = out.findIndex((m) => m.role === "system");
@@ -1025,6 +1039,7 @@ export default {
       const refAns = refDirect(body.query) || mathDirect(body.query);
       if (refAns) return new Response(JSON.stringify({ answer: refAns }), { headers: JSON_H });
       const g = await groundMessages(messages, body, env);
+      if (g.refuse) return new Response(JSON.stringify({ answer: g.refuse }), { headers: JSON_H });
       messages = g.messages;
       const q = String(body.query || "");
       const deep = /\b(analy[sz]e|analysis|calculat|comput|code|coding|program|debug|architect|design|solve|prove|deriv|optimi[sz]|algorithm|reason|strateg|framework|evaluat|equation|integral|theorem|compare|business plan|roadmap|proposal|cv|résumé|resume|cover letter|itinerary|report)\b/i.test(q) || q.length > 420;
@@ -1048,7 +1063,9 @@ data: ${JSON.stringify({ done: true })}
 
 `, { headers: SSE_H });
       let messages = buildMessages(body);
-      messages = (await groundMessages(messages, body, env)).messages;
+      const gr = await groundMessages(messages, body, env);
+      if (gr.refuse) return new Response(`data: ${JSON.stringify({ token: gr.refuse })}\n\ndata: ${JSON.stringify({ done: true })}\n\n`, { headers: SSE_H });
+      messages = gr.messages;
       const gkeys = rotate(groqKeys(env));
       if (!gkeys.length) return new Response(`data: ${JSON.stringify({ error: "no brain key" })}\n\n`, { status: 502, headers: SSE_H });
       // Rotate across Groq keys until one accepts the stream (skips a rate-limited key).
