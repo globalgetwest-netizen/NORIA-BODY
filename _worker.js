@@ -774,6 +774,10 @@ function nowBlock(tz) {
   return "\n\n[CURRENT DATE AND TIME — the exact server clock, authoritative: " + local + " (" + zone + "); UTC " + d.toISOString().slice(0, 16).replace("T", " ") +
     ". Use this for any question about the time, date, day of the week, month, year, or how long until or since something. Never say you cannot know the time and never guess a date.]";
 }
+// A plain question about the time, date or day is answered from the clock alone: a web search for "is it morning or
+// evening now" only drags in other cities' times and confuses the answer.
+const CLOCK_Q = /\b(what|which)\s+(day|date|month|year|time)\b|\b(what'?s|what is|tell me|give me)\s+(the\s+)?(time|date|day)\b|\bhours?\s+(until|till|left|to)\b|\bis it (still\s+)?(morning|afternoon|evening|night|late|early)\b|\b(morning|afternoon|evening|night)\s+(or|now)\b|\btoday'?s date\b|\bcurrent (time|date|day)\b|\btime (now|please)\b|\bwhat'?s the day\b/i;
+const CLOCK_NOT = /\b(news|weather|price|score|president|prime minister|who|won|happen|happened|stock|rate|holiday|schedule|flight|open|opens|close|closes)\b/i;
 // Router-level grounding: when a query needs live facts, fetch the web and fold
 // the results into the system message so every provider in the fallback chain
 // reasons over the same fresh context. `ground` in the request body forces it on
@@ -794,6 +798,7 @@ async function groundMessages(messages, body, env) {
     // Web results would only add stale or conflicting numbers, so skip the search unless the question also needs it.
     if (!/\b(news|headline|happen|happened|stock|score|scores|president|prime minister|who is|who won)\b/i.test(q)) return { messages, grounded: true };
   }
+  if (CLOCK_Q.test(q) && !CLOCK_NOT.test(q)) return { messages, grounded: true }; // the clock line above is the whole answer
   const want = body.ground === true || (body.ground !== false && serverNeedsWeb(q));
   if (!want || !q) return { messages, grounded: false };
   const queries = await withTimeout(planSearchQueries(q, env), 4000, [q]);
