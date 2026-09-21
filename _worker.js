@@ -1044,7 +1044,7 @@ async function judgeGrounded(text, live, q, env) {
   try {
     const msg = [{ role: "system", content: "You are a strict fact-checker. Reply with exactly one line: SUPPORTED, or UNSUPPORTED: <the shortest reason>." },
       { role: "user", content: "SOURCES:\n" + String(live.ctx).slice(0, 9000) + "\n\nQUESTION: " + q + "\n\nANSWER TO CHECK:\n" + String(text).slice(0, 1500) +
-        "\n\nIs the answer's main claim stated by the SOURCES, about the very event, person or thing the question asks for (the NEWEST one if the question says latest, most recent or current)? An answer about an older edition, a different person, or something the sources do not state is UNSUPPORTED." }];
+        "\n\nJudge strictly. Reply UNSUPPORTED if ANY of these is true: (a) the answer gives a specific name, figure, date, edition, title or event that the SOURCES do not state; (b) it is about an older edition or a different person than the question asks for (the NEWEST one when the question says latest, most recent or current); (c) the thing asked about is fictional, or the sources never mention it, yet the answer describes it as real; (d) it says something is confirmed or reported that the SOURCES do not report. An honest answer that says it could not confirm is SUPPORTED. Otherwise reply SUPPORTED." }];
     const r = await brainComplete(msg, env, { maxTokens: 60, temperature: 0, timeoutMs: 9000 });
     const t = String(r || "").trim();
     return /^UNSUPPORTED/i.test(t) ? t.replace(/^UNSUPPORTED:?\s*/i, "").slice(0, 160) || "the sources do not state this" : null;
@@ -1163,9 +1163,12 @@ async function runResearch(query, env, send) {
 // reasons over the same fresh context. `ground` in the request body forces it on
 // (true) or off (false, e.g. a client that already grounded itself); otherwise
 // the router decides with serverNeedsWeb().
+const LOGIC_Q = /\b(?:can we (?:conclude|say|infer|deduce)|does it (?:logically )?follow|is it (?:valid|logical|true) (?:to (?:say|conclude)|that)|therefore|must (?:it|this) be true)\b[\s\S]{0,200}\b(?:all|some|no|every|none)\b|\b(?:all|every)\b[^?]{0,80}\b(?:some|no)\b[^?]{0,120}\b(?:can we|does it|conclude|follow)\b/i;
+const LOGIC_NOTE = "\n\n[REASONING CARE — this is a question of deductive logic. Decide by the FORM of the argument, not by whether the conclusion sounds plausible. Two premises 'All A are B' and 'Some B are C' do NOT allow 'Some A are C' (the B's that are C may all be outside A). Only conclude what must be true in every possible case; if it does not follow, say so plainly and give a short counter-example.]";
 async function groundMessages(messages, body, env) {
   const q = String(body.query || "");
   messages = addSystem(messages, nowBlock(body.tz));
+  if (LOGIC_Q.test(q)) messages = addSystem(messages, LOGIC_NOTE);
   const rb = refBlock(q);
   if (rb) return { messages: addSystem(messages, rb), grounded: true }; // a fixed list is read off the library, not the web
   const fb = futureBlock(q);
