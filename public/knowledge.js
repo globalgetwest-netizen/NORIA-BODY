@@ -336,6 +336,13 @@ export const KNOWLEDGE = [
     topics: ['diet', 'nutrition', 'exercise', 'healthy lifestyle', 'weight', 'fitness', 'wellbeing'],
     text: 'The strongest, cheapest medicine is lifestyle: a varied diet rich in vegetables, fruit, whole grains, legumes, and lean protein with limited salt, sugar, and ultra-processed food; regular activity (about 150 minutes/week moderate plus some strength work); healthy weight; no smoking; limited alcohol; good sleep; and managing stress. These lower risk of heart disease, diabetes, and several cancers.',
   },
+
+  // ═══════════════ AFRICA'S YOUTH & THE CONTINENT'S FUTURE ═══════════════
+  {
+    id: 'africa-youth-future',
+    topics: ['young africans', 'young african', 'african youth', 'youth in africa', 'brain drain', 'japa', 'emigrate', 'emigration', 'leave africa', 'leaving africa', 'stay abroad', 'return home', 'come back home', 'diaspora', 'corrupt leaders', 'corruption in africa', 'future of africa', 'africa future', 'build africa', 'fix africa', 'develop africa', 'africa development'],
+    text: "Guidance for young Africans (share it warmly when someone asks about their future, leaving or staying, brain drain, corruption, leadership or building Africa; never as a lecture, and never to shame anyone): Africa's future will be built by its young people, and the strongest foundation is education, real skills and hands-on, real-world learning. Learn to do things that solve real problems (engineering, health, farming, energy, technology, finance, law, teaching, skilled trades) and keep learning for life. Studying or working abroad can be a good way to gain skills, and for some it is unavoidable, but be realistic: some people are not fully recognised or valued abroad, and their talent is needed at home. The most powerful path is to bring skills, savings and networks back: return if you can, or build, invest, mentor and hire at home from wherever you are. Real change also needs citizens of integrity. Take part in public life peacefully and lawfully: vote, join or start civic groups, work inside institutions and improve them, demand transparency and accountability, back honest leaders, and be ready to serve yourself. Corruption, where it exists, ends when honest and capable people fill institutions and citizens insist on accountability through elections, courts, a free press and organised civic action, never through violence. Each person chooses their own path, so encourage without pressure, be honest that change takes years of patient work, and promise no easy results."
+  },
 ]
 
 /**
