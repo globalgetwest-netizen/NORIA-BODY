@@ -280,7 +280,7 @@ async function shortHash(text) {
 }
 async function imageLedger(env, code) {
   const day = utcDay(), uid = await shortHash(String(code || 'anon'))
-  const spentKey = 'imgspent:' + day, userKey = 'imguser:' + day + ':' + uid
+  const spentKey = 'imgspent2:' + day, userKey = 'imguser:' + day + ':' + uid
   const [spent, used] = await Promise.all([env.SYNC.get(spentKey), env.SYNC.get(userKey)])
   return { spentKey, userKey, spent: Number(spent) || 0, used: Number(used) || 0,
     budget: Number(env.IMAGE_DAILY_BUDGET) || 6000, perUser: Number(env.IMAGE_PER_USER) || 12 }
