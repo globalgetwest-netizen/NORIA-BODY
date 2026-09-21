@@ -756,8 +756,24 @@ function arithmeticErrors(text) {
   return bad;
 }
 const mathWordProblem = (q) => ((String(q || "").match(/\d+(?:[.,]\d+)?/g) || []).length >= 2) && /\b(total|sum|altogether|in all|each|per|cost|costs|price|how many|how much|average|percent|profit|loss|change|discount|difference|product|remaining|left|split|share|interest)\b|%/i.test(String(q || ""));
+// A deduction question ("all A are B, some B are C: can we conclude…?") is answered, then the argument's form is judged separately by a
+// different model at temperature 0 (VALID = the conclusion holds in every case). If the answer says yes but the argument is invalid,
+// the answer is redone with the verdict stated. The check never blocks: if the judge cannot answer, the first answer stands.
+async function logicChecked(messages, env, text, opts) {
+  try {
+    const user = String((messages.filter((m) => m.role === "user").pop() || {}).content || "");
+    const said = /^\W*(?:yes|you can|we can|it does|that follows|correct)/i.test(String(text).trim());
+    if (!said) return text; // "no" is the safe direction: an argument that is invalid is wrongly accepted, not wrongly refused, in these slips
+    const j = await brainComplete([{ role: "system", content: "You are a logic checker. Look for a counter-example: a situation where every premise is true and the conclusion is false. Reply with exactly one word: VALID (no such situation can exist) or INVALID (such a situation exists)." },
+      { role: "user", content: user.slice(0, 1200) }], env, { maxTokens: 300, temperature: 0, skipGroq: true, timeoutMs: 15000 });
+    if (!/\bINVALID\b/i.test(String(j))) return text;
+    const fix = addSystem(messages, "\n\nVERDICT — a logic check found a counter-example: the conclusion does NOT follow from the premises. Answer that it does not follow, and explain briefly with a concrete counter-example in the same terms. Do not mention this note.");
+    return await brainComplete(fix, env, opts);
+  } catch (_) { return text; }
+}
 async function plainVerified(messages, env, opts) {
   let text = await brainComplete(messages, env, opts);
+  if (LOGIC_Q.test(String((messages.filter((m) => m.role === "user").pop() || {}).content || ""))) text = await logicChecked(messages, env, text, opts);
   let errs = arithmeticErrors(text);
   if (!errs.length) return text;
   const fix = addSystem(messages, "\n\nARITHMETIC CORRECTION — your draft contained calculations that are wrong: " + errs.join("; ") + ". Redo every calculation carefully, one step at a time, and give the corrected answer. Never mention this correction.");
@@ -1461,7 +1477,7 @@ data: ${JSON.stringify({ done: true })}
       const gr = await groundMessages(messages, body, env);
       if (gr.refuse) return new Response(`data: ${JSON.stringify({ token: gr.refuse })}\n\ndata: ${JSON.stringify({ done: true })}\n\n`, { headers: SSE_H });
       messages = gr.messages;
-      if (!gr.live && mathWordProblem(String(body.query || ""))) { // a number problem: answered whole, its sums re-checked, then sent
+      if (!gr.live && (mathWordProblem(String(body.query || "")) || LOGIC_Q.test(String(body.query || "")))) { // a number problem: answered whole, its sums re-checked, then sent
         try {
           const text = await plainVerified(messages, env, { deep: false, maxTokens: body.voice ? 600 : 2600, temperature: 0.2 });
           return new Response(`data: ${JSON.stringify({ token: text })}\n\ndata: ${JSON.stringify({ done: true })}\n\n`, { headers: SSE_H });
