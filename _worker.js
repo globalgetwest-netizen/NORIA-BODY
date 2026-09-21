@@ -1200,7 +1200,7 @@ const CAPS = [
   ]],
   ["Knowledge & documents", [
     ["Reading PDF, Word, text, CSV, TSV and Excel files; whole-document search of long files on Noria Pro", "live", "", "The free plan reads the opening pages; Noria Pro searches the whole document. Retrieval is by keywords on the device, not by a vector database."],
-    ["Vector database or semantic knowledge-base construction", "not_built", "", "Not built."],
+    ["Production retrieval over documents and knowledge bases (semantic chunking, keyword plus vector hybrid search, reranking, citation checks)", "not_built", "", "The pipeline is written and tested offline (public/rag.js), but it is not connected to the app or to an embedding service yet, so it is not available to you."],
   ]],
   ["Memory", [
     ["Remembering facts you share, on this device; deleting it whenever you like", "live", "", "Stored in the browser, private to the device."],

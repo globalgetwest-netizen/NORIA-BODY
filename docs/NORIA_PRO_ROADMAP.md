@@ -13,7 +13,7 @@ Status snapshot: 21 September 2026. Benchmark on that day: 94.7% (54/57) on the 
 | # | Capability | State | Notes / next step |
 |---|---|---|---|
 | 1 | Advanced reasoning engine | PARTIAL | Strong models first; logic-form checker; arithmetic re-check. No general chain-of-thought verifier. |
-| 2 | Dynamic agent planner | NOT BUILT | Phase 4 |
+| 2 | Dynamic agent planner | PARTIAL | Read-only planner built (`agent/planner.js`, `POST /brain/plan`, Noria Pro): plan only, nothing executes. Executor not built. |
 | 3 | Multi-step autonomous execution | NOT BUILT | Phase 4. Fixed pipelines only today (decide, retrieve, answer, verify, correct). |
 | 4 | Parallel tool execution | PARTIAL | Searches run in parallel inside the pipeline; no general parallel tool runner. |
 | 5 | Live web / search | LIVE | Tavily, Wikipedia, 16 news feeds, per-source timeouts, relevance ranking. |
@@ -40,9 +40,9 @@ Status snapshot: 21 September 2026. Benchmark on that day: 94.7% (54/57) on the 
 | 26 | Statistical analysis | PARTIAL | Counts, sums, means, medians, correlation. No regression or tests. |
 | 27 | Database querying | NOT BUILT | |
 | 28 | SQL generation / execution | PARTIAL | Generation by the model only. |
-| 29 | RAG | PARTIAL | Keyword retrieval on the device for long files. |
-| 30 | Vector / hybrid search | NOT BUILT | Phase 2 |
-| 31 | Knowledge-base ingestion | NOT BUILT | Phase 2 |
+| 29 | RAG | PARTIAL | Keyword retrieval on the device is what the app uses. A full pipeline (chunking, BM25, vector index, hybrid fusion, reranking, context selection, citation checks) is built and tested offline in `public/rag.js` but is not connected to the app. |
+| 30 | Vector / hybrid search | NOT BUILT | Code exists and is tested (`rag.js`: in-memory vector index, embedder and index interfaces). No embedding service is connected; the app does not use it. |
+| 31 | Knowledge-base ingestion | NOT BUILT | `KnowledgeBase.add()` exists in `rag.js`; no persistent store or upload path yet. |
 | 32 | Long-term memory | NOT BUILT | Phase 3 |
 | 33 | Project memory | NOT BUILT | Phase 3 |
 | 34 | User preference memory | PARTIAL | Device-only profile. |
@@ -62,7 +62,7 @@ Status snapshot: 21 September 2026. Benchmark on that day: 94.7% (54/57) on the 
 | 57 | Retry / recovery | LIVE | Provider fallback; client retries once on 5xx. |
 | 58 | Rollback / idempotency | NOT BUILT | Needed with the first acting tool. |
 | 59 | Execution tracing | PARTIAL | Debug fields on request. |
-| 60 | Tool-health monitoring | PARTIAL | `/brain/capabilities` probes; owner `/brain/providers`. |
+| 60 | Tool-health monitoring | PARTIAL | Public `/brain/tools` (25 tools with state), `/brain/search/providers` (per-provider health, quota) and `/brain/capabilities`. |
 | 61–62 | Capability discovery / self-description | LIVE | Registry in `_worker.js`; Noria answers from it. |
 | 63–64 | Multilingual / translation | LIVE | Benchmark: 4/4. |
 | 65 | Tutoring | LIVE | Persona. |
@@ -135,3 +135,16 @@ Objective, then plan, then act, then observe, then verify, then correct or retry
 2. **Orchestrator location**: browser-side (free, works today, only while the page is open) or a paid always-on Worker (background and scheduled tasks). The roadmap assumes browser-side unless you decide otherwise.
 3. **First connectors**: email, calendar, maps and cloud storage each need an OAuth app created under your own accounts (for example a Google Cloud project). Which first, if any.
 4. **Vector index**: Cloudflare Vectorize plus embeddings use the same 10,000 neurons a day as vision, voice and images. Accept that trade-off, or keep retrieval keyword-based.
+
+## Architecture status (2026-09-21, second pass)
+
+Built, deployed and tested (all in `agent/` and `public/rag.js`; 135 offline checks in `noria-eval/arch_tests.mjs`):
+
+- **Search layer** (`agent/search.js`): provider registry with per-provider timeout, retry, quota awareness (401/402/403/429 and Tavily 432/433), automatic pause, shared health, merge and de-duplication with provenance (`via`, `src`). Live finding: Tavily reports HTTP 432 on every key, so the open web is DEGRADED and Wikipedia plus news carry the load. To add a provider (for example Brave) add one entry to `SEARCH_PROVIDERS`; keys stay in secrets.
+- **Tool registry** (`agent/tools.js`): 25 tools, each with name, description, input and output schema, auth, permissions, state, dependency, risk, timeout, retry, verification method and runtime. All acting tools (email, calendar, files, API) are NOT BUILT, need the person's own authorisation, and are risk `write`. Public view: `GET /brain/tools`.
+- **Read-only planner** (`agent/planner.js`, `POST /brain/plan`, Noria Pro, 20 a day): the model proposes, the validator decides. Unknown tools are dropped and reported, unusable tools block their task and everything depending on it, write tools are proposed-only, cycles invalidate, the execution order is computed from dependencies, degraded tools are flagged, and every plan is stamped `executed: false`.
+- **RAG pipeline** (`public/rag.js`): built and tested offline, not connected (see rows 29 to 31).
+
+Not built: executor (sequential and parallel runs, observation, retry, cancellation, approval gates), a runtime abstraction for browser and server execution, embeddings service, persistent knowledge store, long-term memory, code sandbox, and every connector.
+
+Runtime abstraction (for the executor): one contract, two runtimes. `run(step, tool, input, signal) -> { ok, output, observation, ms }`. The browser runtime calls the worker routes and runs the device tools; the server runtime is the same loop inside a Worker or a job. The planner, registry and verifiers do not change between them.

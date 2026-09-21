@@ -25,6 +25,7 @@ export function buildPlannerMessages(objective, catalog, todayISO) {
     "Rules:\n" +
     "- Break the objective into at most 10 tasks. Each task: id (t1, t2, …), description (one clear sentence), tools (names taken ONLY from the TOOL CATALOG; use [] for a step that is only reasoning or writing), " +
     "requires_info (what must be known or found first), depends_on (ids of tasks that must finish first), verification (how the result will be checked).\n" +
+    "- Prefer the MOST SPECIFIC tool whose description matches the task (for example a tool built for spreadsheets over a general reader plus a calculator). Use a tool only when the task needs it.\n" +
     "- Choose tools only from the catalog. If the objective needs a capability the catalog does not have, do not invent a tool: put it in missing_capabilities.\n" +
     "- Tools with risk \"write\" change something outside Noria (send, book, save, post). Include such a step only if the objective really asks for it.\n" +
     "- Independent tasks should not depend on each other, so they can run in parallel. Verification of important facts is a separate task or part of the task.\n" +
@@ -51,6 +52,8 @@ export function extractJson(text) {
   return null;
 }
 
+// Words a model uses for "no tool, I just think or write": these are not tool names.
+const NO_TOOL = /^(?:\[\]|none|null|n\/a|na|model|llm|reasoning|writing|write|think|thinking|noria|self|internal|manual|-|—)$/i;
 const str = (x, n) => String(x == null ? "" : x).replace(/\s+/g, " ").trim().slice(0, n);
 const list = (x, n, m) => (Array.isArray(x) ? x : []).map((v) => str(v, m)).filter(Boolean).slice(0, n);
 const hash = (s) => { let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return (h >>> 0).toString(16); };
@@ -72,7 +75,7 @@ export function executionLevels(ids, deps) {
 export function validatePlan(raw, objective, catalog, opts = {}) {
   const issues = [];
   const byName = new Map(catalog.map((t) => [t.name, t]));
-  const missing = [];
+  const missing = [], degraded = [];
   const addMissing = (tool, state, reason) => { if (!missing.some((m) => m.tool === tool && m.reason === reason)) missing.push({ tool, state, reason }); };
   if (!raw || typeof raw !== "object" || !Array.isArray(raw.tasks) || !raw.tasks.length) {
     return { valid: false, plan: null, issues: ["the model did not return a usable list of tasks"] };
@@ -92,11 +95,12 @@ export function validatePlan(raw, objective, catalog, opts = {}) {
   // tools: registry check, availability, risk
   for (const t of tasks) {
     const usable = []; t.status = "ready"; t.blocked_by = []; t.approval_required = false;
-    for (const name of t.tools) {
+    for (const name of t.tools.filter((n) => !NO_TOOL.test(String(n).trim()))) {
       const tool = byName.get(name);
       if (!tool) { issues.push("task " + t.id + " named an unknown tool \"" + name + "\": dropped"); addMissing(name, "not_in_registry", "the planner named a tool that does not exist"); t.blocked_by.push(name + " (unknown)"); continue; }
       if (!USABLE.has(tool.available)) { addMissing(name, tool.available, tool.available === "requires_auth" ? "needs the person's authorisation" : tool.available === "unsupported" ? "not supported by policy or design" : "not built yet"); t.blocked_by.push(name + " (" + tool.available + ")"); continue; }
       if (tool.risk === "write") { t.approval_required = true; }
+      if (tool.available === "degraded") { t.notes = (t.notes || []).concat(name + " is degraded right now: expect fewer or weaker results"); if (!degraded.includes(name)) degraded.push(name); }
       usable.push(name);
     }
     t.tools = usable;
@@ -105,7 +109,7 @@ export function validatePlan(raw, objective, catalog, opts = {}) {
     if (!t.verification.length) t.verification = [...new Set(t.tools.map((n) => byName.get(n).verify).filter((v) => v && v !== "schema" && v !== "user"))].map((v) => ({ sources: "answer must be supported by the sources", exact: "result is computed exactly", temporal: "dates in the result match the moment asked about", schema: "" , user: "" }[v])).filter(Boolean);
   }
   // capabilities the model itself said were missing
-  for (const m of Array.isArray(raw.missing_capabilities) ? raw.missing_capabilities.slice(0, 8) : []) { const need = str(m && (m.need || m.tool), 80); if (need) addMissing(need, "not_built", str(m && m.reason, 160) || "reported by the planner"); }
+  for (const m of Array.isArray(raw.missing_capabilities) ? raw.missing_capabilities.slice(0, 8) : []) { const need = str(m && (m.need || m.tool), 80); if (need && !NO_TOOL.test(need)) addMissing(need, "not_built", str(m && m.reason, 160) || "reported by the planner"); }
   // a task that depends on a blocked one is blocked too
   let changed = true;
   while (changed) { changed = false; for (const t of tasks) { if (t.status === "blocked") continue; const b = t.depends_on.filter((d) => tasks.find((x) => x.id === d).status === "blocked"); if (b.length) { t.status = "blocked"; t.blocked_by.push("depends on blocked " + b.join(", ")); changed = true; } } }
@@ -127,6 +131,7 @@ export function validatePlan(raw, objective, catalog, opts = {}) {
     verification_requirements: list(raw.verification_requirements, 8, 200),
     expected_result: str(raw.expected_result, 400),
     missing_capabilities: missing,
+    degraded_tools: degraded,
     audit: { planId: "plan_" + hash(str(objective, 1200) + (opts.now || "")) + "_" + tasks.length, createdAt: opts.now || new Date().toISOString(), registryVersion: REGISTRY_VERSION, objectiveHash: hash(str(objective, 1200)), mode: "plan-only", executed: false },
   };
   if (!plan.verification_requirements.length) plan.verification_requirements = ["every factual claim must be supported by a retrieved source or an exact computation", "the dates in the result must match the moment asked about"];
