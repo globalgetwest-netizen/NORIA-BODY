@@ -249,7 +249,7 @@ function rankRelevant(pool, q, fresh) {
   if (!terms.length) return fresh ? recencySort(pool) : pool;
   const wordRe = terms.map((t) => new RegExp("\\b" + t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))); // a term must start a word: "gold" is not "Ashgold"
   const scored = pool.map((r, i) => {
-    const hay = fold((r.title || "") + " " + (r.snippet || "") + " " + (r.url || ""));
+    const hay = fold((r.title || "") + " " + (r.snippet || "") + " " + String(r.url || "").replace(/^https?:\/\/[^/]+/i, "")); // the site's own name is not evidence about the subject (nation.africa is a newspaper, not "Nations")
     const hit = wordRe.filter((re) => re.test(hay)).length;
     return { r, i, score: hit / terms.length, t: Date.parse(r.date || r.pub || "") || 0, web: r.src === "web" };
   });
