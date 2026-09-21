@@ -1051,9 +1051,15 @@ async function judgeGrounded(text, live, q, env) {
     return /^UNSUPPORTED/i.test(t) ? t.replace(/^UNSUPPORTED:?\s*/i, "").slice(0, 160) || "the sources do not state this" : null;
   } catch (_) { return null; }
 }
+// Sources that come from fan wikis and entertainment sites describe invented worlds. When the leading sources are of that kind, an answer
+// must say the subject is fiction; presenting a story's facts as real-world facts is the error to catch.
+const FICTION_HOST = /(?:fandom\.com|wikia\.|imdb\.com|rottentomatoes\.com|screenrant\.com|cbr\.com|comicbook\.com|marvel\.com|disney(?:plus)?\.com|tvtropes\.org)/i;
+const SAYS_FICTION = /\b(?:fiction|fictional|fictitious|imaginary|invented|marvel|comic|movie|film|character|story|black panther|not a real)\b/i;
 async function checkLive(text, g, q, env) {
   const v = verifyAnswer(text, g.live, q);
   if (!v.ok) return v;
+  const fic = (g.live.sources || []).slice(0, 4).filter((r) => FICTION_HOST.test(String(r.url || ""))).length;
+  if (fic >= 1 && (officeAsk(q) || /(?:king|queen|ruler|emperor|leader|capital|population) of/i.test(q)) && !SAYS_FICTION.test(text) && !/could not confirm|couldn.t confirm|not certain/i.test(text)) return { ok: false, unsupported: ["a fictional subject presented as real (the sources are fan or entertainment pages); say it is fiction"] };
   const why = await judgeGrounded(text, g.live, q, env);
   return why ? { ok: false, unsupported: ["a claim the sources do not state (" + why + ")"] } : v;
 }
