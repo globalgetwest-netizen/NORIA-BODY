@@ -843,7 +843,9 @@ async function respond(q, opts = {}) {
   // questions, or a caller supplies an explicit search query (opts.web) — used by
   // guided documents to stay current (deprecated tools, live pricing, local data).
   let webBlock = '', sources = []
-  const webQuery = (opts.web && String(opts.web).trim()) || ((needsWeb(q) && atts.length === 0 && !opts.noWeb && !opts.voice) ? q : '') // spoken turns let the server ground the answer (no extra round trip here)
+  // Live facts are handled by the server's grounding engine (it decides, retrieves from every source, verifies the answer and
+  // returns the sources). Only a guided document, which supplies its own search phrase, still searches from here.
+  const webQuery = (opts.web && String(opts.web).trim()) || ''
   if (webQuery && atts.length === 0) {
     status.innerHTML = DOTS + ' Searching the web'
     try {
@@ -895,8 +897,9 @@ async function respond(q, opts = {}) {
     // With the voice on, she starts SPEAKING as the answer is written (first finished sentence), not after it.
     let sp = null
     curStream = new AbortController()
+    let askRes = null
     try {
-      await brain.ask(q, {
+      askRes = await brain.ask(q, {
         system: noriaSystem({ json: false, topic: q + ' ' + (brain.history || []).slice(-4).map((m) => m.content).join(' ') }) + systemCommon,
         signal: curStream.signal,
         // If the client already grounded (webBlock present), skip a server search;
@@ -912,9 +915,10 @@ async function respond(q, opts = {}) {
     } catch (streamErr) {
       // A stream failure must never lose the answer: fall back to the structured path.
       if (!acc.trim() && !cancelled) {
-        try { const r = await brain.ask2(q, { system: noriaSystem({ json: false, topic: q + ' ' + (brain.history || []).slice(-4).map((m) => m.content).join(' ') }) + systemCommon }); acc = r.display || r.spoken || '' } catch (_) {}
+        try { const r = await brain.ask2(q, { system: noriaSystem({ json: false, topic: q + ' ' + (brain.history || []).slice(-4).map((m) => m.content).join(' ') }) + systemCommon }); acc = r.display || r.spoken || ''; if (!sources.length && Array.isArray(r.sources)) sources = r.sources.filter((x) => x && x.url).slice(0, 5) } catch (_) {}
       }
     } finally { curStream = null }
+    if (!sources.length && askRes && Array.isArray(askRes.sources)) sources = askRes.sources.filter((x) => x && x.url).slice(0, 5)
     // An answer that has lost its thread is never shown: ask again through the guarded path.
     if (acc && !cancelled && brain.isRambling && brain.isRambling(acc)) {
       acc = ''; try { const r = await brain.ask2(q, { system: noriaSystem({ json: false, topic: q + ' ' + (brain.history || []).slice(-4).map((m) => m.content).join(' ') }) + systemCommon }); acc = r.display || '' } catch (_) {}

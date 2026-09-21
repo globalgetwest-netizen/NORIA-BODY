@@ -138,24 +138,33 @@ const NEWS_FEEDS = [
   "http://feeds.bbci.co.uk/news/technology/rss.xml",
   "http://feeds.bbci.co.uk/news/business/rss.xml",
   "https://feeds.npr.org/1001/rss.xml",
+  // Africa and the wider world (each feed has its own time limit; one that is down simply adds nothing)
+  "https://feeds.bbci.co.uk/news/world/africa/rss.xml",
+  "https://www.aljazeera.com/xml/rss/all.xml",
+  "https://allafrica.com/tools/headlines/rdf/latest/headlines.rdf",
+  "https://citinewsroom.com/feed/",
+  "https://www.gna.org.gh/feed/",
+  "https://punchng.com/feed/",
+  "https://www.premiumtimesng.com/feed",
+  "https://www.thecable.ng/feed",
 ];
 function cdata(s) { return String(s || "").replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1"); }
 function parseFeed(xml) {
   const out = [];
-  const re = /<item>([\s\S]*?)<\/item>/g;
+  const re = /<item[^>]*>([\s\S]*?)<\/item>/g;
   let m;
   while ((m = re.exec(xml))) {
     const b = m[1];
     const title = stripTags(cdata(((b.match(/<title>([\s\S]*?)<\/title>/) || [])[1] || "")));
     const link = stripTags(cdata(((b.match(/<link>([\s\S]*?)<\/link>/) || [])[1] || "")));
     const desc = stripTags(cdata(((b.match(/<description>([\s\S]*?)<\/description>/) || [])[1] || "")));
-    const pub = (((b.match(/<pubDate>([\s\S]*?)<\/pubDate>/) || [])[1] || "").trim());
+    const pub = (((b.match(/<pubDate>([\s\S]*?)<\/pubDate>/) || b.match(/<dc:date>([\s\S]*?)<\/dc:date>/) || [])[1] || "").trim());
     if (title) out.push({ title, snippet: desc, url: link, pub, ts: Date.parse(pub) || 0 });
   }
   return out;
 }
 async function fetchFeed(u) {
-  try { const r = await fetch(u, { headers: { "User-Agent": UA } }); if (!r.ok) return []; return parseFeed(await r.text()); }
+  try { const r = await fetch(u, { headers: { "User-Agent": UA }, signal: AbortSignal.timeout(4500) }); if (!r.ok) return []; return parseFeed(await r.text()); }
   catch (_) { return []; }
 }
 // Is this a general "what's the news" ask (no specific topic to search on)?
@@ -219,41 +228,42 @@ async function tavilySearch(q, key) {
     return sorted;
   } catch (_) { return null; }
 }
-async function webSearch(q, env) {
-  // Priority 1 — a keyed general-web provider, if the owner supplied one
-  // (Tavily is free/no-card; Brave is free-with-card). Best full-web coverage.
-  // Multiple Tavily keys rotate round-robin (3 keys = 3× the free monthly quota);
-  // a rate-limited/invalid key falls through to the next automatically.
+async function webSearch(q, env, fresh) {
+  // Every source runs at the same time and each has its own time limit, so one slow or failing source can never cost the
+  // others: Tavily (open web, key rotation), Brave (if a key is set), Wikipedia (knowledge, updated within minutes for big
+  // events) and live news feeds from Africa and the world. Results are merged, de-duplicated, and — for anything time-
+  // sensitive — ordered newest first, so the freshest source leads. Tavily's own written "summary" is kept but placed last,
+  // because it is a machine-made paraphrase, not a source.
+  const isFresh = fresh !== undefined ? !!fresh : /\b(latest|current|currently|today|tonight|now|recent|breaking|news|update|price|stock|score|result|this (week|month|year)|as of|202\d|203\d)\b/i.test(String(q || ""));
   const tks = rotate(parseKeys(env, "TAVILY_KEYS", "TAVILY_KEY"));
-  for (const k of tks) {
-    const t = await tavilySearch(q, k);
-    if (t === null) continue;      // this key failed → try the next key
-    if (t.length) return t;         // got open-web results
-    break;                          // key worked but no hits → use the free fallback
+  const tavilyP = withTimeout((async () => { for (const k of tks) { const t = await tavilySearch(q, k); if (t === null) continue; return t; } return []; })(), 7000, []);
+  const braveP = env && env.BRAVE_KEY ? withTimeout(braveSearch(q, env.BRAVE_KEY), 6000, []) : Promise.resolve([]);
+  const [tv, br, w, n] = await Promise.all([tavilyP, braveP, withTimeout(wikiSearch(q), 6000, []), withTimeout(newsSearch(q), 6000, [])]);
+  const summary = (tv || []).filter((x) => x.title === "Summary").map((x) => Object.assign({}, x, { snippet: "(search-engine summary — check it against the sources above) " + x.snippet }));
+  const rows = (tv || []).filter((x) => x.title !== "Summary");
+  const seen = new Set(), pool = [];
+  for (const x of [].concat(rows, br || [], isFresh ? (n || []).concat(w || []) : (w || []).concat(n || []))) {
+    const k = x && (x.url || x.title); if (!k || !x.title || seen.has(k)) continue; seen.add(k); pool.push(x);
   }
-  if (env && env.BRAVE_KEY) { const b = await braveSearch(q, env.BRAVE_KEY); if (b.length) return b; }
-  // Priority 2 — the free, keyless, CF-working pair: Wikipedia (knowledge/history)
-  // + Google News (live current events). Merge them, leading with whichever the
-  // query favours, so Noria answers with both depth AND up-to-the-minute facts.
-  const [w, n] = await Promise.all([wikiSearch(q), newsSearch(q)]);
-  const newsy = /\b(latest|current|today|tonight|now|recent|breaking|news|update|price|stock|score|result|this (week|month|year)|as of|202\d|203\d)\b/i.test(String(q || ""));
-  // On time-sensitive queries, sort the merged pool newest-first (news carries dates,
-  // Wikipedia doesn't → fresh news leads, knowledge follows). Otherwise keep the
-  // knowledge-first order for stable factual/historical answers.
-  const merged = (newsy ? recencySort(n.concat(w)) : w.concat(n)).filter((x) => x && x.title);
-  if (merged.length) return merged.slice(0, 6);
-  // Priority 3 — last-resort fallbacks (usually blocked/narrow from CF).
-  const r = await ddgHtml(q); if (r.length) return r;
-  return await ddgInstant(q);
+  const ordered = isFresh ? recencySort(pool) : pool;
+  const out = ordered.slice(0, 8).concat(summary);
+  if (out.length) return out;
+  const r = await withTimeout(ddgHtml(q), 5000, []); if (r.length) return r;
+  return await withTimeout(ddgInstant(q), 5000, []);
 }
 // Build a compact, dated grounding block to inject into the reasoning prompt.
 function groundingBlock(results) {
   if (!results || !results.length) return "";
   const today = new Date().toISOString().slice(0, 10);
-  const lines = results.slice(0, 7).map((r, i) =>
-    `[${i + 1}] ${r.title}${r.snippet ? " — " + r.snippet : ""}${r.url ? " (" + r.url + ")" : ""}`
+  const stamp = (r) => { const t = Date.parse(r.date || r.pub || ""); return t ? " [dated " + new Date(t).toISOString().slice(0, 10) + "]" : ""; };
+  const lines = results.slice(0, 9).map((r, i) =>
+    `[${i + 1}] ${r.title}${stamp(r)}${r.snippet ? " — " + r.snippet : ""}${r.url ? " (" + r.url + ")" : ""}`
   ).join("\n");
-  return "\n\nLIVE WEB CONTEXT — retrieved " + today + " (this is TODAY'S date). " +
+  const dates = results.map((r) => Date.parse(r.date || r.pub || "")).filter(Boolean);
+  const freshness = dates.length
+    ? " The newest dated source is " + new Date(Math.max(...dates)).toISOString().slice(0, 10) + " (" + Math.max(0, Math.round((Date.now() - Math.max(...dates)) / 86400000)) + " days old)."
+    : " None of these sources carries a date, so for anything that changes over time say that you could not confirm how current it is.";
+  return "\n\nLIVE WEB CONTEXT — retrieved " + today + " (this is TODAY'S date)." + freshness + " " +
     "Treat these results as current, authoritative fact and prefer them over your training " +
     "when they disagree. Anything described in the past tense here HAS ALREADY HAPPENED as of " +
     "today — never say an event 'has not happened yet' or 'is not yet determined' if the " +
@@ -805,6 +815,95 @@ const OFFICE_Q = new RegExp("\\b(who\\s+(is|are|was|'s)|who's)\\b[^?.!]{0,60}\\b
 const OFFICE_NOT = /\b(write|essay|poem|story|history of|first|founder|founded|how to become|salary|requirements|qualifications|powers of|role of|duties)\b/i;
 const officeAsk = (q) => OFFICE_Q.test(q) && !OFFICE_NOT.test(q);
 const NO_OFFICE_ANSWER = "I couldn't check who currently holds that office just now, because my live sources didn't answer. I would rather not give you a name from memory that might be out of date. Please try again in a moment.";
+// ══ GROUNDING ENGINE ═══════════════════════════════════════════════════════════════════════════════════════════════
+// Noria's memory stops before today, so anything that can change (who holds a post, prices, scores, laws, records, news,
+// "is X still…") has to be READ from live sources, never recalled. The engine works in four steps, for every question:
+//   1. DECIDE   — does this question depend on the state of the world today? (needsLive: cues of time, of a present-tense
+//                 fact about a named person / place / organisation, or of a value that moves; not a list of titles)
+//   2. RETRIEVE — every source at once (open web, Wikipedia, live news feeds), each with its own time limit, merged and
+//                 ordered newest first, each item carrying its date.
+//   3. ANSWER   — from those sources only. If retrieval fails for a question that must be current, she says so plainly.
+//   4. VERIFY   — before the answer is shown, every name and year in it is checked against the sources. An answer that
+//                 introduces names the sources never mention is rewritten once under a strict instruction; if it still
+//                 does, she shows what the sources actually say instead. A guess never reaches the reader.
+const STABLE_TASK = /\b(write|compose|draft|poem|story|essay|lyrics|code|function|refactor|debug|translate|rephrase|reword|summari[sz]e|brainstorm|pretend|role-?play|plan|build|create|make|prepare|produce|generate|design|explain (how|why)|teach me|help me)\b/i;
+const LIVE_CUE = /\b(current|currently|latest|newest|recent|recently|today|tonight|right now|this (week|month|year|season)|as of|still|upcoming|nowadays|these days|at the moment|at present|present-day|so far this)\b|\bnow\b(?!\s+that)/i;
+const MOVING_VALUE = /\b(price|cost of|rate|worth|net worth|population|score|scores|standings?|results?|forecast|schedule|fixtures?|ranking|rankings|salary|version|release date|stock|share price|exchange rate|inflation|unemployment|market cap|record|odds|winner|winners|champions?|how many (people|residents|inhabitants|users|customers|members))\b/i;
+const STATE_Q = /\b(who|what|which)\s+(is|are|was|were)\b|\bwho\s+(leads|runs|heads|owns|manages|coaches|captains|founded|won|wins|plays|represents|replaced|succeeded|replaces|took over)\b|\bhow (much|many)\b|\bis\s+.{2,40}\b(still|alive|dead|married|open|closed|available|legal|banned|real|true|dating|retired)\b/i;
+const STABLE_FACT = /\b(capital of|currency of|official language|largest (country|city|ocean)|who (wrote|invented|discovered|painted|composed)|meaning of|definition of|synonym|antonym|boiling point|melting point|formula for|symbol for|atomic number)\b/i;
+const STATUS_Q = /\bis\s+.{2,40}\b(available|open|closed|legal|banned|allowed|working|down|operating)\b/i;
+const NOT_ENTITY = new Set("I,I'm,I've,I'd,I'll,Noria,The,A,An,What,Who,Which,Where,When,Why,How,Is,Are,Was,Were,Do,Does,Did,Can,Could,Should,Would,Will,Tell,Give,Show,Please,Monday,Tuesday,Wednesday,Thursday,Friday,Saturday,Sunday,January,February,March,April,May,June,July,August,September,October,November,December,English,Ok,Okay,Hi,Hello,Hey,Thanks".split(","));
+function hasEntity(q) { // a capitalised name somewhere after the first word: a specific person, place or organisation is being asked about
+  const words = String(q || "").replace(/[?!.,;:()"“”]/g, " ").split(/\s+/).filter(Boolean);
+  return words.slice(1).some((w) => /^[A-Z][\p{L}'’-]{2,}$/u.test(w) && !NOT_ENTITY.has(w)) || /\b(his|her|their|its)\s+(net worth|age|wife|husband|salary)\b/i.test(q);
+}
+// 'must' = an out-of-date answer would mislead, so no live source means no answer. 'maybe' = worth checking live, but an answer
+// from general knowledge is still fair when the sources have nothing.
+function liveStrength(q) {
+  const s = String(q || "");
+  if (STABLE_TASK.test(s) && !LIVE_CUE.test(s) && !officeAsk(s)) return "no";
+  if (STABLE_FACT.test(s) && !LIVE_CUE.test(s)) return "no";
+  if (officeAsk(s) || LIVE_CUE.test(s) || MOVING_VALUE.test(s) || STATUS_Q.test(s)) return "must";
+  if (STATE_Q.test(s) && hasEntity(s)) return "maybe";
+  if (serverNeedsWeb(s)) return "must";
+  return "no";
+}
+const NO_LIVE_ANSWER = "I couldn't reach my live sources for that just now, and it is the kind of question where an out-of-date answer would mislead you. I would rather not guess. Please try again in a moment.";
+
+// ── verification ───────────────────────────────────────────────────────────────────────────────────────────────────
+const SC_SKIP = new Set("i,i'm,i've,noria,the,a,an,as,in,on,at,it,it's,he,she,they,we,you,this,that,these,those,here,there,note,source,sources,yes,no,however,also,today,according,based,currently,current,latest,recent,live,web,context,summary,sunday,monday,tuesday,wednesday,thursday,friday,saturday,january,february,march,april,may,june,july,august,september,october,november,december,utc,gmt,and,but,or,so,if,for,from,with,while,since,after,before,during,since,then,when,where,who,what,which,why,how,is,are,was,were,his,her,their,its,one,two,three,mr,mrs,ms,dr,hon,president,minister,prime,foreign,vice,chief,secretary,governor,mayor,ceo".split(","));
+const fold = (t) => String(t || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+function claimPhrases(text) {
+  const clean = String(text || "").replace(/\*\*|__|`|\[\d+\]|\[[^\]]*\]\([^)]*\)|https?:\/\/\S+/g, " ");
+  const phrases = new Set(), years = new Set();
+  const strip = (w) => w.replace(/^[("'“‘]+|[)"'”’.,;:!?…]+$/g, "");
+  for (const sent of clean.split(/(?<=[.!?])\s+|\n+/)) {
+    const words = sent.split(/\s+/).filter(Boolean);
+    let i = 0;
+    while (i < words.length) {
+      const w = strip(words[i]);
+      if (/^[A-Z][\p{L}'’.-]+$/u.test(w) && !SC_SKIP.has(w.toLowerCase())) {
+        let j = i; const run = [w];
+        while (j + 1 < words.length) {
+          const nx = strip(words[j + 1]);
+          if (/^[A-Z][\p{L}'’.-]+$/u.test(nx) && !SC_SKIP.has(nx.toLowerCase())) { run.push(nx); j++; } else break;
+        }
+        if (!(i === 0 && run.length === 1)) phrases.add(run.join(" "));
+        i = j + 1; continue;
+      }
+      i++;
+    }
+  }
+  for (const m of clean.matchAll(/\b(?:19|20)\d{2}\b/g)) years.add(m[0]);
+  return { phrases: [...phrases], years: [...years] };
+}
+function verifyAnswer(text, live, q) {
+  if (!live || !live.ctx) return { ok: true, unsupported: [] };
+  const hay = fold(live.ctx + " " + q + " " + nowBlock("UTC") + " " + (live.extra || ""));
+  const { phrases, years } = claimPhrases(text);
+  const bad = [];
+  for (const ph of phrases) {
+    const parts = fold(ph).split(/\s+/).map((w) => w.replace(/[.,'’]/g, "")).filter((w) => w.length > 2);
+    if (parts.length && !parts.every((w) => hay.includes(w))) bad.push(ph);
+  }
+  for (const y of years) if (!hay.includes(y)) bad.push(y);
+  return { ok: bad.length < 2 && !years.some((y) => !hay.includes(y)), unsupported: bad };
+}
+function fromSources(live) {
+  const rows = (live.sources || []).slice(0, 4).map((r) => "• " + r.title + (r.date ? " (" + String(r.date).slice(0, 16) + ")" : "") + (r.snippet ? ": " + String(r.snippet).replace(/\s+/g, " ").slice(0, 220) : "") + (r.url ? "\n  " + r.url : ""));
+  return "I couldn't confirm a precise answer to that from my live sources, and I don't want to guess. This is what they say:\n\n" + rows.join("\n") + "\n\nIf you tell me which part matters most, I can look again.";
+}
+// The answer for a question that was grounded on live sources: draft, verify, correct once, and if it still cannot be
+// supported show the sources themselves.
+async function liveAnswer(messages, env, g, q, opts) {
+  let text = await brainComplete(messages, env, opts);
+  let v = verifyAnswer(text, g.live, q);
+  if (v.ok) return { text, verified: true };
+  const strict = addSystem(messages, "\n\nCORRECTION — your draft mentioned things that do not appear in the LIVE WEB CONTEXT above: " + v.unsupported.slice(0, 6).join(", ") +
+    ". Rewrite the answer using ONLY names, dates and figures that appear in that context. If the context does not state the answer, say plainly that you could not confirm it. Never mention this correction.");
+  try { text = await brainComplete(strict, env, opts); v = verifyAnswer(text, g.live, q); if (v.ok) return { text, verified: true }; } catch (_) {}
+  return { text: fromSources(g.live), verified: false };
+}
 // Router-level grounding: when a query needs live facts, fetch the web and fold
 // the results into the system message so every provider in the fallback chain
 // reasons over the same fresh context. `ground` in the request body forces it on
@@ -827,23 +926,26 @@ async function groundMessages(messages, body, env) {
   }
   if (CLOCK_Q.test(q) && !CLOCK_NOT.test(q)) return { messages, grounded: true }; // the clock line above is the whole answer
   const office = officeAsk(q);
-  const want = office || body.ground === true || (body.ground !== false && serverNeedsWeb(q));
+  const strength = liveStrength(q);
+  const want = office || body.ground === true || (body.ground !== false && strength !== "no");
   if (!want || !q) return { messages, grounded: false };
   const queries = office ? [q.replace(/[?!.]+$/, "") + " " + new Date().getUTCFullYear()] : await withTimeout(planSearchQueries(q, env), 4000, [q]);
-  const lists = await Promise.all(queries.map((x) => withTimeout(webSearch(x, env), 7000, [])));
+  const lists = await Promise.all(queries.map((x) => withTimeout(webSearch(x, env, strength === "must" || office), 9000, [])));
   const seen = new Set(), results = [];
   for (const list of lists) for (const r of list || []) { const k = r && (r.url || r.title); if (k && !seen.has(k)) { seen.add(k); results.push(r); } }
   if (office && !results.length) { // one more try, with the plain question, before giving up
-    const again = await withTimeout(webSearch(q.replace(/[?!.]+$/, ""), env), 7000, []);
+    const again = await withTimeout(webSearch(q.replace(/[?!.]+$/, ""), env, true), 9000, []);
     for (const r of again || []) { const k = r && (r.url || r.title); if (k && !seen.has(k)) { seen.add(k); results.push(r); } }
     if (!results.length) return { messages, grounded: true, refuse: NO_OFFICE_ANSWER };
   }
-  const block = groundingBlock(results.slice(0, 7)) || noLiveBlock();
+  if (!results.length && strength === "must" && !office) return { messages, grounded: true, refuse: NO_LIVE_ANSWER };
+  const top = results.slice(0, 8);
+  const block = groundingBlock(top) || noLiveBlock();
   const out = messages.slice();
   const sysIdx = out.findIndex((m) => m.role === "system");
   if (sysIdx >= 0) out[sysIdx] = { role: "system", content: out[sysIdx].content + block };
   else out.unshift({ role: "system", content: block.trim() });
-  return { messages: out, grounded: true };
+  return { messages: out, grounded: true, live: top.length ? { ctx: block, sources: top.map((r) => ({ title: r.title, url: r.url || "", snippet: r.snippet || "", date: r.date || r.pub || "" })) } : null };
 }
 // KEY ROTATION + PROVIDER FALLBACK — so free quota effectively never hits zero.
 // Add capacity at $0 by supplying comma-separated keys and/or more providers:
@@ -1046,6 +1148,12 @@ export default {
       // Grounded (live-data) answers run cooler to curb fabrication; free chat stays warm.
       const temperature = g.grounded ? 0.2 : (typeof body.temperature === "number" ? body.temperature : 0.4);
       try {
+        if (g.live) { // a question answered from live sources: verified against them before it is shown
+          let r;
+          try { r = await liveAnswer(messages, env, g, q, { deep, maxTokens: deep ? 8000 : 2600, temperature: Math.min(temperature, 0.2) }); }
+          catch (_) { r = { text: fromSources(g.live), verified: false }; } // the brain is down: the sources themselves still answer
+          return new Response(JSON.stringify({ answer: r.text, sources: g.live.sources, verified: r.verified }), { headers: JSON_H });
+        }
         const text = await brainComplete(messages, env, { deep, maxTokens: deep ? 8000 : 2600, temperature });
         return new Response(JSON.stringify(body.debug ? { answer: text, usage: _lastUsage } : { answer: text }), { headers: JSON_H });
       } catch (e) {
@@ -1066,6 +1174,12 @@ data: ${JSON.stringify({ done: true })}
       const gr = await groundMessages(messages, body, env);
       if (gr.refuse) return new Response(`data: ${JSON.stringify({ token: gr.refuse })}\n\ndata: ${JSON.stringify({ done: true })}\n\n`, { headers: SSE_H });
       messages = gr.messages;
+      if (gr.live) { // live-grounded: the whole answer is verified against the sources first, then sent (with the sources)
+        let r;
+        try { r = await liveAnswer(messages, env, gr, String(body.query || ""), { deep: false, maxTokens: body.voice ? 600 : 3000, temperature: 0.2 }); }
+        catch (_) { r = { text: fromSources(gr.live), verified: false }; }
+        return new Response(`data: ${JSON.stringify({ token: r.text })}\n\ndata: ${JSON.stringify({ done: true, sources: gr.live.sources, verified: r.verified })}\n\n`, { headers: SSE_H });
+      }
       const gkeys = rotate(groqKeys(env));
       if (!gkeys.length) return new Response(`data: ${JSON.stringify({ error: "no brain key" })}\n\n`, { status: 502, headers: SSE_H });
       // Rotate across Groq keys until one accepts the stream (skips a rate-limited key).
@@ -1162,6 +1276,25 @@ data: ${JSON.stringify({ done: true })}
       const r = await fetch("https://api.groq.com/openai/v1/models", { headers: { Authorization: "Bearer " + k }, signal: AbortSignal.timeout(8000) }).catch(() => null);
       const d = r && r.ok ? await r.json().catch(() => null) : null;
       return new Response(JSON.stringify({ models: d && d.data ? d.data.map((m) => m.id).sort() : null, chain: groqModels(env) }), { headers: JSON_H });
+    }
+    // ── Which live news feeds answer from here? (a check for the retrieval engine; names, counts and timings only) ──
+    if (path === "/brain/feeds") {
+      const rows = await Promise.all(NEWS_FEEDS.map(async (u) => {
+        const t = Date.now();
+        const items = await fetchFeed(u);
+        const newest = items.reduce((m, x) => Math.max(m, x.ts || 0), 0);
+        return { feed: u.replace(/^https?:\/\//, "").slice(0, 60), items: items.length, ms: Date.now() - t, newest: newest ? new Date(newest).toISOString().slice(0, 10) : "" };
+      }));
+      return new Response(JSON.stringify({ feeds: rows }), { headers: JSON_H });
+    }
+    // ── Retrieval check: what the engine would hand the model for a question (no model is called) ──
+    if (path === "/brain/retrieve") {
+      const q = (url.searchParams.get("q") || "").trim();
+      if (!q) return new Response(JSON.stringify({ error: "no query" }), { status: 400, headers: JSON_H });
+      const t = Date.now();
+      const strength = liveStrength(q);
+      const res = strength === "no" ? [] : await withTimeout(webSearch(q, env, true), 9000, []);
+      return new Response(JSON.stringify({ query: q, strength, ms: Date.now() - t, results: res.slice(0, 8).map((r) => ({ title: r.title, date: r.date || r.pub || "", url: r.url || "", snippet: (r.snippet || "").slice(0, 140) })) }), { headers: JSON_H });
     }
     // ── Does each brain provider actually answer? One tiny request each (about 10 tokens) — reports status only, never a key ──
     // ── Does Gemini's image model answer on the free keys? One call per model, reports status and size only ──

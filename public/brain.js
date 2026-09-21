@@ -268,7 +268,7 @@ export class Brain {
     const display = (parsed && (parsed.display_text || parsed.reply || parsed.spoken_text)) || (/^\s*\{/.test(raw) && this._recoverDisplay(raw)) || raw || "I'm here."
     const spoken = (parsed && parsed.spoken_text) || speechify(display)
     this.history.push({ role: 'user', content: query }, { role: 'assistant', content: display })
-    return { display, spoken, controls: parsed }
+    return { display, spoken, controls: parsed, sources: Array.isArray(data.sources) ? data.sources : [] }
   }
 
   // Send a 👍/👎 on an answer to the Engine's feedback/review pipeline.
