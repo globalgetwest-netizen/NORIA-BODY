@@ -1,3 +1,6 @@
+import { runProviders, searchHealth } from "./agent/search.js";
+import { TOOLS, REGISTRY_VERSION, listTools, plannerCatalog } from "./agent/tools.js";
+import { buildPlannerMessages, extractJson, validatePlan } from "./agent/planner.js";
 // Cloudflare Pages (Advanced Mode) — Noria's front door AND her brain, served
 // entirely from Cloudflare's edge. The workspace UI is static assets (instant,
 // global, never suspends). Live web search runs here. And /brain/* now calls a
@@ -215,6 +218,7 @@ function recencySort(results) {
     .sort((a, b) => (b.t - a.t) || (a.i - b.i))
     .map((o) => o.r);
 }
+let _tavilyStatus = 0; // the HTTP status of the last failed Tavily call (429 / 402 mean the allowance is spent)
 async function tavilySearch(q, key) {
   try {
     const r = await fetch("https://api.tavily.com/search", {
@@ -222,7 +226,7 @@ async function tavilySearch(q, key) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ api_key: key, query: q, max_results: 6, search_depth: "basic", include_answer: true }),
     });
-    if (!r.ok) return null;
+    if (!r.ok) { _tavilyStatus = r.status; return null; }
     const j = await r.json();
     const rows = (j.results || []).slice(0, 6).map((x) => ({
       title: (x.title || "").trim(), snippet: stripTags(x.content || "").slice(0, 300), url: x.url || "",
@@ -291,6 +295,19 @@ async function webSearch(q, env, fresh, o) {
   try { if (cache && key && Array.isArray(out) && out.length >= 3) await cache.put(key, new Response(JSON.stringify(out), { headers: { "Cache-Control": "public, max-age=" + (isFresh ? 600 : 3600) } })); } catch (_) {}
   return out;
 }
+// The health store shared by every instance (Cloudflare's Cache API): which providers answered, which are out of quota.
+const HEALTH_STORE = {
+  async get(k) { try { const r = typeof caches !== "undefined" ? await caches.default.match(new Request("https://noria-cache.invalid/" + k)) : null; return r ? await r.json() : null; } catch (_) { return null; } },
+  async put(k, v, ttl) { try { if (typeof caches !== "undefined") await caches.default.put(new Request("https://noria-cache.invalid/" + k), new Response(JSON.stringify(v), { headers: { "Cache-Control": "max-age=" + (ttl || 3600) } })); } catch (_) {} },
+};
+// SEARCH PROVIDERS. To add one, add an entry (see agent/search.js); nothing else in Noria changes.
+const SEARCH_PROVIDERS = [
+  { id: "tavily", kind: "web", enabled: (env) => parseKeys(env, "TAVILY_KEYS", "TAVILY_KEY").length > 0, timeoutMs: 7000, quotaPauseMs: 1800000,
+    run: async (q, env) => { for (const k of rotate(parseKeys(env, "TAVILY_KEYS", "TAVILY_KEY"))) { const t = await tavilySearch(q, k); if (t !== null) return t; } throw Object.assign(new Error("every Tavily key failed"), { status: _tavilyStatus }); } },
+  { id: "brave", kind: "web", enabled: (env) => !!(env && env.BRAVE_KEY), timeoutMs: 6000, quotaPauseMs: 1800000, run: (q, env) => braveSearch(q, env.BRAVE_KEY) },
+  { id: "wikipedia", kind: "wiki", enabled: () => true, timeoutMs: 6000, retry: { max: 1, backoffMs: 250 }, run: (q) => wikiSearch(q) },
+  { id: "news-feeds", kind: "news", enabled: () => true, timeoutMs: 6000, run: (q) => newsSearch(q) },
+];
 async function webSearchRaw(q, env, fresh, o) {
   // Every source runs at the same time and each has its own time limit, so one slow or failing source can never cost the
   // others: Tavily (open web, key rotation), Brave (if a key is set), Wikipedia (knowledge, updated within minutes for big
@@ -298,18 +315,9 @@ async function webSearchRaw(q, env, fresh, o) {
   // sensitive — ordered newest first, so the freshest source leads. Tavily's own written "summary" is kept but placed last,
   // because it is a machine-made paraphrase, not a source.
   const isFresh = fresh !== undefined ? !!fresh : /\b(latest|current|currently|today|tonight|now|recent|breaking|news|update|price|stock|score|result|this (week|month|year)|as of|202\d|203\d)\b/i.test(String(q || ""));
-  const tks = rotate(parseKeys(env, "TAVILY_KEYS", "TAVILY_KEY"));
-  const tavilyP = withTimeout((async () => { for (const k of tks) { const t = await tavilySearch(q, k); if (t === null) continue; return t; } return []; })(), 7000, []);
-  const braveP = env && env.BRAVE_KEY ? withTimeout(braveSearch(q, env.BRAVE_KEY), 6000, []) : Promise.resolve([]);
-  const [tv, br, w, n] = await Promise.all([tavilyP, braveP, withTimeout(wikiSearch(q), 6000, []), o && o.noNews ? Promise.resolve([]) : withTimeout(newsSearch(q), 6000, [])]);
-  try { if (typeof caches !== "undefined" && tks.length) await caches.default.put(new Request("https://noria-cache.invalid/health/web"), new Response(JSON.stringify({ ok: (tv || []).filter((x) => x.title !== "Summary").length + (br || []).length > 0, t: Date.now() }), { headers: { "Cache-Control": "max-age=3600" } })); } catch (_) {}
-  const summary = (tv || []).filter((x) => x.title === "Summary").map((x) => Object.assign({}, x, { snippet: "(search-engine summary — check it against the sources above) " + x.snippet }));
-  const tag = (list, src) => (list || []).map((x) => Object.assign({}, x, { src }));
-  const rows = tag((tv || []).filter((x) => x.title !== "Summary"), "web");
-  const seen = new Set(), pool = [];
-  for (const x of [].concat(rows, tag(br, "web"), isFresh ? tag(n, "news").concat(tag(w, "wiki")) : tag(w, "wiki").concat(tag(n, "news")))) {
-    const k = x && (x.url || x.title); if (!k || !x.title || seen.has(k)) continue; seen.add(k); pool.push(x);
-  }
+  const run = await runProviders(SEARCH_PROVIDERS, q, env, { skip: o && o.noNews ? ["news-feeds"] : [], order: isFresh ? ["official", "web", "news", "wiki"] : ["official", "web", "wiki", "news"] }, HEALTH_STORE);
+  const summary = run.items.filter((x) => x.title === "Summary").slice(0, 1).map((x) => Object.assign({}, x, { snippet: "(search-engine summary — check it against the sources above) " + x.snippet }));
+  const pool = run.items.filter((x) => x.title !== "Summary"); // already merged, de-duplicated and tagged with the provider it came from
   const ordered = rankRelevant(pool, q, isFresh);
   const out = ordered.slice(0, 8).concat(isFresh ? [] : summary);
   if (out.length) return out;
@@ -1222,21 +1230,23 @@ const CAPS = [
     ["Exporting to Word, Excel, PowerPoint, PDF and Markdown", "live", "", "From the document view."],
     ["Voice: speaking answers aloud and listening", "connected", "ai", "Hands-free conversation on Noria Pro."],
   ]],
+  ["Planning", [
+    ["A read-only task planner: turns a goal into an auditable plan (tasks, tools, dependencies, order, checks, and what is missing) without executing anything", "connected", "", "Noria Pro. It shows the plan; it does not carry it out."],
+  ]],
   ["Autonomous action", [
     ["Autonomous multi-step agents that choose tools, run them in parallel, recover from errors and finish a job alone", "not_built", "", "Not built. Noria follows fixed pipelines (decide, retrieve, answer, verify, correct); she does not take actions in other apps, send messages or make purchases."],
     ["Connections to email, calendars, maps or other accounts", "not_built", "", "Not built."],
   ]],
 ];
-async function capabilityReport(env) {
-  let webOk = true;
-  try { const h = typeof caches !== "undefined" ? await caches.default.match(new Request("https://noria-cache.invalid/health/web")) : null; if (h) { const j = await h.json(); webOk = !!j.ok; } } catch (_) {}
+async function toolHealth(env) {
   const aiUp = await withTimeout(fetch("https://noria-ai.insights-skyglobe.workers.dev/", { signal: AbortSignal.timeout(3500) }).then((r) => r.status < 500).catch(() => false), 4000, false);
-  const have = {
-    search: true, // Wikipedia and the news feeds need no key, so live search never depends on one service
-    feeds: true,
-    ai: aiUp,
-    accounts: aiUp,
-  };
+  const sh = await searchHealth(SEARCH_PROVIDERS, env, HEALTH_STORE);
+  return { search: sh.webOk, feeds: true, ai: aiUp, accounts: aiUp, providers: sh.providers, webOk: sh.webOk };
+}
+async function capabilityReport(env) {
+  const th = await toolHealth(env);
+  const webOk = th.webOk;
+  const have = { search: true, feeds: true, ai: th.ai, accounts: th.accounts }; // Wikipedia and the news feeds need no key, so live search never depends on one service
   const groups = CAPS.map(([area, items]) => ({ area, items: items.map(([name, state, need, note]) => {
     const up = !need || have[need] !== false;
     if (state === "not_built" || state === "unsupported" || state === "requires_auth") return { name, state, note };
@@ -1838,6 +1848,37 @@ data: ${JSON.stringify({ done: true })}
       const ok = g || gm || o;
       const showKeys = await diagOk(url); // how many keys each provider has is for the owner; everyone else just sees the status
       return new Response(JSON.stringify(showKeys ? { status: ok ? "ok" : "no-key", keys: { cloudflareAI: !!env.AI, groq: g, mistral: mistralKeys(env).length, cerebras: cerebrasKeys(env).length, gemini: gm, openrouter: o } } : { status: ok ? "ok" : "no-key" }), { headers: JSON_H });
+    }
+
+    // ── the tool registry, search-provider status and the read-only planner ──
+    if (path === "/brain/tools") {
+      const h = await toolHealth(env);
+      const tools = listTools(h).map((t) => ({ name: t.name, description: t.description, state: t.available, risk: t.risk, auth: t.auth, permissions: t.permissions, runtime: t.runtime, timeoutMs: t.timeoutMs, retry: t.retry, verify: t.verify, input: t.input, output: t.output }));
+      return new Response(JSON.stringify({ version: REGISTRY_VERSION, generated: new Date().toISOString(), health: { search: h.search, feeds: h.feeds, ai: h.ai, accounts: h.accounts }, tools }), { headers: JSON_H });
+    }
+    if (path === "/brain/search/providers") {
+      const h = await toolHealth(env);
+      return new Response(JSON.stringify({ generated: new Date().toISOString(), webAvailable: h.webOk, providers: h.providers }), { headers: JSON_H });
+    }
+    if (path === "/brain/plan" && request.method === "POST") {
+      let b; try { b = await request.json(); } catch (_) { b = {}; }
+      const objective = String(b.objective || "").trim().slice(0, 1000), code = String(b.pro || "");
+      const fail = (msg, status) => new Response(JSON.stringify({ error: msg }), { status: status || 400, headers: JSON_H });
+      if (objective.length < 6) return fail("Tell me the goal to plan.");
+      if (!(await proValid(env, code))) return fail("Planning is part of Noria Pro.", 402);
+      const q = await takeQuota(code, "plan", 20, false);
+      if (!q || !q.ok) return fail(q && q.error === "limit" ? "You have used today's plans (20 a day)." : "Planning is unavailable right now. Please try again in a moment.", 429);
+      const health = await toolHealth(env), catalog = listTools(health);
+      const msgs = buildPlannerMessages(objective, plannerCatalog(health), new Date().toISOString().slice(0, 10));
+      let raw = null, lastText = "";
+      try {
+        for (let attempt = 0; attempt < 2 && !raw; attempt++) {
+          lastText = await brainComplete(attempt ? msgs.concat([{ role: "user", content: "Return ONLY the JSON object described above, nothing else." }]) : msgs, env, { maxTokens: 2200, temperature: 0.2, timeoutMs: 40000 });
+          raw = extractJson(lastText);
+        }
+      } catch (e) { return fail("The planner could not reach a model just now.", 503); }
+      const res = validatePlan(raw, objective, catalog, { now: new Date().toISOString() });
+      return new Response(JSON.stringify({ valid: res.valid, plan: res.plan, issues: res.issues, health: { search: health.search, ai: health.ai } }), { headers: JSON_H });
     }
 
     if (path === "/brain/capabilities") {
