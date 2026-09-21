@@ -306,13 +306,50 @@ async function ttsBlob(text) {
 // background — so this is what lets Noria keep talking while the user multitasks.
 // It's unlocked on the first tap, so mid-sequence play() is allowed. Web Audio is
 // the fallback if the element is ever blocked. `gen` lets a newer speak/stop abort.
+// Loudness: the voice is used exactly as it is — same voice, same pace, same tone — but the clips arrive quiet
+// (about -22.6 dBFS average, against -16 for a normal assistant), and the player is already at full volume, so the
+// only way to a louder voice is a level lift. Each clip is brought up to a steady average level, and any peak that
+// would go past full scale is rounded off gently instead of cracking. If anything at all goes wrong, the untouched
+// clip plays, so this can never silence her.
+const LOUD_RMS = 0.14, LOUD_MAX_GAIN = 2.4
+async function loudenBlob(blob) {
+  try {
+    const ctx = ensureCtx()
+    if (!ctx) return blob
+    const buf = await ctx.decodeAudioData(await blob.arrayBuffer())
+    const ch = buf.getChannelData(0), n = ch.length
+    if (!n) return blob
+    let ss = 0
+    for (let i = 0; i < n; i++) ss += ch[i] * ch[i]
+    const rms = Math.sqrt(ss / n)
+    if (!(rms > 0.0005) || rms >= LOUD_RMS) return blob
+    const gain = Math.min(LOUD_MAX_GAIN, LOUD_RMS / rms)
+    const knee = 0.7, out = new DataView(new ArrayBuffer(44 + n * 2))
+    const w = (o, s) => { for (let i = 0; i < s.length; i++) out.setUint8(o + i, s.charCodeAt(i)) }
+    w(0, 'RIFF'); out.setUint32(4, 36 + n * 2, true); w(8, 'WAVE'); w(12, 'fmt ')
+    out.setUint32(16, 16, true); out.setUint16(20, 1, true); out.setUint16(22, 1, true)
+    out.setUint32(24, buf.sampleRate, true); out.setUint32(28, buf.sampleRate * 2, true)
+    out.setUint16(32, 2, true); out.setUint16(34, 16, true); w(36, 'data'); out.setUint32(40, n * 2, true)
+    for (let i = 0; i < n; i++) {
+      let x = ch[i] * gain
+      const a = Math.abs(x)
+      if (a > knee) x = Math.sign(x) * (knee + (1 - knee) * Math.tanh((a - knee) / (1 - knee)))
+      out.setInt16(44 + i * 2, Math.max(-32768, Math.min(32767, Math.round(x * 32767))), true)
+    }
+    return new Blob([out], { type: 'audio/wav' })
+  } catch (_) { return blob }
+}
 async function playBlob(blob, gen) {
+  blob = await loudenBlob(blob)
   const url = URL.createObjectURL(blob)
   try {
     await new Promise((resolve, reject) => {
       ttsAudio.onended = () => resolve()
       ttsAudio.onerror = () => reject(new Error('audio'))
       try { ttsAudio.pause() } catch {}
+      // If she is interrupted (stopSpeaking pauses the element) 'ended' never fires — settle here so the
+      // caller (and hands-free voice mode) is released instead of waiting forever.
+      ttsAudio.onpause = () => { if (gen !== undefined && gen !== speakGen) resolve() }
       ttsAudio.src = url
       const p = ttsAudio.play()
       if (p && p.catch) p.catch(reject)
@@ -370,6 +407,43 @@ async function speakNeural(text) {
     if (gen === speakGen) { try { ttsAudio.pause() } catch {} brain.speak(chunks.slice(i).join(' '), {}) }
   } finally {
     if (gen === speakGen) mediaSessionEnd()
+  }
+}
+// Speak WHILE she is still writing: feed() takes the streamed text as it arrives and sends each finished
+// sentence to the same neural voice straight away, so the first words are heard after ~1 sentence instead
+// of after the whole answer. Sentences play in strict order; end() resolves when the last one has been
+// spoken (or she was interrupted). Uses the same ttsBlob / playBlob / speakGen as speakNeural.
+function newSpeechStream(onStart) {
+  const gen = ++speakGen
+  brain.stopSpeaking()
+  mediaSessionStart()
+  let buf = '', count = 0, chain = Promise.resolve(), started = false
+  const enqueue = (raw) => {
+    const t = toSpeech(raw.replace(/(^|\n)[ \t]*(?:[-*•]|\d+[.)])[ \t]+/g, '$1')) // list markers ("- ", "1. ") are shown, not spoken
+    if (!t) return
+    count++
+    const blobP = ttsBlob(t); blobP.catch(() => {}) // start fetching right now; awaited in order below
+    chain = chain.then(async () => {
+      if (gen !== speakGen) return
+      try { const blob = await blobP; if (gen !== speakGen) return; if (!started) { started = true; try { onStart && onStart() } catch {} } await playBlob(blob, gen) }
+      catch (e) { if (gen === speakGen) { try { ttsAudio.pause() } catch {} brain.speak(t, {}) } } // never go silent
+    })
+  }
+  const drain = (final) => {
+    for (;;) {
+      const min = count === 0 ? 20 : 45 // first sentence goes out early; later short ones are merged
+      let cut = -1, m
+      const re = /[.!?]["')\]]*(?=\s)|\n+/g
+      while ((m = re.exec(buf))) { const end = m.index + m[0].length; if (end >= min) { cut = end; break } }
+      if (cut < 0 && buf.length > 240) { const sp = buf.lastIndexOf(' ', 200); cut = sp > 40 ? sp : 200 } // very long run with no punctuation
+      if (cut < 0) break
+      enqueue(buf.slice(0, cut)); buf = buf.slice(cut)
+    }
+    if (final && buf.trim()) { enqueue(buf); buf = '' }
+  }
+  return {
+    feed(d) { buf += d; drain(false) },
+    end() { drain(true); return chain.then(() => { if (gen === speakGen) mediaSessionEnd() }) },
   }
 }
 if (vt) vt.addEventListener('click', () => {
@@ -436,7 +510,7 @@ function startVoiceMode() {
       speechDone = null
       // In a live voice conversation she answers the way people talk: short and natural, which is also
       // much faster to hear. (Ask for detail and she gives it.)
-      await respond(t, { system: 'You are in a live spoken conversation. Answer in one to three short, natural sentences (about 40 words at most), the way a person talks. No lists, no headings, no markdown. Only go longer if the user explicitly asks for detail or a full explanation.' }) // shows your words + her answer in the chat
+      await respond(t, { voice: true, system: 'You are in a live spoken conversation. Answer in one to three short, natural sentences (about 40 words at most), the way a person talks. No lists, no headings, no markdown. Only go longer if the user explicitly asks for detail or a full explanation.' }) // shows your words + her answer in the chat
       if (speechDone) { c.mark('speaking'); await speechDone } // wait until she has finished talking
     },
     onEnd: (why) => {
@@ -451,7 +525,8 @@ function startVoiceMode() {
   if (vmState) vmState.textContent = VM_TEXT.starting
   if (micBtn) micBtn.classList.add('rec')
 }
-micBtn && micBtn.addEventListener('click', () => { if (vmCtl) endVoiceMode(); else startVoiceMode() })
+// Hands-free voice conversation is a Noria Pro feature; everyone keeps the basic tap-to-talk microphone.
+micBtn && micBtn.addEventListener('click', () => { if (vmCtl) endVoiceMode(); else if (isPro) startVoiceMode(); else legacyMic() })
 $('vmEnd') && $('vmEnd').addEventListener('click', endVoiceMode)
 vmOrb && vmOrb.addEventListener('click', () => { if (vmCtl && vmCtl.state === 'speaking') stopSpeaking() }) // interrupt her
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && vmCtl) endVoiceMode() })
@@ -528,11 +603,12 @@ const SMem = (() => {
   }
 })()
 try { window.__smem = SMem } catch (_) {}
-async function extractText(file) {
+async function extractText(file, info) {
   const name = (file.name || '').toLowerCase(), type = file.type || ''
   if (type.startsWith('image/')) {
     // Vision (understands the scene) + OCR (reads exact text) in parallel — most accurate.
-    const [dv, ov] = await Promise.allSettled([describeImage(file), ocrImage(file)])
+    // Understanding the scene (AI vision) is a Noria Pro feature; reading the text in a photo (on-device OCR) stays free.
+    const [dv, ov] = await Promise.allSettled([isPro ? describeImage(file) : Promise.reject(new Error('pro')), ocrImage(file)])
     const d = dv.status === 'fulfilled' ? (dv.value || '').trim() : ''
     const o = ov.status === 'fulfilled' ? (ov.value || '').trim() : ''
     let out = ''
@@ -540,13 +616,29 @@ async function extractText(file) {
     if (o) out += (out ? '\n\n' : '') + 'Exact text read from the image (OCR): ' + o
     return out || d || o
   }
-  if (type === 'application/pdf' || name.endsWith('.pdf')) return await pdfText(file)
+  if (type === 'application/pdf' || name.endsWith('.pdf')) return await pdfText(file, info)
+  if (name.endsWith('.docx') || type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') return await docxText(file)
   return await file.text()
+}
+// Word documents (.docx) — long contracts, reports, letters. A .docx is a zip; the words live in word/document.xml.
+async function docxText(file) {
+  await lazyScript('https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js')
+  const zip = await window.JSZip.loadAsync(await file.arrayBuffer())
+  const part = zip.file('word/document.xml')
+  if (!part) throw new Error('docx: not a Word document')
+  const xml = await part.async('string')
+  const ent = { '&amp;': '&', '&lt;': '<', '&gt;': '>', '&quot;': '"', '&apos;': "'" }
+  return xml
+    .replace(/<w:tab\b[^>]*\/>/g, '\t').replace(/<w:br\b[^>]*\/>/g, '\n')
+    .replace(/<\/w:tc>/g, ' | ').replace(/<\/w:tr>/g, '\n').replace(/<\/w:p>/g, '\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&(?:amp|lt|gt|quot|apos);/g, (m) => ent[m]).replace(/&#(\d+);/g, (m, n) => String.fromCharCode(+n))
+    .replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim()
 }
 // Real photo understanding via Cloudflare Workers AI (llava) — the Body's vision.
 async function describeImage(file) {
   const blob = await downscale(file, 1024)
-  const r = await fetch(NORIA_AI + '/vision?prompt=' + encodeURIComponent('Describe this image in detail: read any visible text exactly, and describe the objects, people, setting, colors and notable details.'), { method: 'POST', headers: { 'Content-Type': blob.type || 'image/jpeg' }, body: blob })
+  const r = await fetch(NORIA_AI + '/vision?prompt=' + encodeURIComponent('Describe this image in detail: read any visible text exactly, and describe the objects, people, setting, colors and notable details.') + proParam(), { method: 'POST', headers: { 'Content-Type': blob.type || 'image/jpeg' }, body: blob })
   const j = await r.json()
   if (j.error) throw new Error(j.error)
   return (j.text || '').trim()
@@ -561,13 +653,15 @@ async function downscale(file, max) {
     return await new Promise((res) => c.toBlob((b) => res(b || file), 'image/jpeg', 0.85))
   } catch { return file }
 }
-async function pdfText(file) {
+async function pdfText(file, info) {
   await lazyScript('https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js')
   const pdfjs = window.pdfjsLib
   pdfjs.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js'
   const doc = await pdfjs.getDocument({ data: await file.arrayBuffer() }).promise
   let out = ''
-  for (let p = 1; p <= Math.min(doc.numPages, 40); p++) { const pg = await doc.getPage(p); const tc = await pg.getTextContent(); out += tc.items.map((i) => i.str).join(' ') + '\n' }
+  const limit = Math.min(doc.numPages, isPro ? 200 : 40)
+  if (info) { info.pages = doc.numPages; info.readPages = limit }
+  for (let p = 1; p <= limit; p++) { const pg = await doc.getPage(p); const tc = await pg.getTextContent(); out += tc.items.map((i) => i.str).join(' ') + '\n' }
   return out.trim()
 }
 async function ocrImage(file) {
@@ -576,13 +670,113 @@ async function ocrImage(file) {
   return ((data && data.text) || '').trim()
 }
 function paperclip() { return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8.5 12.6 17a4 4 0 0 1-5.7-5.7l8-8a2.5 2.5 0 0 1 3.5 3.5l-8 8a1 1 0 0 1-1.4-1.4l7.3-7.3"/></svg>' }
+// Noria's internal state object (spoken_text, display_text, emotion, memory) is never shown or spoken: if a model
+// answers in that shape, only the words meant for the person are kept.
+const META_RX = /^\s*(?:```(?:json)?\s*)?\{\s*"(?:spoken_text|display_text|emotion|voice_tone|reply|conversation_action)"/
+const looksMeta = (t) => META_RX.test(t || '')
+function cleanMeta(t) {
+  if (!looksMeta(t)) return t
+  const str = (k) => {
+    const m = new RegExp('"' + k + '"\\s*:\\s*"((?:[^"\\\\]|\\\\.)*)').exec(t)
+    if (!m) return ''
+    try { return JSON.parse('"' + m[1] + '"') } catch (_) { return m[1].replace(/\\n/g, '\n').replace(/\\"/g, '"') }
+  }
+  try { const o = JSON.parse(t.replace(/^\s*```(?:json)?/i, '').replace(/```\s*$/, '')); return String(o.display_text || o.reply || o.spoken_text || '').trim() } catch (_) {}
+  return (str('display_text') || str('reply') || str('spoken_text')).trim()
+}
+// How much of an attached document is read: the opening pages on the free plan, the whole document on Noria Pro
+// (about 90 pages of text; PDFs up to 200 pages). The paperclip chip always says exactly how much was read.
+const DOC_FREE = 6000, DOC_PRO = 600000, DOC_PRO_TOTAL = 600000, CHARS_PER_PAGE = 3000
+// What is sent to the brain per question. The whole document is held on the device; when it is longer than this the
+// most relevant passages are picked locally (see docExcerpts), so a 60-page file costs the same as a 4-page one.
+const DOC_SEND = 14000
+const docCap = () => (isPro ? DOC_PRO : DOC_FREE)
+const pagesOf = (chars) => Math.max(1, Math.round(chars / CHARS_PER_PAGE))
+function docCut(a) { const cap = docCap(), n = (a.text || '').length, p = a.info && a.info.pages ? a.info : null; return n > cap || !!(p && p.pages > p.readPages) }
+function readNote(a) {
+  if (a.loading || a.preview || !a.text) return ''
+  const n = a.text.length, p = a.info && a.info.pages ? a.info : null
+  if (!docCut(a)) return (isPro && n > DOC_SEND ? ' · whole document searched' : ' · read in full') + (p ? ' (' + p.pages + ' pages)' : n > CHARS_PER_PAGE ? ' (~' + pagesOf(n) + ' pages)' : '')
+  const total = p ? p.pages : pagesOf(n), read = Math.min(total, pagesOf(Math.min(n, docCap())))
+  return ' · first ~' + read + ' of ' + total + ' pages'
+}
+function readNotice(a) {
+  if (!docCut(a)) return
+  note(isPro ? '“' + a.name + '” is very long — the first ~' + pagesOf(docCap()) + ' pages will be read.' : 'Only the first ~' + pagesOf(docCap()) + ' pages of “' + a.name + '” will be read. Noria Pro reads whole documents.')
+}
+// ── Long documents: kept whole on the device, searched locally ──
+// The document is cut into overlapping passages and the ones that answer the question are sent, in reading order,
+// with their approximate page. Nothing is guessed on the server and nothing is silently dropped: Noria is told it
+// is looking at selected passages, so she says so when a question needs every page (for example an exact count).
+const STOP = new Set('the and for are but not you all any can had her was one our out has have this that with from they been were what when where which who how why does did will would could should about into than then them these those there their your yours its also just more most some such only over very much many may might shall of to in on at by an as is it be or if so we he she me my do no'.split(' '))
+function docTokens(t) {
+  const out = [], m = String(t).toLowerCase().match(/[\p{L}\p{N}][\p{L}\p{N}\-_.']*/gu) || []
+  for (let w of m) {
+    w = w.replace(/^[-_.']+|[-_.']+$/g, ''); if (!w) continue
+    if (!STOP.has(w) && (w.length > 2 || /\d/.test(w))) out.push(w)
+    if (/[-_.']/.test(w)) for (const x of w.split(/[-_.']+/)) if (x && !STOP.has(x) && (x.length > 2 || /\d/.test(x))) out.push(x)
+  }
+  return out
+}
+function docChunks(text) {
+  const size = 1400, over = 200, chunks = []
+  let i = 0
+  while (i < text.length) {
+    let end = Math.min(text.length, i + size)
+    if (end < text.length) { const cut = Math.max(text.lastIndexOf('\n', end), text.lastIndexOf('. ', end)); if (cut > i + size * 0.6) end = cut + 1 }
+    chunks.push({ at: i, text: text.slice(i, end).trim() })
+    if (end >= text.length) break
+    i = Math.max(end - over, i + 1)
+  }
+  return chunks.filter((c) => c.text)
+}
+const OVERVIEW_RX = /\b(summari[sz]e|summary|overview|outline|main points?|key points?|key takeaways?|table of contents|structure|what is (this|it) about|what does (this|it) say|gist|tl;?dr|whole (document|thing|file)|entire (document|file|paper|contract|report))\b/i
+function docExcerpts(text, q, budget) {
+  const chunks = docChunks(text), N = chunks.length, pageOf = (c) => Math.floor(c.at / CHARS_PER_PAGE) + 1
+  const per = Math.max(2, Math.floor(budget / 1500)) // how many passages fit
+  let picked
+  if (OVERVIEW_RX.test(q) || !docTokens(q).length) { // a question about the whole thing: spread evenly across every page
+    const k = Math.min(N, Math.max(per, Math.floor(budget / 700))), idx = new Set([0])
+    for (let j = 0; j < k; j++) idx.add(Math.min(N - 1, Math.round((j * (N - 1)) / Math.max(1, k - 1))))
+    picked = [...idx].sort((a, b) => a - b).map((i) => ({ i, cut: Math.floor(budget / idx.size) }))
+  } else { // a question about something specific: the passages that mention it
+    const qt = [...new Set(docTokens(q))], df = {}, tok = chunks.map((c) => docTokens(c.text))
+    tok.forEach((ts) => { for (const t of new Set(ts)) df[t] = (df[t] || 0) + 1 })
+    const avg = tok.reduce((n, t) => n + t.length, 0) / N || 1
+    const sc = tok.map((ts, i) => {
+      const tf = {}; for (const t of ts) tf[t] = (tf[t] || 0) + 1
+      let s = 0
+      for (const t of qt) { if (!tf[t]) continue; const idf = Math.log(1 + (N - df[t] + 0.5) / (df[t] + 0.5)); s += idf * (tf[t] * 2.2) / (tf[t] + 1.2 * (0.25 + 0.75 * ts.length / avg)) }
+      return { i, s }
+    })
+    picked = sc.filter((x) => x.s > 0).sort((a, b) => b.s - a.s).slice(0, per - 1).map((x) => ({ i: x.i, cut: 1500 }))
+    if (!picked.some((x) => x.i === 0)) picked.push({ i: 0, cut: 900 }) // the opening always frames the rest
+    picked.sort((a, b) => a.i - b.i)
+  }
+  const body = picked.map(({ i, cut }) => '[≈ page ' + pageOf(chunks[i]) + ']\n' + chunks[i].text.slice(0, cut)).join('\n…\n')
+  return { body, count: picked.length, total: N }
+}
+// The text of the attached files as sent to the brain, each within its share of the reading allowance.
+function attachmentContext(atts, q) {
+  let budget = isPro ? DOC_PRO_TOTAL : Infinity
+  const full = atts.reduce((n, a) => n + Math.min((a.text || '').length, docCap()), 0)
+  return atts.map((a) => {
+    const t = a.text.slice(0, Math.max(0, Math.min(docCap(), budget))); budget -= t.length
+    if (isPro && !a.preview && full > DOC_SEND && t.length > DOC_SEND / atts.length) {
+      const share = Math.floor(DOC_SEND / atts.length), ex = docExcerpts(t, q || '', share)
+      return `[File: ${a.name} — a long document (about ${pagesOf(t.length)} pages). To stay fast, ${ex.count} passages that best match the question are shown below, in reading order with their approximate page. You are looking at selected passages, not every page: if the question needs something you cannot see here (an exact count, a total, or a passage that is not shown), say so plainly instead of guessing, and invite the user to ask about a specific section.]
+${ex.body}`
+    }
+    return `[${a.preview ? 'Image' : 'File'}: ${a.name}]\n${t}`
+  }).join('\n\n')
+}
 function renderTray() {
   attachTray.hidden = attachments.length === 0
   attachTray.innerHTML = ''
   attachments.forEach((a) => {
     const chip = document.createElement('div'); chip.className = 'chip' + (a.loading ? ' loading' : '')
     chip.innerHTML = (a.loading ? '<span class="spin"></span>' : paperclip()) +
-      '<span class="nm">' + esc(a.name) + '</span><span class="sz">' + (a.loading ? 'reading…' : humanSize(a.size)) + '</span>'
+      '<span class="nm">' + esc(a.name) + '</span><span class="sz">' + (a.loading ? 'reading…' : humanSize(a.size) + readNote(a)) + '</span>'
     if (!a.loading) {
       const x = document.createElement('button'); x.className = 'x'; x.type = 'button'; x.setAttribute('aria-label', 'Remove')
       x.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>'
@@ -598,8 +792,10 @@ async function handleFiles(files) {
     const a = { id: Math.random().toString(36).slice(2), name: file.name || 'file', size: file.size, text: '', loading: true, preview: (file.type || '').startsWith('image/') ? URL.createObjectURL(file) : null }
     attachments.push(a); renderTray(); syncSend()
     try {
-      a.text = (await extractText(file)) || ''
+      const info = {}
+      a.text = (await extractText(file, info)) || ''; a.info = info
       if (!a.text.trim()) { a.text = ''; note('I couldn’t find readable text in “' + file.name + '”.') }
+      else if (!a.preview) readNotice(a)
     } catch (e) {
       note('I couldn’t read “' + file.name + '”. ' + (/tesseract|image/i.test(e.message) ? 'Photo reading is unavailable right now.' : /pdf/i.test(e.message) ? 'PDF reading is unavailable right now.' : ''))
       attachments = attachments.filter((z) => z.id !== a.id)
@@ -631,17 +827,23 @@ async function respond(q, opts = {}) {
   input.value = ''; grow()
 
   // Image generation branch — "draw/create an image of…" (like Gemini).
-  if (!atts.length && isImageRequest(q)) { await generateImage(cleanImagePrompt(q)); finish(); return }
+  if (!atts.length && isImageRequest(q)) {
+    if (!isPro) { // creating images is a Noria Pro feature
+      const el = addNoria(); const note = 'Creating images is part of Noria Pro. You can unlock it with an early-access code — I’m happy to help with anything else in the meantime.'
+      el.textContent = note; convoRecord({ role: 'noria', text: note }); finish(); openPro('Creating images is part of Noria Pro.'); return
+    }
+    await generateImage(cleanImagePrompt(q)); finish(); return
+  }
 
   // Attached file/image content — goes into the SYSTEM context (engine caps the
   // query at 2000 chars), so the user's question stays short.
-  const attBlock = atts.length ? '\n\n[ATTACHED BY THE USER — use this to answer their question]\n' + atts.map((a) => `[${a.preview ? 'Image' : 'File'}: ${a.name}]\n${a.text.slice(0, 6000)}`).join('\n\n') : ''
+  const attBlock = atts.length ? '\n\n[ATTACHED BY THE USER — use this to answer their question]\n' + attachmentContext(atts, q) : ''
 
   // Live web grounding (like Gemini). Either the heuristic fires for current/world
   // questions, or a caller supplies an explicit search query (opts.web) — used by
   // guided documents to stay current (deprecated tools, live pricing, local data).
   let webBlock = '', sources = []
-  const webQuery = (opts.web && String(opts.web).trim()) || ((needsWeb(q) && atts.length === 0 && !opts.noWeb) ? q : '')
+  const webQuery = (opts.web && String(opts.web).trim()) || ((needsWeb(q) && atts.length === 0 && !opts.noWeb && !opts.voice) ? q : '') // spoken turns let the server ground the answer (no extra round trip here)
   if (webQuery && atts.length === 0) {
     status.innerHTML = DOTS + ' Searching the web'
     try {
@@ -662,7 +864,7 @@ async function respond(q, opts = {}) {
   // Recall relevant on-device memories (non-blocking; silently skips until the
   // embedding model has loaded in the background).
   let memBlock = ''
-  try { const mems = await SMem.search(q); if (mems.length) memBlock = '\n\n[MEMORY — things the user told you in earlier conversations (private, on this device). Treat these as true and use them when relevant to answer; do not deny knowing something that is here. Do not list them back verbatim.]\n' + mems.map((m) => '- ' + m.text).join('\n') } catch (_) {}
+  try { const mems = await (opts.voice ? Promise.race([SMem.search(q), new Promise((r) => setTimeout(() => r([]), 400))]) : SMem.search(q)); if (mems.length) memBlock = '\n\n[MEMORY — things the user told you in earlier conversations (private, on this device). Treat these as true and use them when relevant to answer; do not deny knowing something that is here. Do not list them back verbatim.]\n' + mems.map((m) => '- ' + m.text).join('\n') } catch (_) {}
 
   const plan = presence.beginTurn({ userText: q }) // emotional state, delivery, memory, check-in
   stop.style.display = 'inline-flex'
@@ -683,48 +885,73 @@ async function respond(q, opts = {}) {
 
     started = true; clearTimers()
     if (cancelled) { finish(); return }
-    await new Promise((r) => setTimeout(r, plan.delivery.firstBeatDelayMs || 200))
+    if (!opts.voice) await new Promise((r) => setTimeout(r, plan.delivery.firstBeatDelayMs || 200)) // a pause that suits typing, not a spoken back-and-forth
     const el = addNoria()
 
     // Stream the visible answer word-by-word (like Gemini). Plain-markdown output so
     // tokens can appear live; renderMd formats it fully once the stream completes.
     let acc = '', raf = 0
-    const paint = () => { raf = 0; el.textContent = acc; scrollDown() }
+    const paint = () => { raf = 0; if (looksMeta(acc)) return; el.textContent = acc; scrollDown() }
+    // With the voice on, she starts SPEAKING as the answer is written (first finished sentence), not after it.
+    let sp = null
     curStream = new AbortController()
     try {
       await brain.ask(q, {
-        system: noriaSystem({ json: false }) + systemCommon,
+        system: noriaSystem({ json: false, topic: q + ' ' + (brain.history || []).slice(-4).map((m) => m.content).join(' ') }) + systemCommon,
         signal: curStream.signal,
         // If the client already grounded (webBlock present), skip a server search;
         // otherwise let the router decide — a second layer so live facts aren't missed.
         ground: webBlock ? false : 'auto',
-        onToken: (d) => { if (cancelled) return; acc += d; if (!raf) raf = requestAnimationFrame(paint) },
+        voice: !!opts.voice, // spoken turns: the brain answers briefly and with less deliberation
+        onToken: (d) => {
+          if (cancelled) return
+          acc += d; if (!raf) raf = requestAnimationFrame(paint)
+          if (voiceOn && !opts.doc && !looksMeta(acc)) { if (!sp) sp = newSpeechStream(opts.voice ? () => { if (vmCtl) vmCtl.mark('speaking') } : null); sp.feed(d) }
+        },
       })
     } catch (streamErr) {
       // A stream failure must never lose the answer: fall back to the structured path.
       if (!acc.trim() && !cancelled) {
-        try { const r = await brain.ask2(q, { system: noriaSystem() + systemCommon }); acc = r.display || r.spoken || '' } catch (_) {}
+        try { const r = await brain.ask2(q, { system: noriaSystem({ json: false, topic: q + ' ' + (brain.history || []).slice(-4).map((m) => m.content).join(' ') }) + systemCommon }); acc = r.display || r.spoken || '' } catch (_) {}
       }
     } finally { curStream = null }
+    // An answer that has lost its thread is never shown: ask again through the guarded path.
+    if (acc && !cancelled && brain.isRambling && brain.isRambling(acc)) {
+      acc = ''; try { const r = await brain.ask2(q, { system: noriaSystem({ json: false, topic: q + ' ' + (brain.history || []).slice(-4).map((m) => m.content).join(' ') }) + systemCommon }); acc = r.display || '' } catch (_) {}
+    }
     if (raf) { cancelAnimationFrame(raf); raf = 0 }
     if (cancelled) { if (!acc.trim()) el.closest('.msg').remove(); else renderMd(el, acc); finish(); return }
 
     // Any document — guide chip or typed in chat — must come out finished: strip any
     // placeholder scaffolding from a document-like answer.
-    let display = acc || "I'm here."
+    let display = cleanMeta(acc)
+    // Nothing came back: a busy moment usually clears in seconds, so she quietly tries once more, and only then says so.
+    if (!display.trim() && !cancelled && q.length < 20000) {
+      await new Promise((r) => setTimeout(r, 2500))
+      try { const r = await brain.ask2(q, { system: noriaSystem({ json: false, topic: q + ' ' + (brain.history || []).slice(-4).map((m) => m.content).join(' ') }) + systemCommon }); acc = r.display || ''; display = cleanMeta(acc); if (display && brain.isRambling && brain.isRambling(display)) display = '' } catch (_) {}
+    }
+    if (!display.trim()) {
+      // Keep the thread: the next message ("why?", "try again") must know what was being asked.
+      try { brain.history.push({ role: 'user', content: q }, { role: 'assistant', content: '(I could not answer that one — a technical hiccup on my side.)' }) } catch (_) {}
+      const big = q.length > 20000
+      display = big
+        ? "I couldn't finish reading that just now: it is a lot to take in at once and I'm busy. Please try again in a minute, or ask about one section at a time."
+        : "I couldn't answer that just now. Please try again in a moment."
+    }
     const isDocLike = display && (/^#{1,3}\s/m.test(display) || /^\s*\|.*\|\s*$/m.test(display) || /\[[^\]\n]{1,80}\]|\((?:insert|add|list|your |e\.g\.)/i.test(display))
     const dsp = ((opts.doc || isDocLike) && display) ? cleanDocText(display) : display
     renderMd(el, dsp)
     // If the user asked to see a chart and Noria answered with a data table,
     // draw the chart from that table (deterministic — no reliance on the model).
     if (/\b(chart|graph|plot|bar chart|pie chart|line chart|visuali[sz]e)\b/i.test(q)) maybeChartFromTable(el, q)
+    if (sources.length) addSources(el.closest('.msg'), sources) // sources read first (the trust signal), then the actions
     addFeedback(el.closest('.msg'), q, dsp)
-    if (sources.length) addSources(el.closest('.msg'), sources)
     convoRecord({ role: 'noria', text: dsp, sources: sources.map((s) => ({ url: s.url })) })
     if (!opts.doc && !/\?\s*$/.test(shown)) SMem.add(shown) // remember the user's statements (not questions); device-only, fire-and-forget
     const sug = presence.suggestMemory(q)
     if (sug) suggestMemory(sug.value)
-    if (voiceOn && dsp) speechDone = speakNeural(dsp) // speakNeural strips markdown/symbols internally
+    if (sp && voiceOn) speechDone = sp.end() // she has been speaking as it streamed; wait for the last sentence
+    else if (voiceOn && dsp) speechDone = speakNeural(dsp) // speakNeural strips markdown/symbols internally
     savePresence()
   } catch (e) {
     started = true; clearTimers()
@@ -769,7 +996,7 @@ async function generateImage(prompt) {
   status.innerHTML = DOTS + ' Creating your image'
   const el = addNoria()
   try {
-    const r = await fetch(NORIA_AI + '/image?prompt=' + encodeURIComponent(prompt))
+    const r = await fetch(NORIA_AI + '/image?prompt=' + encodeURIComponent(prompt) + proParam())
     if (!r.ok) throw new Error('image gen failed (' + r.status + ')')
     const blob = await r.blob()
     if (cancelled) { el.closest('.msg').remove(); return }
@@ -812,6 +1039,7 @@ function needsWeb(q) {
   if (/\b(what'?s (new|happening|going on|the latest)|any news|tell me (the latest|about the (latest|newest|current))|how is .+ (doing|going|performing)|what did .+ (say|announce|release|launch))\b/.test(s)) return true
   return false
 }
+const GLOBE_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.6 2.7 3.9 5.7 3.9 9s-1.3 6.3-3.9 9c-2.6-2.7-3.9-5.7-3.9-9S9.4 5.7 12 3z"/></svg>'
 function addSources(msg, sources) {
   if (!msg) return
   const seen = new Set(), items = []
@@ -827,7 +1055,14 @@ function addSources(msg, sources) {
   const row = document.createElement('div'); row.className = 'src-row'
   items.forEach(({ host, url }) => {
     const a = document.createElement('a'); a.className = 'src'; a.href = url; a.target = '_blank'; a.rel = 'noopener noreferrer'
-    a.innerHTML = '<img src="https://icons.duckduckgo.com/ip3/' + esc(host) + '.ico" alt="" onerror="this.remove()"><span>' + esc(host) + '</span>'
+    // A neutral globe shows first; the site's own icon replaces it only if our server finds a real one
+    // (unknown sites answer 404, so the globe simply stays).
+    const ico = document.createElement('span'); ico.className = 'src-ico'; ico.innerHTML = GLOBE_SVG
+    const probe = new Image(); probe.alt = ''
+    probe.onload = () => { ico.innerHTML = ''; ico.appendChild(probe) }
+    probe.src = '/favicon?host=' + encodeURIComponent(host)
+    const label = document.createElement('span'); label.textContent = host
+    a.append(ico, label)
     row.appendChild(a)
   })
   wrap.appendChild(row); msg.querySelector('.body').appendChild(wrap)
@@ -869,7 +1104,7 @@ function addFeedback(msg, q, a) {
   const docText = String(a || '')
   if (/^#{1,3}\s/m.test(docText) || /^\s*\|.*\|\s*$/m.test(docText)) {
     const OPEN = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-4M14 3h7v7M21 3l-9 9"/></svg>'
-    const op = document.createElement('button'); op.type = 'button'; op.className = 'pdfbtn openbtn'; op.title = 'Open in document view'; op.setAttribute('aria-label', 'Open document'); op.innerHTML = OPEN + '<span>Open</span>'
+    const op = document.createElement('button'); op.type = 'button'; op.className = 'pdfbtn openbtn'; op.title = 'Open in document view'; op.setAttribute('aria-label', 'Open as document'); op.innerHTML = OPEN + '<span>Open<span class="more">&nbsp;as document</span></span>'
     op.addEventListener('click', () => openCanvas(deriveTitle(q, docText), docText))
     bar.append(op)
   }
@@ -1001,10 +1236,12 @@ function suggestMemory(text) {
   if (document.getElementById('sugg') || !memCard) return
   const c = document.createElement('div'); c.className = 'card memsug'; c.id = 'sugg'
   c.innerHTML = '<div class="lab">✦ Noria noticed</div><p style="margin:0;font-size:.9rem">' + esc(text) + '</p><div class="acts"><button class="save">Remember this</button><button class="no">Not now</button></div>'
-  memCard.parentNode.insertBefore(c, memCard)
+  const wrap = memCard.closest('.memwrap') || memCard // the suggestion sits above the whole Memory & privacy card
+  wrap.parentNode.insertBefore(c, wrap)
   c.querySelector('.save').addEventListener('click', () => {
     applyMemoryUpdate(mem, { facts: [text] })
     const it = document.createElement('div'); it.className = 'memitem'; it.innerHTML = '<span class="k">•</span> ' + esc(text)
+    const none = memCard.querySelector('.memempty'); if (none) none.remove() // the "nothing remembered yet" line goes once there is something
     memCard.appendChild(it); c.remove()
   })
   c.querySelector('.no').addEventListener('click', () => c.remove())
@@ -1072,8 +1309,8 @@ function openConversation(id) {
         brain.history.push({ role: 'assistant', content: '[generated an image: ' + (m.cap || '') + ']' })
       } else {
         renderMd(el, m.text)
-        addFeedback(el.closest('.msg'), lastUserText, m.text) // restore Copy / PDF / Open on saved messages
         if (m.sources && m.sources.length) addSources(el.closest('.msg'), m.sources)
+        addFeedback(el.closest('.msg'), lastUserText, m.text) // restore Copy / PDF / Open on saved messages
         brain.history.push({ role: 'assistant', content: m.text })
       }
     }
@@ -1128,9 +1365,20 @@ $('moreNew') && $('moreNew').addEventListener('click', () => { setMore(false); n
 document.addEventListener('click', (e) => { if (moreMenu && moreMenu.classList.contains('open') && !moreMenu.contains(e.target)) setMore(false) })
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') setMore(false) })
 $('forget') && $('forget').addEventListener('click', () => {
-  forgetMemory(); if (memCard) memCard.innerHTML = '<div class="memitem" style="color:var(--muted)">Memory cleared for this device.</div>'
+  forgetMemory(); if (memCard) memCard.innerHTML = '<div class="memitem memempty">Memory cleared for this device.</div>'
   const s = document.getElementById('sugg'); if (s) s.remove()
 })
+
+// ── Side panel: hide / show, remembered on this device ─────────────────────────
+const ctxShellEl = $('shell'), ctxShowBtn = $('ctxShow')
+function setCtx(open) {
+  if (ctxShellEl) ctxShellEl.classList.toggle('ctx-off', !open)
+  if (ctxShowBtn) ctxShowBtn.hidden = open
+  try { localStorage.setItem('noria.ctx', open ? 'open' : 'closed') } catch {}
+}
+$('ctxHide') && $('ctxHide').addEventListener('click', () => setCtx(false))
+ctxShowBtn && ctxShowBtn.addEventListener('click', () => setCtx(true))
+try { if (localStorage.getItem('noria.ctx') === 'closed') setCtx(false) } catch {}
 
 // ── Mobile drawer ─────────────────────────────────────────────────────────────
 const side = $('side'), backdrop = $('backdrop')
@@ -1147,8 +1395,8 @@ try { isPro = !!localStorage.getItem('noria.pro') } catch {}
 const proBtn = $('proBtn'), proModal = $('proModal'), proMsg = $('proMsg')
 let billing = 'monthly'
 const PRICES = {
-  monthly: { amt: '$35', per: '/ month', note: 'Billed monthly. Cancel anytime.' },
-  annual: { amt: '$28', per: '/ month', note: 'Billed $336 per year — save 20%. Cancel anytime.' },
+  monthly: { amt: '$35', per: '/ month', note: 'Planned price. No payment is taken yet.' },
+  annual: { amt: '$28', per: '/ month', note: 'Planned price: $336 a year, save 20%. No payment is taken yet.' },
 }
 function renderProBadge() { if (!proBtn) return; proBtn.textContent = isPro ? '✦ Pro' : 'Upgrade'; proBtn.classList.toggle('is-pro', isPro); proBtn.title = isPro ? 'Noria Pro active' : 'Upgrade to Noria Pro' }
 function setBilling(p) {
@@ -1161,9 +1409,21 @@ function setBilling(p) {
   if ($('proNote')) $('proNote').textContent = PRICES[p].note
 }
 function closeAllModals() { ['proModal', 'guideModal'].forEach((id) => { const m = $(id); if (m) m.hidden = true }) }
-function openPro() { closeAllModals(); if (proModal) { proModal.hidden = false; if (proMsg) { proMsg.textContent = ''; proMsg.className = 'pm-msg' } } }
+function openPro(reason) { closeAllModals(); if (proModal) { proModal.hidden = false; if (proMsg) { proMsg.textContent = reason || ''; proMsg.className = 'pm-msg' } } }
 function closePro() { if (proModal) proModal.hidden = true }
-proBtn && proBtn.addEventListener('click', openPro)
+proBtn && proBtn.addEventListener('click', () => openPro())
+// The visitor's Pro access code, sent with Pro-only requests so the server can verify it (image creation, photo understanding).
+// (Sent as a query parameter, not a header: a custom header forces the browser to ask the server for permission first,
+// which older servers refuse — a query parameter works with every version.)
+function proParam() { let c = ''; try { c = localStorage.getItem('noria.pro') || '' } catch {} return c ? '&pro=' + encodeURIComponent(c) : '' }
+// See Noria (her live figure) and the 3D avatar are Noria Pro features.
+document.querySelectorAll('.seebtn, a[href="/figure"], a[href="/avatar"]').forEach((a) => a.addEventListener('click', (e) => {
+  if (isPro) return
+  e.preventDefault(); if (typeof setMore === 'function') setMore(false)
+  openPro(a.getAttribute('href') === '/avatar' ? 'The 3D avatar is part of Noria Pro.' : 'See Noria is part of Noria Pro.')
+}))
+// Sent here from the figure / 3D page by a visitor who isn't on Pro yet.
+try { const want = new URLSearchParams(location.search).get('pro'); if (want && !isPro) { openPro(want === 'avatar' ? 'The 3D avatar is part of Noria Pro.' : 'See Noria is part of Noria Pro.'); history.replaceState(null, '', location.pathname) } } catch {}
 $('proClose') && $('proClose').addEventListener('click', closePro)
 proModal && proModal.addEventListener('click', (e) => { if (e.target === proModal) closePro() })
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { closeAllModals(); if (canvasEl && !canvasEl.hidden) closeCanvas() } })
@@ -1171,9 +1431,9 @@ $('segMonthly') && $('segMonthly').addEventListener('click', () => setBilling('m
 $('segAnnual') && $('segAnnual').addEventListener('click', () => setBilling('annual'))
 $('proSubscribe') && $('proSubscribe').addEventListener('click', () => startCheckout(billing))
 function startCheckout(period) {
-  // In-app Paddle checkout is wired here once the Paddle keys are provided — payment
-  // and Pro happen entirely inside Noria, never on an external site.
-  if (proMsg) { proMsg.textContent = 'Secure in-app checkout is coming — for now, use an access code below to unlock Pro.'; proMsg.className = 'pm-msg' }
+  // Payments are not switched on yet (in-app checkout comes later), so this is honest early access:
+  // people ask by email, receive a code, and enter it below. Nothing is charged.
+  if (proMsg) { proMsg.innerHTML = 'Early access is by invitation while payments are being finished. Email <a href="mailto:pro@noria.africa?subject=Noria%20Pro%20early%20access">pro@noria.africa</a> for a code, then enter it below.'; proMsg.className = 'pm-msg' }
   const box = $('proCodeBox'); if (box) box.hidden = false
 }
 // Access code unlock (owner + early users). Verified by the worker (HMAC — not AI,

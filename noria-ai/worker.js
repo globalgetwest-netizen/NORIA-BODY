@@ -7,7 +7,7 @@
 const CORS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'POST, GET, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type',
+  'Access-Control-Allow-Headers': 'Content-Type, X-Noria-Pro',
 }
 
 export default {
@@ -15,6 +15,12 @@ export default {
     if (request.method === 'OPTIONS') return new Response(null, { headers: CORS })
     const url = new URL(request.url)
     try {
+      // Noria Pro features (image creation, photo understanding) cost real compute, so they need a valid Pro
+      // access code, checked here on the server — not only hidden in the app.
+      if ((url.pathname === '/vision' && request.method === 'POST') || (url.pathname === '/image' && (request.method === 'POST' || request.method === 'GET'))) {
+        const code = (url.searchParams.get('pro') || request.headers.get('X-Noria-Pro') || '').trim().toUpperCase()
+        if (!(await validCode(code, env.PRO_KEY))) return json({ error: 'Noria Pro required' }, 402)
+      }
       // See a photo: raw image bytes in the body, question in ?prompt=
       if (url.pathname === '/vision' && request.method === 'POST') {
         const prompt = url.searchParams.get('prompt') ||
@@ -31,8 +37,54 @@ export default {
         let prompt = url.searchParams.get('prompt') || ''
         if (!prompt && request.method === 'POST') { try { prompt = (await request.json()).prompt || '' } catch {} }
         if (!prompt) return json({ error: 'no prompt' }, 400)
+        // Image models are tried in order; the list is a setting (IMAGE_MODELS, comma-separated Cloudflare model ids), so a
+        // stronger model can be swapped in later without touching this code. If none works or returns a usable picture, the
+        // previous Stable Diffusion XL path below runs exactly as before, so images can only stay the same or get better.
+        // A fixed style line (light, lens, detail) is added for these models only; it costs no AI tokens.
+        // Model TEST option (Pro only, like the rest of this route): ?model=<@cf/...>&steps=&width=&height= runs exactly that
+        // one model and reports its real error if it cannot, so candidates can be compared side by side. No fallback here.
+        const testModel = url.searchParams.get('model')
+        if (testModel) {
+          if (!/^@cf\/[a-z0-9._\/-]+$/i.test(testModel)) return json({ error: 'bad model id' }, 400)
+          const params = { prompt: prompt.trim().slice(0, 1900) }
+          for (const k of ['steps', 'width', 'height']) { const v = Number(url.searchParams.get(k)); if (v) params[k] = v }
+          try {
+            let input = params
+            if (/flux-2/i.test(testModel)) { // the FLUX.2 models take a multipart form
+              const form = new FormData()
+              form.append('prompt', params.prompt); form.append('width', String(params.width || 1024)); form.append('height', String(params.height || 1024))
+              if (params.steps) form.append('steps', String(params.steps))
+              const fr = new Response(form)
+              input = { multipart: { body: fr.body, contentType: fr.headers.get('content-type') } }
+            }
+            const out = await Promise.race([env.AI.run(testModel, input), new Promise((_, rej) => setTimeout(() => rej(new Error('timeout after 60s')), 60000))])
+            let bytes = null, type = 'image/jpeg'
+            if (out && typeof out.image === 'string' && out.image.length > 1000) { const bin = atob(out.image); bytes = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i) }
+            else if (out instanceof ReadableStream || out instanceof ArrayBuffer || out instanceof Uint8Array) { bytes = out; type = 'image/png' }
+            if (!bytes) return json({ model: testModel, error: 'no image in response', keys: out && typeof out === 'object' ? Object.keys(out).slice(0, 8) : typeof out }, 502)
+            return new Response(bytes, { headers: { ...CORS, 'Content-Type': type, 'Cache-Control': 'no-store', 'X-Noria-Image-Model': testModel.split('/').pop() } })
+          } catch (e) { return json({ model: testModel, error: String((e && e.message) || e).slice(0, 300) }, 502) }
+        }
+        const models = String(env.IMAGE_MODELS || '@cf/black-forest-labs/flux-1-schnell').split(',').map((m) => m.trim()).filter(Boolean)
+        const styled = (prompt.trim() + '. Natural lighting, sharp focus, fine detail, realistic textures, professional photography quality.').slice(0, 1900)
+        for (const model of models) {
+          try {
+            const out = await Promise.race([
+              env.AI.run(model, imageInput(model, styled)),
+              new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 30000)),
+            ])
+            let bytes = null, type = 'image/jpeg'
+            if (out && typeof out.image === 'string' && out.image.length > 1000) {
+              const bin = atob(out.image); bytes = new Uint8Array(bin.length)
+              for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
+            } else if (out instanceof ReadableStream || out instanceof ArrayBuffer || out instanceof Uint8Array) {
+              bytes = out; type = 'image/png'
+            }
+            if (bytes) return new Response(bytes, { headers: { ...CORS, 'Content-Type': type, 'Cache-Control': 'no-store', 'X-Noria-Image-Model': model.split('/').pop() } })
+          } catch (_) { /* try the next model, then Stable Diffusion XL */ }
+        }
         const img = await env.AI.run('@cf/stabilityai/stable-diffusion-xl-base-1.0', { prompt })
-        return new Response(img, { headers: { ...CORS, 'Content-Type': 'image/png', 'Cache-Control': 'no-store' } })
+        return new Response(img, { headers: { ...CORS, 'Content-Type': 'image/png', 'Cache-Control': 'no-store', 'X-Noria-Image-Model': 'sdxl' } })
       }
       // Natural neural voice — Deepgram Aura (reliable), MeloTTS fallback.
       if (url.pathname === '/tts' && (request.method === 'POST' || request.method === 'GET')) {
@@ -182,6 +234,17 @@ function bytesToBase64(buf) {
   return btoa(s)
 }
 
+// Input for an image model: most take { prompt, steps }; the FLUX.2 family takes a multipart form (1024 x 1024).
+function imageInput(model, prompt) {
+  if (/flux-2/i.test(model)) {
+    const form = new FormData()
+    form.append('prompt', prompt); form.append('width', '1024'); form.append('height', '1024')
+    const fr = new Response(form)
+    return { multipart: { body: fr.body, contentType: fr.headers.get('content-type') } }
+  }
+  if (/leonardo/i.test(model)) return { prompt, width: 1024, height: 1024 }
+  return { prompt, steps: 8 }
+}
 function json(obj, status = 200) {
   return new Response(JSON.stringify(obj), { status, headers: { ...CORS, 'Content-Type': 'application/json' } })
 }

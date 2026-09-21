@@ -2,6 +2,10 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
+<script>
+  // See Noria / the 3D avatar are Noria Pro features: visitors without a Pro code go back to the chat with the upgrade card.
+  (function () { var ok = false; try { ok = !!localStorage.getItem('noria.pro') } catch (e) {} if (!ok) location.replace('/?pro=1') })()
+</script>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>Noria</title>
   <link rel="manifest" href="/manifest.json" />

@@ -315,7 +315,9 @@ function buildMessages(body) {
   const messages = [];
   if (body.system) messages.push({ role: "system", content: String(body.system) });
   const history = Array.isArray(body.history) ? body.history : [];
-  for (const h of history) if (h && h.content) messages.push({ role: h.role === "assistant" ? "assistant" : "user", content: String(h.content) });
+  // Only the live thread travels, and long earlier messages are shortened: what was said a few turns ago is context,
+  // not something to re-send in full on every turn (this is most of the cost of a long conversation).
+  for (const h of history.slice(-8)) if (h && h.content) { const c = String(h.content); messages.push({ role: h.role === "assistant" ? "assistant" : "user", content: c.length > 700 ? c.slice(0, 700) + "…" : c }); }
   if (body.query) messages.push({ role: "user", content: String(body.query) });
   return messages;
 }
@@ -429,6 +431,8 @@ async function jget(url, ms) {
   try { const r = await fetch(url, { signal: c.signal, headers: { "User-Agent": UA } }); return r.ok ? await r.json() : null; }
   catch (_) { return null; } finally { clearTimeout(t); }
 }
+// A live feed that is only slow for a moment gets one more, longer try before Noria says it is unavailable.
+const jretry = async (url) => (await jget(url, 3500)) || (await jget(url, 6000));
 const unavailable = (what) => "\n\nLIVE " + what.toUpperCase() + " DATA UNAVAILABLE — the live data service did not answer just now. Do NOT guess or use remembered numbers: tell the user plainly that you couldn't fetch live " + what + " right now and suggest trying again in a moment. Never mention this note.";
 const fmtNum = (n, d) => Number(n).toLocaleString("en-US", { maximumFractionDigits: d == null ? 2 : d });
 
@@ -458,10 +462,10 @@ async function weatherBlock(q, userTz) {
   // Falling back to the visitor's own city is only right when the question is plainly about the weather.
   if (place && !/\b(in|at|for|near|around)\s+/i.test(q) && !/\b(weather|forecast|temperature|how (?:hot|cold|warm)|raining|rain)\b/i.test(q)) place = "";
   if (!place) return "";
-  const g = await jget("https://geocoding-api.open-meteo.com/v1/search?count=1&language=en&format=json&name=" + encodeURIComponent(place));
+  const g = await jretry("https://geocoding-api.open-meteo.com/v1/search?count=1&language=en&format=json&name=" + encodeURIComponent(place));
   const loc = g && g.results && g.results[0];
   if (!loc) return g === null ? unavailable("weather") : "";
-  const f = await jget("https://api.open-meteo.com/v1/forecast?latitude=" + loc.latitude + "&longitude=" + loc.longitude +
+  const f = await jretry("https://api.open-meteo.com/v1/forecast?latitude=" + loc.latitude + "&longitude=" + loc.longitude +
     "&current=temperature_2m,apparent_temperature,relative_humidity_2m,precipitation,weather_code,wind_speed_10m&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max&forecast_days=3&timezone=auto");
   if (!f || !f.current) return unavailable("weather");
   const c = f.current, d = f.daily || {}, name = loc.name + (loc.country ? ", " + loc.country : "");
@@ -639,6 +643,124 @@ function addSystem(messages, block) {
   else out.unshift({ role: "system", content: block.trim() });
   return out;
 }
+// ── VERIFIED REFERENCE LIBRARY — fixed lists are quoted from here, never recalled from a model's memory ──────────
+// A model asked for a long fixed list (the 99 Names, the books of the Bible, the countries of Africa) will slip:
+// repeat an entry, drop one, invent one. So the well-known closed lists live here, checked entry by entry, and
+// a plain request for one is answered straight from this data (instant, no model, no quota, always complete).
+// For any other question that touches a list ("how many…", "the 40th name…"), the list is placed in front of the
+// model as ground truth. Each list states its own count, and a self-check at load time refuses a list that is short.
+const REF_NAMES99 = [
+  ["Ar-Rahman", "The Most Gracious"], ["Ar-Rahim", "The Most Merciful"], ["Al-Malik", "The King"], ["Al-Quddus", "The Most Holy"],
+  ["As-Salam", "The Source of Peace"], ["Al-Mu'min", "The Granter of Security"], ["Al-Muhaymin", "The Guardian"], ["Al-'Aziz", "The Almighty"],
+  ["Al-Jabbar", "The Compeller"], ["Al-Mutakabbir", "The Supreme"], ["Al-Khaliq", "The Creator"], ["Al-Bari'", "The Maker"],
+  ["Al-Musawwir", "The Fashioner"], ["Al-Ghaffar", "The Constant Forgiver"], ["Al-Qahhar", "The All-Subduer"], ["Al-Wahhab", "The Bestower"],
+  ["Ar-Razzaq", "The Provider"], ["Al-Fattah", "The Opener"], ["Al-'Alim", "The All-Knowing"], ["Al-Qabid", "The Withholder"],
+  ["Al-Basit", "The Extender"], ["Al-Khafid", "The Reducer"], ["Ar-Rafi'", "The Exalter"], ["Al-Mu'izz", "The Honourer"],
+  ["Al-Mudhill", "The Humiliator"], ["As-Sami'", "The All-Hearing"], ["Al-Basir", "The All-Seeing"], ["Al-Hakam", "The Judge"],
+  ["Al-'Adl", "The Utterly Just"], ["Al-Latif", "The Subtle"], ["Al-Khabir", "The All-Aware"], ["Al-Halim", "The Forbearing"],
+  ["Al-'Azim", "The Magnificent"], ["Al-Ghafur", "The All-Forgiving"], ["Ash-Shakur", "The Appreciative"], ["Al-'Ali", "The Most High"],
+  ["Al-Kabir", "The Most Great"], ["Al-Hafiz", "The Preserver"], ["Al-Muqit", "The Sustainer"], ["Al-Hasib", "The Reckoner"],
+  ["Al-Jalil", "The Majestic"], ["Al-Karim", "The Generous"], ["Ar-Raqib", "The Watchful"], ["Al-Mujib", "The Responsive"],
+  ["Al-Wasi'", "The All-Encompassing"], ["Al-Hakim", "The Wise"], ["Al-Wadud", "The Loving"], ["Al-Majid", "The Glorious"],
+  ["Al-Ba'ith", "The Resurrector"], ["Ash-Shahid", "The Witness"], ["Al-Haqq", "The Truth"], ["Al-Wakil", "The Trustee"],
+  ["Al-Qawiyy", "The Strong"], ["Al-Matin", "The Firm"], ["Al-Wali", "The Protecting Friend"], ["Al-Hamid", "The Praiseworthy"],
+  ["Al-Muhsi", "The Accounter"], ["Al-Mubdi'", "The Originator"], ["Al-Mu'id", "The Restorer"], ["Al-Muhyi", "The Giver of Life"],
+  ["Al-Mumit", "The Bringer of Death"], ["Al-Hayy", "The Ever-Living"], ["Al-Qayyum", "The Self-Subsisting"], ["Al-Wajid", "The Finder"],
+  ["Al-Majid (Al-Maajid)", "The Noble"], ["Al-Wahid", "The One"], ["Al-Ahad", "The Unique"], ["As-Samad", "The Eternal Refuge"],
+  ["Al-Qadir", "The Able"], ["Al-Muqtadir", "The Powerful"], ["Al-Muqaddim", "The Expediter"], ["Al-Mu'akhkhir", "The Delayer"],
+  ["Al-Awwal", "The First"], ["Al-Akhir", "The Last"], ["Az-Zahir", "The Manifest"], ["Al-Batin", "The Hidden"],
+  ["Al-Waali", "The Governor"], ["Al-Muta'ali", "The Most Exalted"], ["Al-Barr", "The Source of Goodness"], ["At-Tawwab", "The Acceptor of Repentance"],
+  ["Al-Muntaqim", "The Avenger"], ["Al-'Afuww", "The Pardoner"], ["Ar-Ra'uf", "The Compassionate"], ["Malik-ul-Mulk", "The Master of the Kingdom"],
+  ["Dhul-Jalali wal-Ikram", "The Lord of Majesty and Generosity"], ["Al-Muqsit", "The Equitable"], ["Al-Jami'", "The Gatherer"], ["Al-Ghani", "The Self-Sufficient"],
+  ["Al-Mughni", "The Enricher"], ["Al-Mani'", "The Preventer"], ["Ad-Darr", "The Distresser"], ["An-Nafi'", "The Benefactor"],
+  ["An-Nur", "The Light"], ["Al-Hadi", "The Guide"], ["Al-Badi'", "The Incomparable Originator"], ["Al-Baqi", "The Everlasting"],
+  ["Al-Warith", "The Inheritor"], ["Ar-Rashid", "The Guide to the Right Path"], ["As-Sabur", "The Patient"],
+];
+const REF_BIBLE_OT = ["Genesis", "Exodus", "Leviticus", "Numbers", "Deuteronomy", "Joshua", "Judges", "Ruth", "1 Samuel", "2 Samuel", "1 Kings", "2 Kings", "1 Chronicles", "2 Chronicles", "Ezra", "Nehemiah", "Esther", "Job", "Psalms", "Proverbs", "Ecclesiastes", "Song of Solomon", "Isaiah", "Jeremiah", "Lamentations", "Ezekiel", "Daniel", "Hosea", "Joel", "Amos", "Obadiah", "Jonah", "Micah", "Nahum", "Habakkuk", "Zephaniah", "Haggai", "Zechariah", "Malachi"];
+const REF_BIBLE_NT = ["Matthew", "Mark", "Luke", "John", "Acts", "Romans", "1 Corinthians", "2 Corinthians", "Galatians", "Ephesians", "Philippians", "Colossians", "1 Thessalonians", "2 Thessalonians", "1 Timothy", "2 Timothy", "Titus", "Philemon", "Hebrews", "James", "1 Peter", "2 Peter", "1 John", "2 John", "3 John", "Jude", "Revelation"];
+const REF_AFRICA = [
+  ["Algeria", "Algiers"], ["Angola", "Luanda"], ["Benin", "Porto-Novo"], ["Botswana", "Gaborone"], ["Burkina Faso", "Ouagadougou"], ["Burundi", "Gitega"],
+  ["Cabo Verde", "Praia"], ["Cameroon", "Yaoundé"], ["Central African Republic", "Bangui"], ["Chad", "N'Djamena"], ["Comoros", "Moroni"],
+  ["Congo (Republic of the)", "Brazzaville"], ["Congo (Democratic Republic of the)", "Kinshasa"], ["Côte d'Ivoire", "Yamoussoukro"], ["Djibouti", "Djibouti"],
+  ["Egypt", "Cairo"], ["Equatorial Guinea", "Malabo"], ["Eritrea", "Asmara"], ["Eswatini", "Mbabane"], ["Ethiopia", "Addis Ababa"], ["Gabon", "Libreville"],
+  ["Gambia", "Banjul"], ["Ghana", "Accra"], ["Guinea", "Conakry"], ["Guinea-Bissau", "Bissau"], ["Kenya", "Nairobi"], ["Lesotho", "Maseru"], ["Liberia", "Monrovia"],
+  ["Libya", "Tripoli"], ["Madagascar", "Antananarivo"], ["Malawi", "Lilongwe"], ["Mali", "Bamako"], ["Mauritania", "Nouakchott"], ["Mauritius", "Port Louis"],
+  ["Morocco", "Rabat"], ["Mozambique", "Maputo"], ["Namibia", "Windhoek"], ["Niger", "Niamey"], ["Nigeria", "Abuja"], ["Rwanda", "Kigali"],
+  ["São Tomé and Príncipe", "São Tomé"], ["Senegal", "Dakar"], ["Seychelles", "Victoria"], ["Sierra Leone", "Freetown"], ["Somalia", "Mogadishu"],
+  ["South Africa", "Pretoria (executive), Cape Town (legislative), Bloemfontein (judicial)"], ["South Sudan", "Juba"], ["Sudan", "Khartoum"],
+  ["Tanzania", "Dodoma"], ["Togo", "Lomé"], ["Tunisia", "Tunis"], ["Uganda", "Kampala"], ["Zambia", "Lusaka"], ["Zimbabwe", "Harare"],
+];
+const REF_NIGERIA = [
+  ["Abia", "Umuahia"], ["Adamawa", "Yola"], ["Akwa Ibom", "Uyo"], ["Anambra", "Awka"], ["Bauchi", "Bauchi"], ["Bayelsa", "Yenagoa"], ["Benue", "Makurdi"],
+  ["Borno", "Maiduguri"], ["Cross River", "Calabar"], ["Delta", "Asaba"], ["Ebonyi", "Abakaliki"], ["Edo", "Benin City"], ["Ekiti", "Ado-Ekiti"], ["Enugu", "Enugu"],
+  ["Gombe", "Gombe"], ["Imo", "Owerri"], ["Jigawa", "Dutse"], ["Kaduna", "Kaduna"], ["Kano", "Kano"], ["Katsina", "Katsina"], ["Kebbi", "Birnin Kebbi"],
+  ["Kogi", "Lokoja"], ["Kwara", "Ilorin"], ["Lagos", "Ikeja"], ["Nasarawa", "Lafia"], ["Niger", "Minna"], ["Ogun", "Abeokuta"], ["Ondo", "Akure"],
+  ["Osun", "Osogbo"], ["Oyo", "Ibadan"], ["Plateau", "Jos"], ["Rivers", "Port Harcourt"], ["Sokoto", "Sokoto"], ["Taraba", "Jalingo"], ["Yobe", "Damaturu"], ["Zamfara", "Gusau"],
+];
+const REF_GHANA = [
+  ["Ahafo", "Goaso"], ["Ashanti", "Kumasi"], ["Bono", "Sunyani"], ["Bono East", "Techiman"], ["Central", "Cape Coast"], ["Eastern", "Koforidua"],
+  ["Greater Accra", "Accra"], ["North East", "Nalerigu"], ["Northern", "Tamale"], ["Oti", "Dambai"], ["Savannah", "Damongo"], ["Upper East", "Bolgatanga"],
+  ["Upper West", "Wa"], ["Volta", "Ho"], ["Western", "Sekondi-Takoradi"], ["Western North", "Sefwi Wiawso"],
+];
+const REF_SURAHS = ["Al-Fatihah", "Al-Baqarah", "Ali 'Imran", "An-Nisa", "Al-Ma'idah", "Al-An'am", "Al-A'raf", "Al-Anfal", "At-Tawbah", "Yunus", "Hud", "Yusuf", "Ar-Ra'd", "Ibrahim", "Al-Hijr", "An-Nahl", "Al-Isra", "Al-Kahf", "Maryam", "Ta-Ha", "Al-Anbiya", "Al-Hajj", "Al-Mu'minun", "An-Nur", "Al-Furqan", "Ash-Shu'ara", "An-Naml", "Al-Qasas", "Al-'Ankabut", "Ar-Rum", "Luqman", "As-Sajdah", "Al-Ahzab", "Saba", "Fatir", "Ya-Sin", "As-Saffat", "Sad", "Az-Zumar", "Ghafir", "Fussilat", "Ash-Shura", "Az-Zukhruf", "Ad-Dukhan", "Al-Jathiyah", "Al-Ahqaf", "Muhammad", "Al-Fath", "Al-Hujurat", "Qaf", "Adh-Dhariyat", "At-Tur", "An-Najm", "Al-Qamar", "Ar-Rahman", "Al-Waqi'ah", "Al-Hadid", "Al-Mujadila", "Al-Hashr", "Al-Mumtahanah", "As-Saff", "Al-Jumu'ah", "Al-Munafiqun", "At-Taghabun", "At-Talaq", "At-Tahrim", "Al-Mulk", "Al-Qalam", "Al-Haqqah", "Al-Ma'arij", "Nuh", "Al-Jinn", "Al-Muzzammil", "Al-Muddaththir", "Al-Qiyamah", "Al-Insan", "Al-Mursalat", "An-Naba", "An-Nazi'at", "'Abasa", "At-Takwir", "Al-Infitar", "Al-Mutaffifin", "Al-Inshiqaq", "Al-Buruj", "At-Tariq", "Al-A'la", "Al-Ghashiyah", "Al-Fajr", "Al-Balad", "Ash-Shams", "Al-Layl", "Ad-Duha", "Ash-Sharh", "At-Tin", "Al-'Alaq", "Al-Qadr", "Al-Bayyinah", "Az-Zalzalah", "Al-'Adiyat", "Al-Qari'ah", "At-Takathur", "Al-'Asr", "Al-Humazah", "Al-Fil", "Quraysh", "Al-Ma'un", "Al-Kawthar", "Al-Kafirun", "An-Nasr", "Al-Masad", "Al-Ikhlas", "Al-Falaq", "An-Nas"];
+const REF_PLANETS = ["Mercury", "Venus", "Earth", "Mars", "Jupiter", "Saturn", "Uranus", "Neptune"];
+const REF_CONTINENTS = ["Africa", "Antarctica", "Asia", "Europe", "North America", "Oceania (Australia)", "South America"];
+const REF_PILLARS = [["Shahada", "the declaration of faith"], ["Salah", "the five daily prayers"], ["Zakat", "giving to those in need"], ["Sawm", "fasting during Ramadan"], ["Hajj", "the pilgrimage to Mecca, for those who are able"]];
+const numbered = (rows) => rows.map((r, i) => (i + 1) + ". " + r).join("\n");
+const REFS = [
+  { id: "names99", n: 99, rx: /\b(99|ninety[- ]?nine)\s+(beautiful\s+)?names\b|asma+[’']?\s*-?(ul|al)[- ]?husna|\bnames of (allah|god)\b/i,
+    title: "The 99 Names of Allah (Asma’ul-Husna)",
+    body: () => numbered(REF_NAMES99.map(([a, m]) => "**" + a + "** — " + m)),
+    note: "This is the widely used list of 99 attributes (the name “Allah” itself is not counted among them). Traditions differ slightly in which names are included and how they are translated." },
+  { id: "bible", n: 66, rx: /\bbooks of the (holy )?bible\b|\b(list|name|all)\b.{0,25}\bbooks\b.{0,20}\bbible\b|\b66 books\b/i,
+    title: "The 66 books of the Bible",
+    body: () => "**Old Testament (39)**\n" + numbered(REF_BIBLE_OT) + "\n\n**New Testament (27)**\n" + numbered(REF_BIBLE_NT),
+    note: "This is the Protestant canon of 66 books. Catholic Bibles have 73, adding Tobit, Judith, 1 and 2 Maccabees, Wisdom, Sirach and Baruch; Orthodox Bibles include still more." },
+  { id: "africa", n: 54, rx: /\b(countries|nations|capitals?)\b.{0,30}\bafrica\b|\bafrica(n)?\b.{0,30}\b(countries|nations|capitals?)\b/i,
+    title: "The 54 countries of Africa and their capitals",
+    body: () => numbered(REF_AFRICA.map(([c, k]) => "**" + c + "** — " + k)),
+    note: "These are the 54 sovereign states of Africa recognised by the United Nations. Western Sahara, a disputed territory, is not counted. Some countries have more than one seat of government; the one listed is the official capital, with the exceptions shown." },
+  { id: "nigeria", n: 36, rx: /\bstates? (of|in) nigeria\b|\bnigeria(n)?\b.{0,20}\bstates\b|\bnigeria(n)?\b.{0,20}\bstate capitals\b/i,
+    title: "The 36 states of Nigeria and their capitals",
+    body: () => numbered(REF_NIGERIA.map(([s, c]) => "**" + s + "** — " + c)) + "\n\nPlus the **Federal Capital Territory (FCT)** — Abuja.",
+    note: "Nigeria has 36 states and the Federal Capital Territory." },
+  { id: "ghana", n: 16, rx: /\bregions? (of|in) ghana\b|\bghana(ian)?\b.{0,20}\bregions?\b/i,
+    title: "The 16 regions of Ghana and their capitals",
+    body: () => numbered(REF_GHANA.map(([s, c]) => "**" + s + "** — " + c)),
+    note: "Ghana has had 16 regions since 2019." },
+  { id: "surahs", n: 114, rx: /\b(surahs?|suras?|chapters?)\b.{0,25}\b(qur.?an|koran)\b|\b(qur.?an|koran)\b.{0,25}\b(surahs?|suras?|chapters?)\b|\b114 (surahs?|chapters?)\b/i,
+    title: "The 114 surahs of the Qur’an",
+    body: () => numbered(REF_SURAHS),
+    note: "Names are given in the common English transliteration; spellings vary between publications." },
+  { id: "planets", n: 8, rx: /\bplanets\b.{0,25}\bsolar system\b|\bsolar system\b.{0,25}\bplanets\b|\b(list|name)\b.{0,15}\bplanets\b/i,
+    title: "The eight planets, in order from the Sun", body: () => numbered(REF_PLANETS), note: "" },
+  { id: "continents", n: 7, rx: /\b(list|name|what are)\b.{0,20}\b(the )?(seven |7 )?continents\b/i,
+    title: "The seven continents", body: () => numbered(REF_CONTINENTS), note: "" },
+  { id: "pillars", n: 5, rx: /\b(five|5) pillars of islam\b|\bpillars of islam\b/i,
+    title: "The Five Pillars of Islam", body: () => numbered(REF_PILLARS.map(([a, m]) => "**" + a + "** — " + m)), note: "" },
+];
+// Load-time self-check: a list whose length is not what it claims is switched off, never served short.
+const REF_OK = REFS.filter((r) => { const c = r.id === "bible" ? REF_BIBLE_OT.length + REF_BIBLE_NT.length : r.body().split("\n").filter((l) => /^\d+\. /.test(l)).length; return c === r.n || (r.id === "nigeria" && c === 36); });
+const REF_DIRECT_NO = /\b(explain|why|meaning|meanings|history|compare|difference|translate|arabic|essay|summari[sz]e|first|last|which|who|how many|number|#\d|\d+(st|nd|rd|th)|tell me about|describe|pdf|word|excel|table)\b/i;
+const REF_LIST_VERB = /\b(list|give|show|name|write|recite|what are|tell me|share|provide|all|full|complete)\b/i;
+function refMatch(q) { q = String(q || ""); return REF_OK.find((r) => r.rx.test(q)) || null; }
+// A plain "list the 99 names" is answered straight from the library.
+function refDirect(q) {
+  q = String(q || "").trim();
+  if (q.length > 110) return null;
+  const r = refMatch(q);
+  if (!r || !REF_LIST_VERB.test(q) || REF_DIRECT_NO.test(q)) return null;
+  return "Here is the complete list: **" + r.title + "**.\n\n" + r.body() + (r.note ? "\n\n*" + r.note + "*" : "");
+}
+// Anything else that touches a list gets the list as ground truth.
+function refBlock(q) {
+  const r = refMatch(q);
+  if (!r) return "";
+  return "\n\n[VERIFIED REFERENCE — " + r.title + ". This list is checked and complete (" + r.n + " entries" + (r.id === "bible" ? " in the Protestant canon" : "") + "). Answer exactly what was asked, and only from it: for a count, a position or a single entry, give just that (briefly, in a sentence); print the whole list only if the person asked for the list. Quote entries exactly as written and keep the order and numbering; never add, drop, repeat or invent an entry, and never comment on or correct the list.]\n" + r.body() + (r.note ? "\n(" + r.note + ")" : "") + "\n";
+}
+// Nothing outside Noria may hold up her reply: a search, a feed or a data service that stalls is given a fixed time and
+// then dropped, and she answers with what she has (or says plainly that she could not get the live detail).
+const withTimeout = (p, ms, fallback) => Promise.race([Promise.resolve(p).catch(() => fallback), new Promise((r) => setTimeout(() => r(fallback), ms))]);
 // Router-level grounding: when a query needs live facts, fetch the web and fold
 // the results into the system message so every provider in the fallback chain
 // reasons over the same fresh context. `ground` in the request body forces it on
@@ -646,10 +768,12 @@ function addSystem(messages, block) {
 // the router decides with serverNeedsWeb().
 async function groundMessages(messages, body, env) {
   const q = String(body.query || "");
+  const rb = refBlock(q);
+  if (rb) return { messages: addSystem(messages, rb), grounded: true }; // a fixed list is read off the library, not the web
   const fb = futureBlock(q);
   if (fb) return { messages: addSystem(messages, fb), grounded: true }; // no search: there is nothing true to find
   // Exact-data tools first: clock, calendar/math (instant) and weather / exchange rates / crypto (live feeds).
-  const live = await Promise.all([weatherBlock(q, body.tz), currencyBlock(q), cryptoBlock(q)]).catch(() => []);
+  const live = await withTimeout(Promise.all([weatherBlock(q, body.tz), currencyBlock(q), cryptoBlock(q)]), 9000, []);
   const tools = [timeBlock(q, body.tz), calcBlock(q)].concat(live).filter(Boolean);
   if (tools.length) {
     messages = addSystem(messages, tools.join(""));
@@ -658,8 +782,8 @@ async function groundMessages(messages, body, env) {
   }
   const want = body.ground === true || (body.ground !== false && serverNeedsWeb(q));
   if (!want || !q) return { messages, grounded: false };
-  const queries = await planSearchQueries(q, env).catch(() => [q]);
-  const lists = await Promise.all(queries.map((x) => webSearch(x, env).catch(() => [])));
+  const queries = await withTimeout(planSearchQueries(q, env), 4000, [q]);
+  const lists = await Promise.all(queries.map((x) => withTimeout(webSearch(x, env), 7000, [])));
   const seen = new Set(), results = [];
   for (const list of lists) for (const r of list || []) { const k = r && (r.url || r.title); if (k && !seen.has(k)) { seen.add(k); results.push(r); } }
   const block = groundingBlock(results.slice(0, 7)) || noLiveBlock();
@@ -679,15 +803,24 @@ function parseKeys(env, ...names) {
   for (const n of names) { const v = env[n]; if (v) for (const k of String(v).split(",").map((s) => s.trim()).filter(Boolean)) if (!keys.includes(k)) keys.push(k); }
   return keys;
 }
+// Every Groq model has its OWN free allowance, so a busy model is followed by the next one before any other provider
+// is needed. The first is the strongest; the rest keep her answering when its allowance is spent.
+const groqModels = (env) => [env.GROQ_MODEL || "openai/gpt-oss-120b", env.GROQ_FAST_MODEL || "openai/gpt-oss-20b"].filter((m, i, a) => a.indexOf(m) === i);
 let _rot = 0;
 function rotate(arr) { if (arr.length <= 1) return arr.slice(); const s = _rot++ % arr.length; return arr.slice(s).concat(arr.slice(0, s)); }
 const groqKeys = (env) => parseKeys(env, "GROQ_API_KEYS", "GROQ_API_KEY");
-const geminiKeys = (env) => parseKeys(env, "GEMINI_API_KEYS", "GEMINI_API_KEY"); // accepts AIza… and newer AQ.… key formats
+const geminiKeys = (env) => parseKeys(env, "GEMINI_API_KEYS", "GEMINI_API_KEY", "GEMINI_API_KEY_NEW"); // accepts AIza… and newer AQ.… key formats
 const openrouterKeys = (env) => parseKeys(env, "OPENROUTER_API_KEYS", "OPENROUTER_API_KEY");
-const brainConfigured = (env) => groqKeys(env).length || geminiKeys(env).length || openrouterKeys(env).length;
+// More free brains: each provider below has its own free allowance and is used only when its key is set.
+// Models in the order tried: the strongest first; each has its own allowance on the account.
+const mistralModels = (env) => [env.MISTRAL_MODEL || "mistral-large-2512", "mistral-small-2603", "ministral-14b-2512"].filter((m, i, a) => a.indexOf(m) === i);
+const mistralKeys = (env) => parseKeys(env, "MISTRAL_API_KEYS", "MISTRAL_API_KEY");
+const cerebrasKeys = (env) => parseKeys(env, "CEREBRAS_API_KEYS", "CEREBRAS_API_KEY");
+const brainConfigured = (env) => groqKeys(env).length || mistralKeys(env).length || cerebrasKeys(env).length || geminiKeys(env).length || openrouterKeys(env).length || !!env.AI;
 
 // Shared OpenAI-compatible completion (Groq + OpenRouter). gpt-oss models spend
 // tokens on internal reasoning, so the budget is generous; answer is in content.
+let _lastUsage = null;
 async function openaiCompatible(url, key, models, messages, opts, extraHeaders) {
   let lastErr = "";
   for (const model of models) {
@@ -695,9 +828,11 @@ async function openaiCompatible(url, key, models, messages, opts, extraHeaders) 
       method: "POST",
       headers: Object.assign({ "Content-Type": "application/json", Authorization: "Bearer " + key }, extraHeaders || {}),
       body: JSON.stringify({ model, messages, max_tokens: opts.maxTokens ?? 8000, temperature: opts.temperature ?? 0.4, stream: false }),
+      signal: AbortSignal.timeout(20000), // a provider that stalls is skipped, never waited on
     });
     if (r.ok) {
       const d = await r.json();
+      _lastUsage = d.usage || null; // read only by the diagnostic flag on /brain/ask
       const text = ((d.choices && d.choices[0] && d.choices[0].message && d.choices[0].message.content) || "").trim();
       if (text) return text;
       lastErr = model + ": empty"; continue;
@@ -709,35 +844,83 @@ async function openaiCompatible(url, key, models, messages, opts, extraHeaders) 
   throw new Error(lastErr || "no model");
 }
 async function geminiComplete(key, env, messages, opts) {
-  const model = opts.geminiModel || env.GEMINI_MODEL || "gemini-2.5-flash";
+  // Each Gemini model has its own free allowance, so when one is used up the next is tried before giving up on Gemini.
+  const models = [opts.geminiModel || env.GEMINI_MODEL || "gemini-2.5-flash", env.GEMINI_FALLBACK_MODEL || "gemini-2.5-flash-lite"].filter((m, i, a) => a.indexOf(m) === i);
   const system = (messages.find((m) => m.role === "system") || {}).content || "";
   const contents = messages.filter((m) => m.role !== "system").map((m) => ({ role: m.role === "assistant" ? "model" : "user", parts: [{ text: m.content }] }));
-  const r = await fetch("https://generativelanguage.googleapis.com/v1beta/models/" + model + ":generateContent?key=" + key, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ system_instruction: system ? { parts: [{ text: system }] } : undefined, contents, generationConfig: { maxOutputTokens: opts.maxTokens ?? 8000, temperature: opts.temperature ?? 0.4 } }),
-  });
-  if (!r.ok) throw new Error("gemini " + r.status + ": " + (await r.text()).slice(0, 160));
-  const d = await r.json();
-  return ((d.candidates && d.candidates[0] && d.candidates[0].content && d.candidates[0].content.parts && d.candidates[0].content.parts[0] && d.candidates[0].content.parts[0].text) || "").trim();
+  let lastErr = "";
+  for (const model of models) {
+    const r = await fetch("https://generativelanguage.googleapis.com/v1beta/models/" + model + ":generateContent?key=" + key, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ system_instruction: system ? { parts: [{ text: system }] } : undefined, contents, generationConfig: { maxOutputTokens: opts.maxTokens ?? 8000, temperature: opts.temperature ?? 0.4 } }),
+      signal: AbortSignal.timeout(20000),
+    });
+    if (r.ok) {
+      const d = await r.json();
+      const text = ((d.candidates && d.candidates[0] && d.candidates[0].content && d.candidates[0].content.parts && d.candidates[0].content.parts[0] && d.candidates[0].content.parts[0].text) || "").trim();
+      if (text) return text;
+      lastErr = model + ": empty"; continue;
+    }
+    lastErr = "gemini " + model + " " + r.status + ": " + (await r.text()).replace(/\s+/g, " ").slice(0, 120);
+    if (r.status === 429 || r.status === 404 || r.status >= 500) continue;
+    break;
+  }
+  throw new Error(lastErr || "gemini: no model");
+}
+// A model that has lost its thread starts repeating itself or arguing with its own list. That is never shown to a
+// user: such an answer counts as a failed attempt and the next provider is tried.
+function isDegenerate(text) {
+  const t = String(text || "");
+  if (t.length < 400) return false;
+  const seen = {};
+  for (const raw of t.split("\n")) {
+    const l = raw.toLowerCase().replace(/^[\s>*#\-|\d.)]+/, "").replace(/[*_`|]/g, "").trim();
+    if (l.length < 6) continue;
+    if ((seen[l] = (seen[l] || 0) + 1) >= 4) return true;
+  }
+  if ((t.match(/\((?:again|duplicate)[^)]{0,40}\)/gi) || []).length >= 3) return true;
+  return (t.match(/let'?s (?:correct|restructure|adjust|choose|pick|use)/gi) || []).length >= 3;
+}
+// Cloudflare Workers AI: runs inside Cloudflare on the free daily allowance, through the project's "AI" binding
+// (Pages → Settings → Bindings → Workers AI, variable name AI). Used only if that binding exists.
+const CF_MODELS = ["@cf/meta/llama-3.3-70b-instruct-fp8-fast", "@cf/meta/llama-3.1-8b-instruct"];
+async function cfAiComplete(env, messages, opts) {
+  let lastErr = "";
+  for (const model of CF_MODELS) {
+    try {
+      const out = await Promise.race([
+        env.AI.run(model, { messages, max_tokens: Math.min(opts.maxTokens ?? 2000, 2500), temperature: opts.temperature ?? 0.4 }),
+        new Promise((_, rej) => setTimeout(() => rej(new Error("timeout")), 20000)),
+      ]);
+      const text = String((out && (out.response || (out.choices && out.choices[0] && out.choices[0].message && out.choices[0].message.content))) || "").trim();
+      if (text) return text;
+      lastErr = model + ": empty";
+    } catch (e) { lastErr = model + ": " + String((e && e.message) || e).slice(0, 100); }
+  }
+  throw new Error("cloudflare " + lastErr);
 }
 // Task-based routing: deep queries (analysis/coding/math/reasoning) go to the
 // strongest models with a big budget; everyday chat goes to fast, low-latency models.
 async function brainComplete(messages, env, opts = {}) {
   const attempts = [];
   const gm = opts.deep
-    ? [env.GROQ_MODEL || "openai/gpt-oss-120b"]
-    : [env.GROQ_FAST_MODEL || "openai/gpt-oss-20b", env.GROQ_MODEL || "openai/gpt-oss-120b"];
+    ? groqModels(env)
+    : [env.GROQ_FAST_MODEL || "openai/gpt-oss-20b"].concat(groqModels(env)).filter((m, i, a) => a.indexOf(m) === i);
   // Note: Gemini Pro models are quota-gated on the free tier, so we use flash for
   // both modes (env-overridable). Deep-mode strength comes from Groq gpt-oss-120b + budget.
   const gemOpts = Object.assign({}, opts, { geminiModel: opts.deep ? (env.GEMINI_DEEP_MODEL || "gemini-2.5-flash") : (env.GEMINI_MODEL || "gemini-2.5-flash") });
   for (const key of rotate(groqKeys(env))) attempts.push({ name: "groq", fn: () => openaiCompatible("https://api.groq.com/openai/v1/chat/completions", key, gm, messages, opts) });
-  for (const key of rotate(geminiKeys(env))) attempts.push({ name: "gemini", fn: () => geminiComplete(key, env, messages, gemOpts) });
+  for (const key of rotate(mistralKeys(env)).slice(0, 3)) attempts.push({ name: "mistral", fn: () => openaiCompatible("https://api.mistral.ai/v1/chat/completions", key, mistralModels(env), messages, opts) });
+  // Cerebras answers 402 (payment required) for these keys, so it stays out of the chain until CEREBRAS_ENABLED=1 is set.
+  if (env.CEREBRAS_ENABLED === "1") for (const key of rotate(cerebrasKeys(env)).slice(0, 2)) attempts.push({ name: "cerebras", fn: () => openaiCompatible("https://api.cerebras.ai/v1/chat/completions", key, [env.CEREBRAS_MODEL || "gpt-oss-120b", "llama-3.3-70b"], messages, opts) });
+  for (const key of rotate(geminiKeys(env)).slice(0, 3)) attempts.push({ name: "gemini", fn: () => geminiComplete(key, env, messages, gemOpts) });
   const om = [env.OPENROUTER_MODEL || "qwen/qwen3.8-27b:free", env.OPENROUTER_FALLBACK_MODEL || "z-ai/glm-5.2:free"];
-  for (const key of rotate(openrouterKeys(env))) attempts.push({ name: "openrouter", fn: () => openaiCompatible("https://openrouter.ai/api/v1/chat/completions", key, om, messages, opts, { "HTTP-Referer": "https://noria.skyglobegroup.com", "X-Title": "Noria" }) });
+  for (const key of rotate(openrouterKeys(env)).slice(0, 2)) attempts.push({ name: "openrouter", fn: () => openaiCompatible("https://openrouter.ai/api/v1/chat/completions", key, om, messages, opts, { "HTTP-Referer": "https://noria.skyglobegroup.com", "X-Title": "Noria" }) });
+  if (env.AI) attempts.push({ name: "cloudflare", fn: () => cfAiComplete(env, messages, opts) });
   if (!attempts.length) throw new Error("no model key configured");
   const errs = [];
-  for (const a of attempts) { try { const t = await a.fn(); if (t) return t; errs.push(a.name + ": empty"); } catch (e) { errs.push(a.name + ": " + e.message); } }
+  for (const a of attempts) { try { const t = await a.fn(); if (t && isDegenerate(t)) { errs.push(a.name + ": rambling answer discarded"); continue; } if (t) return t; errs.push(a.name + ": empty"); } catch (e) { errs.push(a.name + ": " + e.message); } }
   throw new Error("Noria's brain is unavailable → " + errs.join(" | "));
 }
 
@@ -774,6 +957,20 @@ export default {
       return new Response(JSON.stringify({ error: lastErr }), { status: 502, headers: JSON_H });
     }
 
+    // ── Site icons for the "Sources" chips. Fetched here (not by the visitor's browser) so the icon service
+    // never sees visitors' addresses, and so an unknown site is a clean 404 — the service answers those with a
+    // grey placeholder picture that a browser would otherwise show. Cached for a day.
+    if (path === "/favicon" && request.method === "GET") {
+      const host = (url.searchParams.get("host") || "").toLowerCase();
+      if (!/^[a-z0-9]([a-z0-9.-]{1,78})[a-z0-9]$/.test(host) || !host.includes(".")) return new Response(null, { status: 400 });
+      try {
+        const r = await fetch("https://icons.duckduckgo.com/ip3/" + host + ".ico", { headers: { "User-Agent": UA }, cf: { cacheTtl: 86400, cacheEverything: true } });
+        const ct = r.headers.get("content-type") || "";
+        if (!r.ok || !/^image\//i.test(ct)) return new Response(null, { status: 404, headers: { "Cache-Control": "public, max-age=86400" } });
+        return new Response(r.body, { headers: { "Content-Type": ct, "Cache-Control": "public, max-age=604800" } });
+      } catch (_) { return new Response(null, { status: 404 }); }
+    }
+
     // ── Live web search ──
     if (path === "/search" && request.method === "GET") {
       const q = (url.searchParams.get("q") || "").trim();
@@ -787,6 +984,8 @@ export default {
       let body; try { body = await request.json(); } catch (_) { body = {}; }
       let messages = buildMessages(body);
       if (!messages.length) return new Response(JSON.stringify({ error: "empty request" }), { status: 400, headers: JSON_H });
+      const refAns = refDirect(body.query);
+      if (refAns) return new Response(JSON.stringify({ answer: refAns }), { headers: JSON_H });
       const g = await groundMessages(messages, body, env);
       messages = g.messages;
       const q = String(body.query || "");
@@ -795,31 +994,79 @@ export default {
       const temperature = g.grounded ? 0.2 : (typeof body.temperature === "number" ? body.temperature : 0.4);
       try {
         const text = await brainComplete(messages, env, { deep, maxTokens: deep ? 8000 : 2600, temperature });
-        return new Response(JSON.stringify({ answer: text }), { headers: JSON_H });
+        return new Response(JSON.stringify(body.debug ? { answer: text, usage: _lastUsage } : { answer: text }), { headers: JSON_H });
       } catch (e) {
-        return new Response(JSON.stringify({ error: e.message }), { status: 502, headers: JSON_H });
+        return new Response(JSON.stringify({ error: e.message }), { status: 503, headers: JSON_H });
       }
     }
 
     // ── Brain: streaming (SSE) — translate Groq deltas to the app's {token}/{done} ──
     if (path === "/brain/ask/stream" && request.method === "POST") {
       let body; try { body = await request.json(); } catch (_) { body = {}; }
+      const refAns = refDirect(body.query);
+      if (refAns) return new Response(`data: ${JSON.stringify({ token: refAns })}
+
+data: ${JSON.stringify({ done: true })}
+
+`, { headers: SSE_H });
       let messages = buildMessages(body);
       messages = (await groundMessages(messages, body, env)).messages;
       const gkeys = rotate(groqKeys(env));
       if (!gkeys.length) return new Response(`data: ${JSON.stringify({ error: "no brain key" })}\n\n`, { status: 502, headers: SSE_H });
       // Rotate across Groq keys until one accepts the stream (skips a rate-limited key).
       let up = null, lastErr = "";
+      // A SPOKEN turn (body.voice) is a short back-and-forth, so the same strong model is asked to think
+      // briefly (reasoning_effort "low") and answer briefly — the first words arrive much sooner. If Groq
+      // rejects that setting the request is simply repeated the normal way, so it can never fail because of it.
+      const cfgs = body.voice ? [{ effort: "low", max: 600 }, { effort: null, max: 600 }] : [{ effort: null, max: 8000 }];
+      outer:
       for (const key of gkeys) {
+        for (const model of groqModels(env)) {
+          for (const cfg of cfgs) {
+            try {
+              const payload = { model, messages, max_tokens: cfg.max, temperature: 0.4, stream: true };
+              if (cfg.effort && /gpt-oss/.test(model)) payload.reasoning_effort = cfg.effort;
+              const r = await fetch(GROQ_URL, {
+                method: "POST",
+                headers: { "Content-Type": "application/json", Authorization: "Bearer " + key },
+                body: JSON.stringify(payload),
+              });
+              if (r.ok) { up = r; break outer; }
+              lastErr = "groq " + model + " " + r.status; try { await r.body.cancel(); } catch (_) {}
+              if (r.status === 429 || r.status === 413 || r.status === 404 || r.status >= 500) break; // this model is limited/unwell — try the next model
+            } catch (e) { lastErr = e.message; break; }
+          }
+        }
+      }
+      if (!up) {
+        // Groq is busy: Mistral's strongest model answers next, STREAMED, so the first words still appear within a moment.
+        for (const key of rotate(mistralKeys(env)).slice(0, 2)) {
+          for (const model of mistralModels(env).slice(0, 2)) {
+            try {
+              const r = await fetch("https://api.mistral.ai/v1/chat/completions", {
+                method: "POST", headers: { "Content-Type": "application/json", Authorization: "Bearer " + key },
+                body: JSON.stringify({ model, messages, max_tokens: body.voice ? 600 : 3000, temperature: 0.4, stream: true }),
+                signal: AbortSignal.timeout(12000),
+              });
+              if (r.ok) { up = r; break; }
+              try { await r.body.cancel(); } catch (_) {}
+              if (r.status !== 429 && r.status !== 404 && r.status < 500) break;
+            } catch (_) { break; }
+          }
+          if (up) break;
+        }
+      }
+      if (!up) {
+        // Groq is busy or limited: answer through the other providers right here, so the person gets a clean reply now
+        // (one request) instead of an error followed by a second, slower attempt.
         try {
-          const r = await fetch(GROQ_URL, {
-            method: "POST",
-            headers: { "Content-Type": "application/json", Authorization: "Bearer " + key },
-            body: JSON.stringify({ model: env.GROQ_MODEL || "openai/gpt-oss-120b", messages, max_tokens: 8000, temperature: 0.4, stream: true }),
-          });
-          if (r.ok) { up = r; break; }
-          lastErr = "groq " + r.status; try { await r.body.cancel(); } catch (_) {}
-        } catch (e) { lastErr = e.message; }
+          const text = await brainComplete(messages, env, { deep: false, maxTokens: body.voice ? 600 : 2600, temperature: 0.4 });
+          return new Response(`data: ${JSON.stringify({ token: text })}
+
+data: ${JSON.stringify({ done: true })}
+
+`, { headers: SSE_H });
+        } catch (_) {}
       }
       if (!up) return new Response(`data: ${JSON.stringify({ error: "Cannot reach Noria's brain: " + lastErr })}\n\n`, { status: 502, headers: SSE_H });
       const stream = new ReadableStream({
@@ -853,17 +1100,75 @@ export default {
     if (path === "/brain/feedback" && request.method === "POST") {
       return new Response(JSON.stringify({ ok: true }), { headers: JSON_H });
     }
+    // ── Which models the brain provider currently offers (names only) — so the fallback chain can be kept valid ──
+    if (path === "/brain/models") {
+      const k = groqKeys(env)[0];
+      if (!k) return new Response(JSON.stringify({ error: "no key" }), { status: 503, headers: JSON_H });
+      const r = await fetch("https://api.groq.com/openai/v1/models", { headers: { Authorization: "Bearer " + k }, signal: AbortSignal.timeout(8000) }).catch(() => null);
+      const d = r && r.ok ? await r.json().catch(() => null) : null;
+      return new Response(JSON.stringify({ models: d && d.data ? d.data.map((m) => m.id).sort() : null, chain: groqModels(env) }), { headers: JSON_H });
+    }
+    // ── Does each brain provider actually answer? One tiny request each (about 10 tokens) — reports status only, never a key ──
+    // ── Does Gemini's image model answer on the free keys? One call per model, reports status and size only ──
+    if (path === "/brain/imgcheck") {
+      const k = geminiKeys(env)[0];
+      if (!k) return new Response(JSON.stringify({ error: "no gemini key" }), { headers: JSON_H });
+      const out = [];
+      for (const model of ["gemini-2.5-flash-image", "gemini-2.0-flash-preview-image-generation"]) {
+        const t = Date.now();
+        try {
+          const r = await fetch("https://generativelanguage.googleapis.com/v1beta/models/" + model + ":generateContent?key=" + k, {
+            method: "POST", headers: { "Content-Type": "application/json" }, signal: AbortSignal.timeout(40000),
+            body: JSON.stringify({ contents: [{ parts: [{ text: "A candid documentary photograph of a busy street market in Accra, Ghana at midday" }] }], generationConfig: { responseModalities: ["IMAGE", "TEXT"] } }),
+          });
+          const txt = await r.text();
+          let img = 0; try { const d = JSON.parse(txt); for (const p of ((d.candidates || [])[0] || {}).content ? d.candidates[0].content.parts : []) if (p.inlineData) img = p.inlineData.data.length; } catch (_) {}
+          out.push({ model, status: r.status, imageBase64Chars: img, ms: Date.now() - t, error: r.ok ? undefined : txt.replace(/\s+/g, " ").slice(0, 180) });
+        } catch (e) { out.push({ model, status: "error", ms: Date.now() - t, error: String(e.message || e).slice(0, 120) }); }
+      }
+      return new Response(JSON.stringify({ results: out }), { headers: JSON_H });
+    }
+    if (path === "/brain/providers" && url.searchParams.get("cerebras")) {
+      // Which Cerebras models can these keys use? List them, then try each with one tiny request (status only).
+      const k = cerebrasKeys(env)[0];
+      if (!k) return new Response(JSON.stringify({ error: "no cerebras key" }), { headers: JSON_H });
+      const lr = await fetch("https://api.cerebras.ai/v1/models", { headers: { Authorization: "Bearer " + k }, signal: AbortSignal.timeout(8000) }).catch(() => null);
+      const ld = lr && lr.ok ? await lr.json().catch(() => null) : null;
+      const ids = ld && ld.data ? ld.data.map((m) => m.id) : [];
+      const res = [];
+      for (const id of ids.slice(0, 10)) {
+        const r = await fetch("https://api.cerebras.ai/v1/chat/completions", { method: "POST", headers: { "Content-Type": "application/json", Authorization: "Bearer " + k }, body: JSON.stringify({ model: id, messages: [{ role: "user", content: "Reply with the single word: ok" }], max_tokens: 40 }), signal: AbortSignal.timeout(10000) }).catch(() => null);
+        res.push({ model: id, status: r ? r.status : "no-response" });
+      }
+      return new Response(JSON.stringify({ listed: ids.length, tried: res }), { headers: JSON_H });
+    }
+    if (path === "/brain/providers") {
+      const ping = async (name, fn) => { const t = Date.now(); try { const r = await fn(); return { name, ok: !!r, ms: Date.now() - t }; } catch (e) { return { name, ok: false, ms: Date.now() - t, error: String(e.message || e).replace(/\s+/g, " ").slice(0, 110) }; } };
+      const m = [{ role: "user", content: "Reply with the single word: ok" }], o = { maxTokens: 40, temperature: 0 };
+      const jobs = [];
+      const g = groqKeys(env)[0]; if (g) jobs.push(ping("groq", () => openaiCompatible("https://api.groq.com/openai/v1/chat/completions", g, groqModels(env), m, o)));
+      const mi = mistralKeys(env); if (url.searchParams.get("all")) mi.forEach((k, i) => jobs.push(ping("mistral key " + (i + 1), () => openaiCompatible("https://api.mistral.ai/v1/chat/completions", k, mistralModels(env), m, o)))); else if (mi.length) jobs.push(ping("mistral (key 1 of " + mi.length + ")", () => openaiCompatible("https://api.mistral.ai/v1/chat/completions", mi[0], mistralModels(env), m, o)));
+      const ce = cerebrasKeys(env); if (ce.length) jobs.push(ping("cerebras (key 1 of " + ce.length + ")", () => openaiCompatible("https://api.cerebras.ai/v1/chat/completions", ce[0], [env.CEREBRAS_MODEL || "gpt-oss-120b", "llama-3.3-70b"], m, o)));
+      const ge = geminiKeys(env)[0]; if (ge) jobs.push(ping("gemini", () => geminiComplete(ge, env, m, o)));
+      const orK = openrouterKeys(env)[0];
+      if (orK) jobs.push(ping("openrouter", () => openaiCompatible("https://openrouter.ai/api/v1/chat/completions", orK, [env.OPENROUTER_MODEL || "qwen/qwen3.8-27b:free", env.OPENROUTER_FALLBACK_MODEL || "z-ai/glm-5.2:free"], m, o, { "HTTP-Referer": "https://noria.africa", "X-Title": "Noria" })));
+      if (env.AI) jobs.push(ping("cloudflare workers ai", () => cfAiComplete(env, m, o)));
+      else jobs.push(Promise.resolve({ name: "cloudflare workers ai", ok: false, ms: 0, error: "no AI binding on this project yet" }));
+      return new Response(JSON.stringify({ providers: await Promise.all(jobs) }), { headers: JSON_H });
+    }
     // ── Health ── (reports how many keys per provider are configured)
     if (path === "/brain/health") {
       const g = groqKeys(env).length, gm = geminiKeys(env).length, o = openrouterKeys(env).length;
       const ok = g || gm || o;
-      return new Response(JSON.stringify({ status: ok ? "ok" : "no-key", keys: { groq: g, gemini: gm, openrouter: o } }), { headers: JSON_H });
+      return new Response(JSON.stringify({ status: ok ? "ok" : "no-key", keys: { cloudflareAI: !!env.AI, groq: g, mistral: mistralKeys(env).length, cerebras: cerebrasKeys(env).length, gemini: gm, openrouter: o } }), { headers: JSON_H });
     }
 
     // ── Static assets, served by Cloudflare Pages ──
     // Front door = the workspace (served in place at "/", no redirect). Pages serves
     // workspace.html at the clean path "/workspace", so we fetch that for "/".
-    const assetPath = path === "/" ? "/workspace" : path;
+    // "See Noria" (the figure page) is the site's index.html, which the host would otherwise redirect to "/"
+    // (the chat). Serve it explicitly at /figure, and let the old /index.html address reach it too.
+    const assetPath = path === "/" ? "/workspace" : (path === "/figure" || path === "/index.html") ? "/" : path;
     const assetReq = assetPath === path ? request : new Request(new URL(assetPath + url.search, url.origin), request);
     let resp = await env.ASSETS.fetch(assetReq);
     const ct = resp.headers.get("content-type") || "";

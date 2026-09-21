@@ -176,7 +176,7 @@ export class Brain {
   }
 
   // Stream an answer. Calls onToken(delta) as text arrives; resolves to full text.
-  async ask(query, { onToken = () => {}, system = '', signal = null, ground = false } = {}) {
+  async ask(query, { onToken = () => {}, system = '', signal = null, ground = false, voice = false } = {}) {
     // Own timeout (aborts a stalled stream) merged with any caller signal (Stop button).
     const ac = new AbortController()
     const to = setTimeout(() => ac.abort(), 90000)
@@ -185,6 +185,7 @@ export class Brain {
     // the client did NOT ground, so let the ROUTER decide and search if the query
     // needs live facts (a second safety-net layer so nothing current slips through).
     const payload = { query, history: this.history.slice(-8), system, tz: userTz() }
+    if (voice) payload.voice = true // a spoken turn: the server answers briefly and with less deliberation
     if (ground === false) payload.ground = false
     else if (ground === true) payload.ground = true // 'auto' → omit → server uses serverNeedsWeb
     let res
@@ -222,6 +223,26 @@ export class Brain {
     return { text: full, ...meta }
   }
 
+  // A model that has lost its thread (repeats itself, argues with its own list) must never reach the user.
+  isRambling(text) {
+    const t = String(text || '')
+    if (t.length < 400) return false
+    const seen = {}
+    for (const raw of t.split('\n')) {
+      const l = raw.toLowerCase().replace(/^[\s>*#\-|\d.)]+/, '').replace(/[*_`|]/g, '').trim()
+      if (l.length < 6) continue
+      if ((seen[l] = (seen[l] || 0) + 1) >= 4) return true
+    }
+    if ((t.match(/\((?:again|duplicate)[^)]{0,40}\)/gi) || []).length >= 3) return true
+    return (t.match(/let'?s (?:correct|restructure|adjust|choose|pick|use)/gi) || []).length >= 3
+  }
+  // If the structured reply was cut short, its JSON cannot be parsed — pull the text out anyway, never show the braces.
+  _recoverDisplay(raw) {
+    const m = /"display_text"\s*:\s*"((?:[^"\\]|\\.)*)/.exec(raw)
+    if (!m) return null
+    try { return JSON.parse('"' + m[1] + '"') } catch (_) { return m[1].replace(/\\n/g, '\n').replace(/\\"/g, '"') }
+  }
+
   // Structured ask: returns { reply, controls } where controls is the full
   // PHYSICAL HUMAN PRESENCE JSON (situation/condition/face/eyes/body/voice).
   // Falls back gracefully to plain text if the model doesn't return clean JSON.
@@ -244,7 +265,7 @@ export class Brain {
     const raw = data.answer ?? data.reply ?? ''
     const parsed = this._parseControls(raw)
     // display_text is shown in chat; spoken_text is voiced. Fall back gracefully.
-    const display = (parsed && (parsed.display_text || parsed.reply)) || raw || "I'm here."
+    const display = (parsed && (parsed.display_text || parsed.reply || parsed.spoken_text)) || (/^\s*\{/.test(raw) && this._recoverDisplay(raw)) || raw || "I'm here."
     const spoken = (parsed && parsed.spoken_text) || speechify(display)
     this.history.push({ role: 'user', content: query }, { role: 'assistant', content: display })
     return { display, spoken, controls: parsed }
@@ -452,7 +473,7 @@ export class Brain {
   //   states: 'listening' → 'hearing' → 'thinking' → 'speaking' → 'listening' …
   // Returns null if this browser can't do it (caller then uses the older tap-to-talk path).
   // onEnd(reason): 'stopped' | 'idle' | 'hidden' | 'denied' | 'unsupported' | 'stt-failed'
-  converse({ onState = () => {}, onLevel = () => {}, onHeard = () => {}, onUtterance = async () => {}, onEnd = () => {}, endSilenceMs = 800, idleMs = 120000 } = {}) {
+  converse({ onState = () => {}, onLevel = () => {}, onHeard = () => {}, onUtterance = async () => {}, onEnd = () => {}, endSilenceMs = 700, idleMs = 120000 } = {}) {
     const AC = window.AudioContext || window.webkitAudioContext
     if (!AC || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || !AC.prototype.createScriptProcessor) return null
     let ctx
