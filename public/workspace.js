@@ -855,6 +855,16 @@ async function respond(q, opts = {}) {
   attachments = []; renderTray()
   input.value = ''; grow()
 
+  // Deep research (Noria Pro): "deep research on …", "/research …", "research report on …" — a cited brief from many sources.
+  const rm = RESEARCH_RX.exec(q)
+  if (rm && !atts.length) {
+    if (!isPro) {
+      const el = addNoria(); const note = 'Deep research is part of Noria Pro: I break your question into angles, read many sources, and write a cited brief. You can unlock it with an early-access code — and I am happy to answer this as a normal question meanwhile.'
+      el.textContent = note; convoRecord({ role: 'noria', text: note }); finish(); openPro('Deep research is part of Noria Pro.'); return
+    }
+    await runResearch(rm[1].trim()); finish(); return
+  }
+
   // A question about an attached spreadsheet is answered by the data engine: exact figures from every row, no model involved.
   if (isPro && dataTables.length && !isImageRequest(q)) {
     const tbl = atts.find((x) => x.table)
@@ -1050,6 +1060,45 @@ function realPersonImage(q) {
 function cleanImagePrompt(q) {
   const p = q.replace(/^\s*(please\s+)?(can you\s+|could you\s+|i want you to\s+|i'd like you to\s+)?(draw|paint|sketch|render|generate|create|make|design|produce|imagine|show me)\s+(me\s+)?(an?\s+|the\s+|some\s+)?(image|picture|photo|photograph|art|artwork|illustration|drawing|painting|logo|poster|wallpaper|portrait)\s*(of\s+|showing\s+|depicting\s+|with\s+)?/i, '').trim()
   return p || q
+}
+const RESEARCH_RX = /^\s*(?:\/research|deep research|research report|do (?:a )?(?:deep )?research|please do (?:a )?(?:deep )?research)\s*(?:on|about|into|for|:|-)?\s+(.{6,})$/i
+// Sends the topic to the research service and follows its progress messages; the finished brief opens like any long answer, with
+// its real sources underneath and the "Open as document" button (so it can go to Word, PDF or PowerPoint).
+async function runResearch(topic) {
+  stop.style.display = 'inline-flex'; status.innerHTML = DOTS + ' Starting deep research'
+  const el = addNoria(); const msgEl = el.closest('.msg')
+  curStream = new AbortController()
+  let text = '', meta = null, err = ''
+  try {
+    let code = ''; try { code = localStorage.getItem('noria.pro') || '' } catch {}
+    const r = await fetch('/brain/research', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query: topic, pro: code }), signal: curStream.signal })
+    if (!r.body) throw new Error('no stream')
+    const reader = r.body.getReader(), dec = new TextDecoder(); let buf = ''
+    while (true) {
+      const { done, value } = await reader.read(); if (done) break
+      buf += dec.decode(value, { stream: true }); let i
+      while ((i = buf.indexOf('\n')) >= 0) {
+        const line = buf.slice(0, i).trim(); buf = buf.slice(i + 1)
+        if (!line.startsWith('data:')) continue
+        let o; try { o = JSON.parse(line.slice(5)) } catch { continue }
+        if (o.progress) status.innerHTML = DOTS + ' ' + o.progress
+        if (o.token) text += o.token
+        if (o.error) err = o.error
+        if (o.done) meta = o
+      }
+    }
+  } catch (e) { if (cancelled) { msgEl.remove(); curStream = null; return } err = err || 'I could not finish that research just now. Please try again in a moment.' }
+  curStream = null
+  if (err || !text.trim()) {
+    msgEl.classList.add('err'); el.textContent = err || 'I could not finish that research just now. Please try again in a moment.'
+    convoRecord({ role: 'user', text: 'Deep research: ' + topic }); convoRecord({ role: 'err', text: el.textContent }); return
+  }
+  const srcs = ((meta && meta.sources) || []).filter((x) => x && x.url).slice(0, 6)
+  renderMd(el, text)
+  if (srcs.length) addSources(msgEl, srcs)
+  addFeedback(msgEl, 'Deep research: ' + topic, text)
+  if (meta && typeof meta.left === 'number') note('Deep research briefs left today: ' + meta.left)
+  convoRecord({ role: 'noria', text, sources: srcs.map((x) => ({ url: x.url })) })
 }
 async function generateImage(prompt) {
   stop.style.display = 'inline-flex'

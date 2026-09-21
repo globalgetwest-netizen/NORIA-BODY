@@ -274,7 +274,7 @@ function rankRelevant(pool, q, fresh) {
   if (newsQ) { let w = 0; keep = keep.filter((x) => x.r.src !== "wiki" || ++w <= 2); } // a news question does not need more than two encyclopedia pages
   return keep.map((x) => x.r);
 }
-async function webSearch(q, env, fresh) {
+async function webSearch(q, env, fresh, o) {
   // Every source runs at the same time and each has its own time limit, so one slow or failing source can never cost the
   // others: Tavily (open web, key rotation), Brave (if a key is set), Wikipedia (knowledge, updated within minutes for big
   // events) and live news feeds from Africa and the world. Results are merged, de-duplicated, and — for anything time-
@@ -284,7 +284,7 @@ async function webSearch(q, env, fresh) {
   const tks = rotate(parseKeys(env, "TAVILY_KEYS", "TAVILY_KEY"));
   const tavilyP = withTimeout((async () => { for (const k of tks) { const t = await tavilySearch(q, k); if (t === null) continue; return t; } return []; })(), 7000, []);
   const braveP = env && env.BRAVE_KEY ? withTimeout(braveSearch(q, env.BRAVE_KEY), 6000, []) : Promise.resolve([]);
-  const [tv, br, w, n] = await Promise.all([tavilyP, braveP, withTimeout(wikiSearch(q), 6000, []), withTimeout(newsSearch(q), 6000, [])]);
+  const [tv, br, w, n] = await Promise.all([tavilyP, braveP, withTimeout(wikiSearch(q), 6000, []), o && o.noNews ? Promise.resolve([]) : withTimeout(newsSearch(q), 6000, [])]);
   const summary = (tv || []).filter((x) => x.title === "Summary").map((x) => Object.assign({}, x, { snippet: "(search-engine summary — check it against the sources above) " + x.snippet }));
   const tag = (list, src) => (list || []).map((x) => Object.assign({}, x, { src }));
   const rows = tag((tv || []).filter((x) => x.title !== "Summary"), "web");
@@ -1050,6 +1050,62 @@ async function diagOk(url) {
   } catch (_) { return false; }
 }
 const DIAG_DENIED = () => new Response(JSON.stringify({ error: "Owner access only." }), { status: 403, headers: JSON_H });
+// ══ DEEP RESEARCH (Noria Pro) ══════════════════════════════════════════════════════════════════════════════════════
+// One question in, one cited brief out. The question is broken into focused sub-questions; each is searched (open web + Wikipedia);
+// the sources are pooled, numbered and de-duplicated; the brief is written from THOSE sources only, every claim carrying its [n];
+// names and years are checked against the sources (one strict rewrite if they do not match); and the source list at the end is
+// built from the real results, never written by the model. A few briefs a day per person keep it inside the free allowances.
+async function proValid(env, code) {
+  if (!code) return false;
+  try { const r = await fetch("https://noria-ai.insights-skyglobe.workers.dev/pro/check?code=" + encodeURIComponent(String(code).trim().toUpperCase()), { signal: AbortSignal.timeout(4000) }); return !!(await r.json()).pro; } catch (_) { return false; }
+}
+async function takeQuota(code, kind, max) {
+  try { const r = await fetch("https://noria-ai.insights-skyglobe.workers.dev/quota/take?kind=" + kind + "&max=" + max + "&code=" + encodeURIComponent(String(code).trim().toUpperCase()), { signal: AbortSignal.timeout(5000) }); return await r.json(); } catch (_) { return { ok: false, error: "quota service unavailable" }; }
+}
+async function researchPlan(query, env) {
+  const fallback = [query, query + " latest developments", query + " statistics and data", query + " challenges and criticism"];
+  try {
+    const t = await brainComplete([
+      { role: "system", content: "You plan web research. Reply with ONLY a JSON object: {\"title\": \"a short report title\", \"questions\": [3 to 5 focused search queries, each under 12 words, covering different angles: the facts, the numbers, recent developments, causes, and criticism or risks]}. No prose." },
+      { role: "user", content: query.slice(0, 500) },
+    ], env, { skipGroq: true, maxTokens: 500, temperature: 0.2 });
+    const m = /\{[\s\S]*\}/.exec(t || ""); const j = m ? JSON.parse(m[0]) : null;
+    const qs = j && Array.isArray(j.questions) ? j.questions.filter((x) => typeof x === "string" && x.trim()).map((x) => x.trim().slice(0, 140)).slice(0, 5) : [];
+    return { title: (j && j.title ? String(j.title) : query).slice(0, 120), questions: qs.length >= 2 ? qs : fallback };
+  } catch (_) { return { title: query.slice(0, 120), questions: fallback }; }
+}
+async function runResearch(query, env, send) {
+  send({ progress: "Planning the research…" });
+  const plan = await researchPlan(query, env);
+  send({ progress: "Searching " + plan.questions.length + " angles across the web…" });
+  const lists = await Promise.all(plan.questions.map((q) => withTimeout(webSearch(q, env, true, { noNews: true }), 12000, [])));
+  const seen = new Set(), pool = [];
+  for (const list of lists) for (const r of list || []) { const k = r && (r.url || r.title); if (!k || !r.title || seen.has(k) || r.title === "Summary") continue; seen.add(k); pool.push(r); }
+  const top = pool.slice(0, 22);
+  if (top.length < 3) return { title: plan.title, text: "I couldn't find enough reliable sources to write a research brief on that. Try a more specific topic, or ask again in a moment.", sources: top, verified: false };
+  send({ progress: "Reading " + top.length + " sources and writing the brief…" });
+  const ctx = "SOURCES (numbered; cite them as [n]):\n" + top.map((r, i) => "[" + (i + 1) + "] " + r.title + (r.date ? " [dated " + String(r.date).slice(0, 16) + "]" : "") + " — " + String(r.snippet || "").replace(/\s+/g, " ").slice(0, 380) + (r.url ? " (" + r.url + ")" : "")).join("\n");
+  const today = new Date().toISOString().slice(0, 10);
+  const system = "You are Noria writing a research brief for a busy professional. Today is " + today + ". Use ONLY the numbered sources below: every factual sentence must end with its source number in square brackets, like [3] or [2][5]. Never state a fact, name, number or date that the sources do not contain; if the sources do not cover something the reader would expect, say so under 'Gaps and uncertainty'. Where sources disagree, say so and prefer the newer one. Write in clear, plain language.\n\nStructure (use these markdown headings): # (the title) ; ## Summary (5 bullet points) ; then one ## section for each angle of the question with substance, comparisons and figures where the sources give them ; ## Key figures (a table, only if the sources give numbers) ; ## Gaps and uncertainty ; ## What this means / next steps. Aim for a thorough brief of roughly 1,500 to 2,500 words, as long as the sources support and no longer. Do not write a 'Sources' section (it is added for you) and do not write any web addresses.\n\n" + ctx;
+  const opts = { skipGroq: true, maxTokens: 6500, temperature: 0.3 };
+  let text = await brainComplete([{ role: "system", content: system }, { role: "user", content: "Write the research brief on: " + query + "\nReport title: " + plan.title }], env, opts);
+  const live = { ctx, sources: top.map((r) => ({ title: r.title, url: r.url || "", snippet: r.snippet || "", date: r.date || "" })) };
+  let v = verifyAnswer(text, live, query), verified = v.ok;
+  if (!v.ok) {
+    send({ progress: "Checking the brief against the sources…" });
+    try {
+      const fix = [{ role: "system", content: system + "\n\nCORRECTION — your draft named things the sources do not contain: " + v.unsupported.slice(0, 8).join(", ") + ". Rewrite the whole brief using only what the sources state; remove or replace anything unsupported. Never mention this correction." }, { role: "user", content: "Write the research brief on: " + query }];
+      const t2 = await brainComplete(fix, env, opts); const v2 = verifyAnswer(t2, live, query);
+      if (v2.ok || v2.unsupported.length < v.unsupported.length) { text = t2; v = v2; verified = v2.ok; }
+    } catch (_) {}
+  }
+  // web addresses come only from the real sources
+  text = String(text).replace(/\[([^\]\n]+)\]\((https?:\/\/[^)\s]+)\)/g, "$1").replace(/(^|[\s(])(https?:\/\/[^\s)\]>"']+)/g, "$1");
+  const list = top.map((r, i) => "[" + (i + 1) + "] " + String(r.title).replace(/\s+/g, " ").slice(0, 120) + (r.date ? " (" + String(r.date).slice(0, 16) + ")" : "") + (r.url ? " — " + r.url : "")).join("\n\n");
+  text += "\n\n## Sources\n\n" + list + (verified ? "" : "\n\n*Note: a few names or figures in this brief could not be matched line-by-line to the sources above (" + v.unsupported.slice(0, 5).join(", ") + "). Please check them before relying on them.*");
+  return { title: plan.title, text, sources: live.sources, verified };
+}
+
 // Router-level grounding: when a query needs live facts, fetch the web and fold
 // the results into the system message so every provider in the fallback chain
 // reasons over the same fresh context. `ground` in the request body forces it on
@@ -1210,9 +1266,9 @@ async function brainComplete(messages, env, opts = {}) {
   // Note: Gemini Pro models are quota-gated on the free tier, so we use flash for
   // both modes (env-overridable). Deep-mode strength comes from Groq gpt-oss-120b + budget.
   const gemOpts = Object.assign({}, opts, { geminiModel: opts.deep ? (env.GEMINI_DEEP_MODEL || "gemini-2.5-flash") : (env.GEMINI_MODEL || "gemini-2.5-flash") });
-  for (const key of rotate(groqKeys(env))) attempts.push({ name: "groq", fn: () => openaiCompatible("https://api.groq.com/openai/v1/chat/completions", key, gmMain, messages, opts) });
+  if (!opts.skipGroq) for (const key of rotate(groqKeys(env))) attempts.push({ name: "groq", fn: () => openaiCompatible("https://api.groq.com/openai/v1/chat/completions", key, gmMain, messages, opts) });
   for (const key of rotate(mistralKeys(env)).slice(0, 3)) attempts.push({ name: "mistral", fn: () => openaiCompatible("https://api.mistral.ai/v1/chat/completions", key, mistralModels(env), messages, opts) });
-  if (gmFast.length) for (const key of rotate(groqKeys(env)).slice(0, 2)) attempts.push({ name: "groq-fast", fn: () => openaiCompatible("https://api.groq.com/openai/v1/chat/completions", key, gmFast, messages, opts) });
+  if (gmFast.length && !opts.skipGroq) for (const key of rotate(groqKeys(env)).slice(0, 2)) attempts.push({ name: "groq-fast", fn: () => openaiCompatible("https://api.groq.com/openai/v1/chat/completions", key, gmFast, messages, opts) });
   // Cerebras answers 402 (payment required) for these keys, so it stays out of the chain until CEREBRAS_ENABLED=1 is set.
   if (env.CEREBRAS_ENABLED === "1") for (const key of rotate(cerebrasKeys(env)).slice(0, 2)) attempts.push({ name: "cerebras", fn: () => openaiCompatible("https://api.cerebras.ai/v1/chat/completions", key, [env.CEREBRAS_MODEL || "gpt-oss-120b", "llama-3.3-70b"], messages, opts) });
   for (const key of rotate(geminiKeys(env)).slice(0, 3)) attempts.push({ name: "gemini", fn: () => geminiComplete(key, env, messages, gemOpts) });
@@ -1308,6 +1364,26 @@ export default {
       }
     }
 
+    // ── Deep research (Noria Pro): a cited brief, streamed as progress messages and then the brief itself ──
+    if (path === "/brain/research" && request.method === "POST") {
+      let b; try { b = await request.json(); } catch (_) { b = {}; }
+      const query = String(b.query || "").trim().slice(0, 600), code = String(b.pro || "");
+      const sse = (obj) => "data: " + JSON.stringify(obj) + "\n\n";
+      const fail = (msg, status) => new Response(sse({ error: msg }), { status: status || 200, headers: SSE_H });
+      if (query.length < 4) return fail("Tell me what to research.", 400);
+      if (!(await proValid(env, code))) return fail("Deep research is part of Noria Pro.", 402);
+      const q = await takeQuota(code, "research", 3);
+      if (!q || !q.ok) return fail(q && q.error === "limit" ? "You have used today's deep research briefs (3 a day). They come back tomorrow." : "Deep research is unavailable right now. Please try again in a moment.", 429);
+      const stream = new ReadableStream({
+        async start(controller) {
+          const enc = new TextEncoder(); const send = (o) => { try { controller.enqueue(enc.encode(sse(o))); } catch (_) {} };
+          try { const r = await runResearch(query, env, send); send({ token: r.text }); send({ done: true, title: r.title, sources: r.sources, verified: r.verified, left: q.left }); }
+          catch (e) { send({ error: "I could not finish that research just now. Please try again in a moment." }); }
+          try { controller.close(); } catch (_) {}
+        },
+      });
+      return new Response(stream, { headers: SSE_H });
+    }
     // ── Brain: streaming (SSE) — translate Groq deltas to the app's {token}/{done} ──
     if (path === "/brain/ask/stream" && request.method === "POST") {
       let body; try { body = await request.json(); } catch (_) { body = {}; }

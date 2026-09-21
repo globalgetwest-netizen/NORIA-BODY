@@ -229,6 +229,19 @@ export default {
         return json({ ok: true })
       }
       // Noria Pro license check — stateless HMAC-signed codes (no database).
+      // A small daily allowance per Pro code for costly features (deep research): GET /quota/take?kind=research&max=3&code=…
+      if (url.pathname === '/quota/take') {
+        const code = (url.searchParams.get('code') || '').trim().toUpperCase()
+        if (!(await validCode(code, env.PRO_KEY, env.OWNER_KEY))) return json({ ok: false, error: 'pro' }, 402)
+        const kind = (url.searchParams.get('kind') || '').replace(/[^a-z]/g, '').slice(0, 12) || 'x'
+        const owner = isOwnerKey(code, env.OWNER_KEY)
+        const max = Math.min(owner ? 20 : 5, Number(url.searchParams.get('max')) || 3)
+        const key = 'quota:' + kind + ':' + utcDay() + ':' + (await shortHash(code))
+        const used = Number(await env.SYNC.get(key)) || 0
+        if (used >= max) return json({ ok: false, error: 'limit', left: 0 })
+        await env.SYNC.put(key, String(used + 1), { expirationTtl: 172800 })
+        return json({ ok: true, left: max - used - 1 })
+      }
       if (url.pathname === '/pro/check') {
         const code = (url.searchParams.get('code') || '').trim().toUpperCase()
         return json({ pro: await validCode(code, env.PRO_KEY, env.OWNER_KEY) })
