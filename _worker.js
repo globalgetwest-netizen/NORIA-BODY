@@ -653,6 +653,59 @@ async function cryptoBlock(q) {
   return "\n\nLIVE CRYPTO PRICES (fetched " + new Date().toISOString().slice(0, 16).replace("T", " ") + " UTC) — authoritative; use these exact figures, never remembered ones.\n" + rows.join("\n") + "\nAnswer briefly with the price and the 24-hour move.";
 }
 
+// ── §6 REALITY LAYER IN NORMAL CHAT ───────────────────────────────────────────────────────────────
+// FX and crypto answers now carry the cross-checked reality VERDICT (VERIFIED / PARTIALLY_VERIFIED /
+// CONFLICTING / STALE / UNAVAILABLE), its provenance (which independent sources agreed, as of when),
+// and its honest no-answer state. The model may phrase the answer but may NOT overrule the verdict:
+// when the verdict withholds a value, the block carries the verdict's own statement and forbids the
+// model from stating a number of its own. Feeds run through reality-feeds.js (the same path the agent
+// tools use), so the evidence model is identical, not a second implementation.
+function verdictLine(v) {
+  const src = (v.agreeing_sources || []).join(", ");
+  const asOf = v.as_of ? new Date(v.as_of).toISOString().slice(0, 16).replace("T", " ") + " UTC" : "";
+  if (v.status === "VERIFIED") return "VERIFIED — " + (v.independent_sources || 1) + (v.independent_sources > 1 ? " independent sources agree" : " source of record") + (src ? " (" + src + ")" : "") + (asOf ? ", as of " + asOf : "");
+  if (v.status === "PARTIALLY_VERIFIED") return "PARTIALLY VERIFIED — " + ((v.reasons && v.reasons[0]) || "only one credible source answered") + " (provisional)";
+  return v.status;
+}
+function verdictBlock(r, kind, opts = {}) {
+  if (!r || !r.verdict) return "";
+  const v = r.verdict;
+  if (ANSWERABLE.has(v.status)) {
+    const val = opts.line ? opts.line(v) : (v.attribute + " of " + v.entity + " = " + fmtNum(v.value, v.value < 1 ? 6 : 4) + (v.unit ? " " + v.unit : ""));
+    return "\n\nLIVE " + kind + " [" + verdictLine(v) + "] Use exactly this verified figure; never substitute a remembered or web number.\n- " + val + (r.note ? "\n(" + r.note + ")" : "") +
+      "\nState it plainly" + (v.status === "PARTIALLY_VERIFIED" ? " and note it is provisional" : "") + "; you may say it was checked against current sources. Do not add, round differently, or change the number.";
+  }
+  // Not answerable: the verdict withheld a value. Answer with its own honest statement; state no number.
+  return "\n\nLIVE " + kind + " [" + v.status + "] The verification layer did not confirm a value. Answer using EXACTLY this, and do NOT state any specific number of your own:\n\"" + v.statement + "\"";
+}
+async function realityFxBlock(q) {
+  const s = String(q || "");
+  if (!/\b(convert|conversion|exchange|how (?:many|much)|worth|rate|equals?|equivalent|in|into|to)\b|=/i.test(s)) return "";
+  curIndex();
+  const found = []; let m; _curRe.lastIndex = 0;
+  while ((m = _curRe.exec(s))) { const code = curCode(m[0]); if (code) found.push({ code, at: m.index }); }
+  const distinct = found.filter((f, i) => found.findIndex((g) => g.code === f.code) === i);
+  if (distinct.length < 2) return "";
+  const num = s.match(/\d[\d,]*(?:\.\d+)?/);
+  const amount = num ? parseFloat(num[0].replace(/,/g, "")) : 1;
+  const a = distinct[0], b = distinct[1];
+  const targetFirst = num ? a.at < num.index : /^\W*how\s+(?:many|much)\s+/i.test(s);
+  const from = targetFirst ? b.code : a.code, to = targetFirst ? a.code : b.code;
+  if (from === to) return "";
+  let r; try { r = await fxVerdict(from, to, { jget: jretry }); } catch (_) { return currencyBlock(q); } // hard failure → never worse than the ad-hoc path
+  if (!r || !r.verdict) return currencyBlock(q);
+  return verdictBlock(r, "EXCHANGE RATE", { line: (v) => "1 " + from + " = " + fmtNum(v.value, v.value < 1 ? 6 : 4) + " " + to + (amount !== 1 ? "  ->  " + fmtNum(amount, 6) + " " + from + " = " + fmtNum(amount * v.value, (amount * v.value) < 1 ? 6 : 2) + " " + to : "") });
+}
+async function realityCryptoBlock(q) {
+  const s = String(q || "").toLowerCase();
+  if (!/\b(price|cost|worth|trading|value|rate|how much|market|today|now|up|down)\b/.test(s)) return "";
+  const hits = COINS.filter(([names]) => new RegExp("(?<![a-z])(?:" + names + ")(?![a-z])", "i").test(s)).slice(0, 3);
+  if (!hits.length) return "";
+  let rs; try { rs = await Promise.all(hits.map(([, , , label]) => cryptoVerdict(label, { jget: jretry }).catch(() => null))); } catch (_) { return cryptoBlock(q); }
+  const blocks = rs.map((r) => r ? verdictBlock(r, "CRYPTO PRICE", { line: (v) => v.entity + " = $" + fmtNum(v.value, v.value < 1 ? 6 : 2) + " USD" }) : "").filter(Boolean);
+  return blocks.length ? blocks.join("") : cryptoBlock(q);
+}
+
 // Calendar + arithmetic ----------------------------------------------------------------------------
 const MON_RE = "jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sept?(?:ember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?";
 const monIdx = (m) => ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"].indexOf(String(m).toLowerCase().slice(0, 3));
@@ -1479,7 +1532,7 @@ async function groundMessages(messages, body, env) {
   const fb = futureBlock(q);
   if (fb) return { messages: addSystem(messages, fb), grounded: true }; // no search: there is nothing true to find
   // Exact-data tools first: clock, calendar/math (instant) and weather / exchange rates / crypto (live feeds).
-  const live = await withTimeout(Promise.all([weatherBlock(q, body.tz), currencyBlock(q), cryptoBlock(q)]), 9000, []);
+  const live = await withTimeout(Promise.all([weatherBlock(q, body.tz), realityFxBlock(q), realityCryptoBlock(q)]), 9000, []);
   const tools = [timeBlock(q, body.tz), calcBlock(q)].concat(live).filter(Boolean);
   if (tools.length) {
     messages = addSystem(messages, tools.join(""));
