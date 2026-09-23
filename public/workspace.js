@@ -1708,10 +1708,56 @@ const DOC_RULES = '\n\nFORMAT RULES (critical — a finished, ready-to-use docum
 // with a placeholder is kept only if what remains is a complete sentence, otherwise
 // the whole line is dropped — and any section left with no body is removed too.
 const PH_RE = /\[[^\]\n]{1,100}\]|\((?:add|insert|list|repeat|include|fill in|e\.g\.[^)]*optional)\b[^)]*\)/i
+// Output-integrity guard (§4). Every fenced ```code block``` and inline `code span`
+// in the raw model text is executable/structured content that MUST survive the
+// prose cleaner byte-for-byte. This extracts them so the transform can be verified
+// against its input, independently of HOW the cleaner protects them.
+function codeSpans(s) {
+  const out = [], t = String(s || '')
+  let m
+  const fence = /```[\s\S]*?```/g
+  while ((m = fence.exec(t))) out.push(m[0])
+  const noFence = t.replace(/```[\s\S]*?```/g, '\n')
+  const inline = /`[^`\n]+`/g
+  while ((m = inline.exec(noFence))) out.push(m[0])
+  return out
+}
+// A markdown link [text](url) is STRUCTURED content, not a [placeholder]: the link
+// text must survive the placeholder cleaner. The url may carry one level of nested
+// parentheses (e.g. .../api_(v2)). Hidden with its own invisible sentinels before any
+// prose cleaning, restored byte-for-byte after — the same discipline hideCode() uses.
+const MDLINK_RE = /\[[^\]\n]+\]\((?:[^()\s]|\([^()\s]*\))*\)/g
+function hideLinks(text) {
+  const hidden = [], S0 = '', S1 = ''
+  const out = String(text || '').replace(MDLINK_RE, (m) => { hidden.push(m); return S0 + (hidden.length - 1) + S1 })
+  return { text: out, unhide: (s) => s.replace(new RegExp(S0 + '(\\d+)' + S1, 'g'), (_, i) => hidden[+i]) }
+}
+const mdLinksOf = (s) => String(s).match(MDLINK_RE) || []
+const urlsOf = (s) => String(s).match(/https?:\/\/[^\s)]+/g) || []
+// INPUT -> TRANSFORM -> OUTPUT -> INTEGRITY CHECK. cleanDocTextInner is the proven
+// prose cleaner; this wrapper runs it, then verifies every code span from the input
+// is present, in order, byte-identical in the output. If ANY code span was altered
+// or dropped, the cleaner touched code it must never touch: we DISCARD the cleaned
+// result and return the original text unchanged. No silent corruption ever reaches
+// the user, now or after any future change to the cleaner.
 function cleanDocText(t) {
+  let cleaned
+  try { cleaned = cleanDocTextInner(t) } catch (_) { return t }
+  const before = codeSpans(t), after = codeSpans(cleaned)
+  const codeOK = before.length === after.length && before.every((x, i) => x === after[i])
+  const linksOK = mdLinksOf(t).every((x) => cleaned.includes(x))
+  const urlsOK = urlsOf(t).every((x) => cleaned.includes(x))
+  if (!codeOK || !linksOK || !urlsOK) { try { console.warn('[integrity] cleanDocText altered code/link/url — using raw output') } catch (_) {} return t }
+  return cleaned
+}
+// Test hook so the output-integrity suite can run against the REAL deployed code in
+// production (verify-output.html / console), not only an offline copy.
+try { window.__docpipe = { cleanDocText, cleanDocTextInner, codeSpans } } catch (_) {}
+function cleanDocTextInner(t) {
   // Code is hidden FIRST, before anything else: a "[...]" list/array literal or an empty "()" call is real code,
   // never a leftover fill-in-the-blank placeholder, no matter which line it sits on. See hideCode()'s comment.
-  const { text: hiddenText, unhide } = hideCode(t)
+  const _code = hideCode(t)
+  const { text: hiddenText, unhide } = hideLinks(_code.text)
   // Pre-pass: remove conversational meta-announcements and broken structural tags
   // (artifacts) so the document opens directly on its own content.
   let s0 = hiddenText
@@ -1739,7 +1785,7 @@ function cleanDocText(t) {
     }
     out.push(l)
   }
-  return unhide(out.join('\n').replace(/\n{3,}/g, '\n\n').trim())
+  return _code.unhide(unhide(out.join('\n').replace(/\n{3,}/g, '\n\n').trim()))
 }
 
 const MODERN_STANDARD = '\n\n[MODERN STANDARD — match or exceed today\'s best assistants]\n' +
