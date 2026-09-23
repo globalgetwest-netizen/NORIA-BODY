@@ -667,43 +667,53 @@ function verdictLine(v) {
   if (v.status === "PARTIALLY_VERIFIED") return "PARTIALLY VERIFIED — " + ((v.reasons && v.reasons[0]) || "only one credible source answered") + " (provisional)";
   return v.status;
 }
-function verdictBlock(r, kind, opts = {}) {
-  if (!r || !r.verdict) return "";
+// Returns { text, refuse }. ANSWERABLE -> a grounding block carrying the verified
+// value + provenance (text). WITHHELD (CONFLICTING/STALE/UNAVAILABLE/UNVERIFIED) ->
+// refuse = the verdict's OWN deterministic statement, which groundMessages delivers
+// verbatim, bypassing the model entirely so it can never state a withheld number.
+function verdictResult(r, kind, opts = {}) {
+  if (!r || !r.verdict) return { text: "", refuse: null };
   const v = r.verdict;
   if (ANSWERABLE.has(v.status)) {
     const val = opts.line ? opts.line(v) : (v.attribute + " of " + v.entity + " = " + fmtNum(v.value, v.value < 1 ? 6 : 4) + (v.unit ? " " + v.unit : ""));
-    return "\n\nLIVE " + kind + " [" + verdictLine(v) + "] Use exactly this verified figure; never substitute a remembered or web number.\n- " + val + (r.note ? "\n(" + r.note + ")" : "") +
-      "\nState it plainly" + (v.status === "PARTIALLY_VERIFIED" ? " and note it is provisional" : "") + "; you may say it was checked against current sources. Do not add, round differently, or change the number.";
+    return { text: "\n\nLIVE " + kind + " [" + verdictLine(v) + "] Use exactly this verified figure; never substitute a remembered or web number.\n- " + val + (r.note ? "\n(" + r.note + ")" : "") +
+      "\nState it plainly" + (v.status === "PARTIALLY_VERIFIED" ? " and note it is provisional" : "") + "; you may say it was checked against current sources. Do not add, round differently, or change the number.", refuse: null };
   }
-  // Not answerable: the verdict withheld a value. Answer with its own honest statement; state no number.
-  return "\n\nLIVE " + kind + " [" + v.status + "] The verification layer did not confirm a value. Answer using EXACTLY this, and do NOT state any specific number of your own:\n\"" + v.statement + "\"";
+  return { text: "", refuse: v.statement }; // the verification layer withheld a value → deliver its honest statement directly
 }
 async function realityFxBlock(q) {
+  const none = { text: "", refuse: null };
   const s = String(q || "");
-  if (!/\b(convert|conversion|exchange|how (?:many|much)|worth|rate|equals?|equivalent|in|into|to)\b|=/i.test(s)) return "";
+  if (!/\b(convert|conversion|exchange|how (?:many|much)|worth|rate|equals?|equivalent|in|into|to)\b|=/i.test(s)) return none;
   curIndex();
   const found = []; let m; _curRe.lastIndex = 0;
   while ((m = _curRe.exec(s))) { const code = curCode(m[0]); if (code) found.push({ code, at: m.index }); }
   const distinct = found.filter((f, i) => found.findIndex((g) => g.code === f.code) === i);
-  if (distinct.length < 2) return "";
+  if (distinct.length < 2) return none;
   const num = s.match(/\d[\d,]*(?:\.\d+)?/);
   const amount = num ? parseFloat(num[0].replace(/,/g, "")) : 1;
   const a = distinct[0], b = distinct[1];
   const targetFirst = num ? a.at < num.index : /^\W*how\s+(?:many|much)\s+/i.test(s);
   const from = targetFirst ? b.code : a.code, to = targetFirst ? a.code : b.code;
-  if (from === to) return "";
-  let r; try { r = await fxVerdict(from, to, { jget: jretry }); } catch (_) { return currencyBlock(q); } // hard failure → never worse than the ad-hoc path
-  if (!r || !r.verdict) return currencyBlock(q);
-  return verdictBlock(r, "EXCHANGE RATE", { line: (v) => "1 " + from + " = " + fmtNum(v.value, v.value < 1 ? 6 : 4) + " " + to + (amount !== 1 ? "  ->  " + fmtNum(amount, 6) + " " + from + " = " + fmtNum(amount * v.value, (amount * v.value) < 1 ? 6 : 2) + " " + to : "") });
+  if (from === to) return none;
+  let r; try { r = await fxVerdict(from, to, { jget: jretry }); } catch (_) { return { text: currencyBlock(q), refuse: null }; } // hard failure → never worse than the ad-hoc path
+  if (!r || !r.verdict) return { text: currencyBlock(q), refuse: null };
+  return verdictResult(r, "EXCHANGE RATE", { line: (v) => "1 " + from + " = " + fmtNum(v.value, v.value < 1 ? 6 : 4) + " " + to + (amount !== 1 ? "  ->  " + fmtNum(amount, 6) + " " + from + " = " + fmtNum(amount * v.value, (amount * v.value) < 1 ? 6 : 2) + " " + to : "") });
 }
 async function realityCryptoBlock(q) {
+  const none = { text: "", refuse: null };
   const s = String(q || "").toLowerCase();
-  if (!/\b(price|cost|worth|trading|value|rate|how much|market|today|now|up|down)\b/.test(s)) return "";
+  if (!/\b(price|cost|worth|trading|value|rate|how much|market|today|now|up|down)\b/.test(s)) return none;
   const hits = COINS.filter(([names]) => new RegExp("(?<![a-z])(?:" + names + ")(?![a-z])", "i").test(s)).slice(0, 3);
-  if (!hits.length) return "";
-  let rs; try { rs = await Promise.all(hits.map(([, , , label]) => cryptoVerdict(label, { jget: jretry }).catch(() => null))); } catch (_) { return cryptoBlock(q); }
-  const blocks = rs.map((r) => r ? verdictBlock(r, "CRYPTO PRICE", { line: (v) => v.entity + " = $" + fmtNum(v.value, v.value < 1 ? 6 : 2) + " USD" }) : "").filter(Boolean);
-  return blocks.length ? blocks.join("") : cryptoBlock(q);
+  if (!hits.length) return none;
+  let rs; try { rs = await Promise.all(hits.map(([, , , label]) => cryptoVerdict(label, { jget: jretry }).catch(() => null))); } catch (_) { return { text: cryptoBlock(q), refuse: null }; }
+  const results = rs.filter(Boolean).map((r) => verdictResult(r, "CRYPTO PRICE", { line: (v) => v.entity + " = $" + fmtNum(v.value, v.value < 1 ? 6 : 2) + " USD" }));
+  if (!results.length) return { text: cryptoBlock(q), refuse: null };
+  const texts = results.filter((x) => x.text).map((x) => x.text);
+  const withheld = results.filter((x) => x.refuse).map((x) => x.refuse);
+  if (!texts.length) return { text: "", refuse: withheld.join(" ") };                 // every asset withheld → structural refuse
+  const extra = withheld.length ? "\n\nLIVE CRYPTO PRICE [withheld] For the other asset(s), answer with EXACTLY this and state no number of your own: " + withheld.join(" ") : "";
+  return { text: texts.join("") + extra, refuse: null };                               // some verified, any withheld carried as an honest instruction
 }
 
 // Calendar + arithmetic ----------------------------------------------------------------------------
@@ -1532,7 +1542,13 @@ async function groundMessages(messages, body, env) {
   const fb = futureBlock(q);
   if (fb) return { messages: addSystem(messages, fb), grounded: true }; // no search: there is nothing true to find
   // Exact-data tools first: clock, calendar/math (instant) and weather / exchange rates / crypto (live feeds).
-  const live = await withTimeout(Promise.all([weatherBlock(q, body.tz), realityFxBlock(q), realityCryptoBlock(q)]), 9000, []);
+  const [wx, fx, cr] = await withTimeout(Promise.all([weatherBlock(q, body.tz), realityFxBlock(q), realityCryptoBlock(q)]), 9000, ["", null, null]);
+  // A WITHHELD reality verdict (CONFLICTING / STALE / UNAVAILABLE / UNVERIFIED) is
+  // delivered verbatim as its own honest statement, bypassing the model — so the
+  // model can never state a value the evidence layer refused to confirm.
+  const withheld = (fx && fx.refuse) || (cr && cr.refuse) || null;
+  if (withheld) return { messages, grounded: true, refuse: withheld };
+  const live = [typeof wx === "string" ? wx : "", fx && fx.text, cr && cr.text];
   const tools = [timeBlock(q, body.tz), calcBlock(q)].concat(live).filter(Boolean);
   if (tools.length) {
     messages = addSystem(messages, tools.join(""));
