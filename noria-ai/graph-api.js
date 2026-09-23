@@ -15,7 +15,12 @@ export const GRAPH_OPS = new Set([
   'addDecision', 'decisions',
   'memSet', 'memGet', 'memList', 'memMap', 'memDelete', 'memSearch', 'context', 'dataContext',
   'appendEvent', 'events', 'verifyEvents',
-  'setSchedule', 'dueObjectives',
+  'setSchedule', 'dueObjectives', 'advanceSchedule',
+  // control loop (schema v2)
+  'getPolicy', 'setPolicy', 'retryTask', 'recordUses', 'currentRefHash', 'staleCheck', 'observe', 'supersedeMany', 'learnFromFailure',
+  'checkpoint', 'pauseObjective', 'resumeObjective', 'revisionState',
+  // fewer round trips (the store restricts what a batch may contain)
+  'batch', 'appendEvents', 'claimReadyContext', 'projectSnapshot',
 ])
 const MAX_BODY = 400000
 
@@ -45,6 +50,7 @@ export function graphDeleteStatements(db, userId) {
   const stmts = [
     db.prepare('DELETE FROM g_attempts WHERE objective_id IN (SELECT id FROM g_objectives WHERE user_id = ?)').bind(userId),
     db.prepare('DELETE FROM g_task_deps WHERE objective_id IN (SELECT id FROM g_objectives WHERE user_id = ?)').bind(userId),
+    db.prepare('DELETE FROM g_task_uses WHERE objective_id IN (SELECT id FROM g_objectives WHERE user_id = ?)').bind(userId),
   ]
   for (const t of byUser) stmts.push(db.prepare(`DELETE FROM ${t} WHERE user_id = ?`).bind(userId))
   stmts.push(db.prepare('DELETE FROM g_objectives WHERE user_id = ?').bind(userId), db.prepare('DELETE FROM g_projects WHERE user_id = ?').bind(userId))

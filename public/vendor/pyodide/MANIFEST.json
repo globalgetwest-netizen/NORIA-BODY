@@ -1,0 +1,32 @@
+{
+ "name": "pyodide",
+ "version": "314.0.7",
+ "license": "MPL-2.0",
+ "source": "https://registry.npmjs.org/pyodide/-/pyodide-314.0.7.tgz",
+ "npm_integrity": "sha512-0YvXxEhfEdpLfb/XkM2BFAeMROq0iMUX2bzzH9pOttyMcWkwq+HbE5uyuGD82LN7y2q+SNvi/6V5JEsOlD2R1A==",
+ "npm_shasum_sha1": "19a6865259f8d594cdef5b7e2f44930b68f5e987",
+ "verified": "the tarball SHA-512 and SHA-1 were computed locally and matched the registry values on 2026-09-22; no install scripts exist in the package; only these static files are hosted",
+ "note": "pyodide-lock.min.json is generated: the original lock file with its package list removed, so no package can be named or loaded. numpy/pandas etc. are NOT included.",
+ "files": {
+  "pyodide-lock.min.json": {
+   "bytes": 111,
+   "sha256": "8cbda7522cdf03a2d5590a0bf2fe6d3c5bd60539481af157273c555862ee888d"
+  },
+  "pyodide.asm.mjs": {
+   "bytes": 1250344,
+   "sha256": "f7cdc8ece80678ceb712f8e65ebe6d3a83203a180c399865f49612a051693635"
+  },
+  "pyodide.asm.wasm": {
+   "bytes": 9598218,
+   "sha256": "cc36e3cab04fdfc9a63ff13eb52eae2b911bf46c025cc7b281f394bd3de1d5e6"
+  },
+  "pyodide.mjs": {
+   "bytes": 17931,
+   "sha256": "6f1d60f7bf529beb300f0f47983c921d3982363640ba20af0e38efdddbc66109"
+  },
+  "python_stdlib.zip": {
+   "bytes": 2545637,
+   "sha256": "fa1957e5777068fc4f7437f96d860ae2fbe9c19732ba06c84e004ec16dd7dd7a"
+  }
+ }
+}

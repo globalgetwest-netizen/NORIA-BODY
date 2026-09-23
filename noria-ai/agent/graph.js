@@ -8,7 +8,7 @@
 import { executionLevels } from "./planner.js";
 
 // ── states ─────────────────────────────────────────────────────────────────────────────────────────────────────────
-export const TASK_STATES = ["pending", "ready", "running", "done", "failed", "blocked", "awaiting_approval", "needs_permission", "denied", "uncertain", "skipped", "cancelled", "removed"];
+export const TASK_STATES = ["pending", "ready", "running", "done", "failed", "blocked", "awaiting_approval", "needs_permission", "denied", "uncertain", "skipped", "cancelled", "removed", "superseded"];
 export const OBJECTIVE_STATES = ["draft", "planned", "running", "awaiting_user", "paused", "completed", "partial", "failed", "cancelled"];
 export const PROJECT_STATES = ["active", "archived"];
 
@@ -19,19 +19,20 @@ export const TRANSITIONS = {
   running: ["done", "failed", "ready", "awaiting_approval", "needs_permission", "denied", "blocked", "uncertain", "cancelled"],
   awaiting_approval: ["ready", "denied", "cancelled", "removed"],
   needs_permission: ["ready", "cancelled", "removed"],
-  failed: ["ready", "removed"],
+  failed: ["ready", "removed", "superseded"],
   denied: ["ready", "removed"],
   blocked: ["ready", "removed"],
   uncertain: ["ready", "done", "failed", "removed"],
-  skipped: ["pending", "removed"],
-  done: [],
+  skipped: ["pending", "removed", "superseded"],
+  done: ["superseded"], // finished work is never rewritten; it can only be replaced by a newer version, and the old output is kept as history
+  superseded: [],
   cancelled: [],
   removed: [],
 };
 export const canTransition = (from, to) => (TRANSITIONS[from] || []).includes(to);
 // terminal for scheduling: no further work will happen on this task unless the graph is revised or the person acts
 export const TERMINAL_OK = new Set(["done"]);
-export const TERMINAL_STOP = new Set(["failed", "blocked", "denied", "skipped", "cancelled", "removed"]); // a dependent of one of these cannot run
+export const TERMINAL_STOP = new Set(["failed", "blocked", "denied", "skipped", "cancelled", "removed", "superseded"]); // a dependent of one of these cannot run
 export const WAITING = new Set(["awaiting_approval", "needs_permission", "uncertain"]);       // need the person or an outside change
 export const ACTIVE = new Set(["pending", "ready", "running"]);
 
@@ -99,6 +100,7 @@ export function resolveRefs(value, ctx) {
 }
 
 // ── creating a graph from a validated plan ─────────────────────────────────────────────────────────────────────────
+export const DEFAULT_POLICY = { max_revisions: 3, max_retries: 2, max_iterations: 6, session_max_tasks: 40, background: false };
 export const LIMITS = { tasks: 60, artifactBytes: 200000, memoryValueBytes: 20000, memoryKeys: 500, textBytes: 4000 };
 // planResult: the output of validatePlan ({ valid, plan }). Returns { ok, tasks, problems }; a task's initial state follows from the plan.
 export function graphFromPlan(planResult) {
@@ -113,7 +115,7 @@ export function graphFromPlan(planResult) {
     for (const r of refs) if (!keys.has(r)) problems.push(t.id + " refers to a task that does not exist: " + r);
     const depends_on = [...new Set([...(t.depends_on || []), ...refs.filter((r) => r !== t.id)])]; // data flow implies dependency
     if (refs.includes(t.id)) problems.push(t.id + " refers to its own output");
-    return { key: t.id, description: t.description, tools: t.tools || [], input: t.input || {}, depends_on, verification: t.verification || [], approval_required: !!t.approval_required, plan_status: t.status, blocked_by: t.blocked_by || [] };
+    return { key: t.id, description: t.description, tools: t.tools || [], input: t.input || {}, depends_on, verification: t.verification || [], approval_required: !!t.approval_required, plan_status: t.status, blocked_by: t.blocked_by || [], remember: t.remember || null };
   });
   const levels = executionLevels(tasks.map((t) => t.key), Object.fromEntries(tasks.map((t) => [t.key, t.depends_on])));
   if (!levels && !problems.length) problems.push("the dependencies contain a cycle");
@@ -148,7 +150,7 @@ export function checkRevision(current, revision) {
 
 // What state should an objective be in, given its tasks?
 export function objectiveStateFrom(taskStates) {
-  const s = taskStates.filter((x) => x !== "removed");
+  const s = taskStates.filter((x) => x !== "removed" && x !== "superseded");
   if (!s.length) return "draft";
   if (s.every((x) => x === "done")) return "completed";
   if (s.some((x) => x === "running")) return "running";
@@ -158,4 +160,10 @@ export function objectiveStateFrom(taskStates) {
   const done = s.filter((x) => x === "done").length;
   if (s.every((x) => x === "cancelled")) return "cancelled";
   return done ? "partial" : "failed";
+}
+
+// The fingerprint of what a reference reads right now. Pure (no store needed), so callers compute it locally instead of asking the server.
+export async function refHash(ref, ctx) {
+  const r = resolveRefs("{{" + ref + "}}", ctx);
+  return r.errors.length ? "missing" : (await sha256(stableJson(r.value))).slice(0, 24);
 }

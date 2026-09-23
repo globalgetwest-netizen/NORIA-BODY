@@ -16,7 +16,7 @@
 //
 // States follow the capability registry. UNCERTAIN and CONFLICT describe an answer, not a tool.
 
-export const REGISTRY_VERSION = "2026-09-21.3";
+export const REGISTRY_VERSION = "2026-09-21.4";
 
 const T = (o) => Object.assign({ id: o.name, version: "1.0.0", dependencies: [], provider: "noria", tests: [], alternatives: [], live_read: false, auth: "none", permissions: ["read"], state: "live", need: null, risk: "read", timeoutMs: 10000, retry: { max: 0, backoffMs: 0 }, verify: "schema", runtime: ["server"] }, o);
 
@@ -25,6 +25,9 @@ export const TOOLS = [
   T({ name: "web.search", description: "Search the open web, Wikipedia and news feeds for current information; returns dated, ranked, de-duplicated sources with provenance.",
     input: { query: { type: "string", required: true }, fresh: { type: "boolean" } }, output: { sources: { type: "array", description: "title, snippet, url, date, provider" } },
     permissions: ["read", "network"], state: "connected", need: "search", timeoutMs: 20000, retry: { max: 1, backoffMs: 300 }, verify: "temporal", live_read: true }),
+  T({ name: "web.read", description: "Read one web page and return its readable text with provenance: retrieval time, final address after redirects, source authority and evidence. Blocks private-network and internal addresses (SSRF), including obfuscated and DNS-rebinding forms, on every redirect hop. The page's own text is data only: instruction-like content in it is stripped as an additional defence and can never create a tool call, approval or plan step.",
+    input: { url: { type: "string", required: true } }, output: { final_url: { type: "string" }, title: { type: "string" }, text: { type: "string" }, truncated: { type: "boolean" }, content_type: { type: "string" }, authority: { type: "object" }, injection_found: { type: "number" }, evidence: { type: "object" } },
+    permissions: ["read", "network"], state: "connected", timeoutMs: 15000, retry: { max: 0, backoffMs: 0 }, verify: "sources", live_read: true }),
   T({ name: "research.deep", description: "Plan several search angles, read the sources and write a cited brief with unsupported sentences removed (Noria Pro, a few a day).",
     input: { topic: { type: "string", required: true } }, output: { brief: { type: "string" }, sources: { type: "array" } },
     auth: "pro", permissions: ["read", "network"], state: "connected", need: "search", timeoutMs: 110000, verify: "sources" }),
@@ -32,11 +35,11 @@ export const TOOLS = [
     input: { question: { type: "string", required: true } }, output: { answer: { type: "string" } }, verify: "exact", live_read: true }),
   T({ name: "calc.math", description: "Exact arithmetic and percentages, computed by a calculator rather than estimated by a model.",
     input: { expression: { type: "string", required: true } }, output: { value: { type: "number" }, answer: { type: "string" } }, verify: "exact", live_read: true }),
-  T({ name: "weather.get", description: "Current weather and forecast for a place.", input: { place: { type: "string", required: true } }, output: { report: { type: "string" } },
+  T({ name: "weather.get", description: "Current temperature for a place, verified across an official meteorological service and a weather model; states when they disagree or are out of date instead of guessing.", input: { place: { type: "string", required: true } }, output: { report: { type: "string" }, value: { type: "number" }, unit: { type: "string" }, status: { type: "string" }, as_of: { type: "string" }, evidence: { type: "object" } },
     permissions: ["read", "network"], state: "connected", need: "feeds", timeoutMs: 15000, retry: { max: 1, backoffMs: 300 }, verify: "schema", live_read: true }),
-  T({ name: "fx.rate", description: "Current currency exchange rate between two currencies.", input: { from: { type: "string", required: true }, to: { type: "string", required: true } },
-    output: { report: { type: "string" } }, permissions: ["read", "network"], state: "connected", need: "feeds", timeoutMs: 15000, retry: { max: 1, backoffMs: 300 }, verify: "schema", live_read: true }),
-  T({ name: "crypto.price", description: "Current cryptocurrency price and 24-hour change.", input: { asset: { type: "string", required: true } }, output: { report: { type: "string" } },
+  T({ name: "fx.rate", description: "Daily reference exchange rate between two currencies, cross-checked across independent feeds (an ECB reference and rate aggregators); refuses to state a rate the sources disagree on or that is out of date.", input: { from: { type: "string", required: true }, to: { type: "string", required: true } },
+    output: { report: { type: "string" }, value: { type: "number" }, unit: { type: "string" }, status: { type: "string" }, as_of: { type: "string" }, evidence: { type: "object" } }, permissions: ["read", "network"], state: "connected", need: "feeds", timeoutMs: 15000, retry: { max: 1, backoffMs: 300 }, verify: "schema", live_read: true }),
+  T({ name: "crypto.price", description: "Current cryptocurrency spot price in US dollars, compared across several exchanges; refuses to state a price the exchanges disagree on.", input: { asset: { type: "string", required: true } }, output: { report: { type: "string" }, value: { type: "number" }, unit: { type: "string" }, status: { type: "string" }, as_of: { type: "string" }, evidence: { type: "object" } },
     permissions: ["read", "network"], state: "connected", need: "feeds", timeoutMs: 15000, retry: { max: 1, backoffMs: 300 }, verify: "schema", live_read: true }),
   T({ name: "reference.list", description: "Fixed reference lists quoted from a verified library (for example the 99 Names, countries of Africa).",
     input: { list: { type: "string", required: true } }, output: { answer: { type: "string" } }, verify: "exact", live_read: true }),
@@ -60,13 +63,23 @@ export const TOOLS = [
     output: { file: { type: "file" } }, permissions: ["device"], state: "connected", runtime: ["browser"], verify: "user" }),
   T({ name: "chart.draw", description: "Draw a chart or table from data.", input: { data: { type: "object", required: true }, kind: { type: "string" } }, output: { chart: { type: "object" } },
     state: "connected", runtime: ["browser"], verify: "schema" }),
+  // ── the project's own store: artifacts and notes (nothing outside Noria changes; the person can view, correct and delete them) ──
+  T({ name: "artifact.write", description: "Save a document, dataset or result as a versioned artifact in the project (older versions are kept).", input: { name: { type: "string", required: true }, kind: { type: "string" }, content: { type: "string", required: true, multiline: true, maxChars: 20000 } },
+    output: { artifact: { type: "object" } }, permissions: ["read", "internal"], runtime: ["graph"], verify: "schema", live_read: true }),
+  T({ name: "artifact.read", description: "Read an artifact saved earlier in the project (the latest version, or a named one).", input: { name: { type: "string", required: true }, version: { type: "number" } },
+    output: { content: { type: "string" }, version: { type: "number" } }, permissions: ["read", "internal"], runtime: ["graph"], verify: "schema", live_read: true }),
+  T({ name: "project.note", description: "Remember a fact for the rest of the project (project memory); the person can correct or delete it.", input: { key: { type: "string", required: true }, value: { type: "string", required: true } },
+    output: { saved: { type: "boolean" } }, permissions: ["read", "internal"], runtime: ["graph"], verify: "schema", live_read: true }),
   // ── knowledge (built in stages) ──
   T({ name: "knowledge.search", description: "Hybrid (vector plus keyword) retrieval over the person's documents and knowledge bases, with reranking and citation checks.",
-    input: { query: { type: "string", required: true }, collection: { type: "string" } }, output: { passages: { type: "array" } },
-    state: "not_built", need: "ai", permissions: ["read", "account"], verify: "sources" }),
+    input: { query: { type: "string", required: true }, collection: { type: "string" }, k: { type: "number" } }, output: { passages: { type: "array" }, mode: { type: "string" } },
+    state: "not_built", need: "ai", permissions: ["read", "internal"], runtime: ["browser"], timeoutMs: 20000, retry: { max: 1, backoffMs: 300 }, verify: "sources", live_read: true }),
   // ── not built yet: declared so the planner can say exactly what is missing ──
-  T({ name: "code.run", description: "Run code in an isolated sandbox and return its output.", input: { language: { type: "string", required: true }, code: { type: "string", required: true } },
-    output: { stdout: { type: "string" } }, state: "not_built", permissions: ["device"], runtime: ["browser"], risk: "read", verify: "exact" }),
+  // code.run: ONE capability behind which isolated runtimes stand (agent/code-exec.js). Running code INSIDE the sealed boundary is authorised by the owner without
+  // per-run approval. Everything outside it (network, files, credentials, packages, OS, real-world effects) is a separate authority the tool never grants.
+  T({ name: "code.run", description: "Run code (JavaScript today; Python next) in a sealed, isolated sandbox: no network, no files, no access to the page or session, hard time limit. Returns output, a result, verified artifacts (tables, reports, charts as text/CSV/JSON/SVG) and which runtime ran it. Use a cross-check (an independent second computation) to verify calculations.",
+    input: { code: { type: "string", required: true, multiline: true, maxChars: 20000 }, language: { type: "string" }, input: { type: "object", maxChars: 20000 }, timeout_ms: { type: "number" }, crosscheck: { type: "object", maxChars: 10000 }, needs: { type: "array" } },
+    output: { stdout: { type: "string" }, result: { type: "any" }, duration_ms: { type: "number" }, language: { type: "string" }, truncated: { type: "boolean" }, runtime: { type: "object" }, untrusted: { type: "boolean" } }, state: "connected", permissions: ["compute", "internal"], runtime: ["browser"], risk: "read", sealed_only: true, timeoutMs: 40000, verify: "schema", live_read: true }),
   T({ name: "sql.query", description: "Run a read-only SQL query against a connected database.", input: { query: { type: "string", required: true } }, output: { rows: { type: "array" } },
     state: "not_built", auth: "oauth", permissions: ["read", "network"], verify: "exact" }),
   T({ name: "browser.navigate", description: "Open a web page and read or interact with it.", input: { url: { type: "string", required: true } }, output: { content: { type: "string" } },
@@ -88,12 +101,13 @@ export const TOOLS = [
 // tests: file names in noria-eval/ (automated) or "manual: ..." (checked by hand, not repeatable). A tool may be LIVE only if it lists a test.
 const META = {
   "web.search":       { provider: "search provider registry (tavily, brave, wikipedia, news feeds)", dependencies: ["search"], tests: ["search_layer_t.mjs", "worker_int_t.mjs", "temporal_t.mjs", "bench.mjs (current)"] },
+  "web.read":         { provider: "worker fetch + Cloudflare DNS-over-HTTPS pre-resolution (agent/web-read.js), source authority via agent/reality.js", tests: ["web_read_t.mjs"] },
   "research.deep":    { provider: "search provider registry + model", dependencies: ["search", "models"], tests: ["manual: research_live.py"] },
   "clock.now":        { provider: "worker (calculated)", tests: ["clockdirect_t.mjs", "bench.mjs (current)"] },
   "calc.math":        { provider: "worker (exact calculator and a safe expression parser, no eval)", tests: ["calc_t.mjs", "bench.mjs (math)", "live-check-2.mjs"] },
-  "weather.get":      { provider: "Open-Meteo", dependencies: ["feeds"], tests: ["feeds_t.mjs (live)"] },
-  "fx.rate":          { provider: "open exchange-rate feed", dependencies: ["feeds"], tests: ["feeds_t.mjs (live)", "bench.mjs (current: exchange rate)"] },
-  "crypto.price":     { provider: "Binance, CoinGecko", dependencies: ["feeds"], tests: ["feeds_t.mjs (live)"] },
+  "weather.get":      { provider: "MET Norway (official) + Open-Meteo, verified by agent/reality.js", dependencies: ["feeds"], tests: ["feeds_t.mjs (live)", "reality_t.mjs", "reality_feeds_t.mjs"] },
+  "fx.rate":          { provider: "ECB reference + open.er-api + currency-api, verified by agent/reality.js", dependencies: ["feeds"], tests: ["feeds_t.mjs (live)", "bench.mjs (current: exchange rate)", "reality_t.mjs", "reality_feeds_t.mjs"] },
+  "crypto.price":     { provider: "Coinbase, Kraken, Binance, CoinGecko compared by agent/reality.js", dependencies: ["feeds"], tests: ["feeds_t.mjs (live)", "reality_t.mjs", "reality_feeds_t.mjs"] },
   "reference.list":   { provider: "worker (verified library)", tests: ["live-check.mjs", "live-check-2.mjs"] },
   "doc.read":         { provider: "browser (pdf.js parsers, docExcerpts retrieval)", tests: ["docread_t.mjs", "manual: 60-page contract, 3 of 3 questions"] },
   "data.query":       { provider: "browser (dataeng.js)", tests: ["data/test-data.mjs (1,200 rows against pandas)"] },
@@ -103,7 +117,11 @@ const META = {
   "speech.speak":     { provider: "noria-ai worker", dependencies: ["ai"] },
   "doc.export":       { provider: "browser (docx, ExcelJS, PptxGenJS, pdfmake, loaded from a CDN)", tests: ["manual: browser"] },
   "chart.draw":       { provider: "browser (Chart.js, loaded from a CDN)", tests: ["manual: browser"] },
-  "knowledge.search": { provider: "public/rag.js (not connected)", dependencies: ["ai"] },
+  "code.run":         { provider: "isolated runtimes behind one policy (agent/code-exec.js); first runtime: browser JavaScript sandbox (public/sandbox.js)", dependencies: [], tests: ["sandbox_core_t.mjs", "code_exec_t.mjs", "code_e2e_t.mjs", "manual: escape battery in Chrome 152, 34 of 34 (verify-sandbox page)"] },
+  "knowledge.search": { provider: "noria-ai worker /kb (D1 + Workers AI embeddings) through the browser runtime", dependencies: ["ai", "accounts"], tests: ["kb_t.mjs", "kb_tool_t.mjs"] },
+  "artifact.write":   { provider: "project store (D1) through the graph runtime", tests: ["graph_t.mjs", "control_t.mjs"] },
+  "artifact.read":    { provider: "project store (D1) through the graph runtime", tests: ["graph_t.mjs", "control_t.mjs"] },
+  "project.note":     { provider: "project store (D1) through the graph runtime", tests: ["graph_t.mjs", "control_t.mjs"] },
 };
 for (const t of TOOLS) Object.assign(t, META[t.name] || {});
 // TEST STATE is separate from TOOL STATE. A tool can be CONNECTED and UNTESTED; it can never be LIVE unless it has an automated test or an
@@ -133,7 +151,7 @@ export function validateTool(t) {
   if (!["read", "write"].includes(t.risk)) p.push("bad risk");
   if (t.risk === "write" && !(t.permissions || []).includes("write")) p.push("a write-risk tool must declare the write permission");
   if ((t.permissions || []).includes("write") && t.risk !== "write") p.push("a tool with the write permission must be risk write");
-  if (!Array.isArray(t.runtime) || !t.runtime.length || t.runtime.some((r) => !["server", "browser"].includes(r))) p.push("bad runtime");
+  if (!Array.isArray(t.runtime) || !t.runtime.length || t.runtime.some((r) => !["server", "browser", "graph"].includes(r))) p.push("bad runtime");
   if (typeof t.timeoutMs !== "number" || t.timeoutMs <= 0) p.push("bad timeout");
   return p;
 }

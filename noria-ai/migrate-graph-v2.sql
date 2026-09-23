@@ -1,0 +1,11 @@
+ALTER TABLE g_objectives ADD COLUMN policy TEXT;
+ALTER TABLE g_objectives ADD COLUMN revision_count INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE g_tasks ADD COLUMN stale INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE g_tasks ADD COLUMN superseded_by TEXT;
+ALTER TABLE g_tasks ADD COLUMN retries INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE g_tasks ADD COLUMN last_verification TEXT;
+ALTER TABLE g_tasks ADD COLUMN remember TEXT;
+ALTER TABLE g_tasks ADD COLUMN version INTEGER NOT NULL DEFAULT 1;
+CREATE TABLE IF NOT EXISTS g_task_uses (objective_id TEXT NOT NULL, task_key TEXT NOT NULL, ref TEXT NOT NULL, value_hash TEXT NOT NULL, PRIMARY KEY (objective_id, task_key, ref));
+CREATE TABLE IF NOT EXISTS g_meta (k TEXT PRIMARY KEY, v TEXT);
+INSERT OR REPLACE INTO g_meta (k, v) VALUES ('schema_version', '2');

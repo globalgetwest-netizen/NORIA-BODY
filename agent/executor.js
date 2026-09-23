@@ -55,7 +55,7 @@ export function buildInput(tool, task, opts = {}) {
   }
   return out;
 }
-const INJECTION = /(?:ignore|disregard|forget)\s+(?:all\s+|any\s+|the\s+)?(?:previous|prior|above|earlier|system)\s+(?:instructions?|prompts?|rules?)|you\s+(?:must|should)\s+now\b|new\s+instructions?\s*:|(?:send|forward)\s+(?:an?\s+)?e-?mail\s+to\b|(?:call|invoke|use|run)\s+(?:the\s+)?[a-z]+\.[a-z_]+\s+tool|reveal\s+(?:your\s+)?(?:system\s+)?prompt|execute\s+the\s+following/i;
+const INJECTION = /(?:ignore|disregard|forget)\s+(?:all\s+|any\s+|the\s+)?(?:previous|prior|above|earlier|system)\s+(?:instructions?|prompts?|rules?)|you\s+(?:must|should)\s+now\b|new\s+instructions?\s*:|(?:send|forward)\s+(?:an?\s+)?e-?mail\s+to\b|(?:call|invoke|use|run)\s+(?:the\s+)?[a-z]+\.[a-z_]+\s+tool|reveal\s+(?:your\s+)?(?:system\s+)?prompt|execute\s+the\s+following|(?:ignore|disregard|forget|bypass|override)\s+(?:all\s+|any\s+|the\s+|your\s+|my\s+|these\s+|those\s+)?(?:previous\s+|prior\s+|above\s+|earlier\s+|safety\s+|security\s+)?(?:instructions?|prompts?|rules?|guidelines|restrictions|safeguards|limits)|you\s+are\s+now\s+(?:in\s+|an?\s+)?(?:admin|administrator|developer|root|god|dan|unrestricted|jailbreak(?:en)?|unfiltered)\b|(?:^|\n)\s*(?:system|assistant|developer)\s*[:>]|<\|?(?:im_start|system|assistant)\|?>|\[\s*(?:system|assistant)\s*\]|(?:approval|permission|authori[sz]ation)\s+(?:has\s+been\s+|is\s+)?(?:granted|given|approved)|(?:send|forward|upload|post|exfiltrate)\s+(?:all\s+|the\s+|any\s+|every\s+)?(?:data|database|secrets?|tokens?|passwords?|credentials|api\s+keys?|cookies?|session|files?)\s+(?:to|at)\b|act\s+as\s+(?:an?\s+)?(?:unrestricted|admin|root|jailbroken)/i;
 // Removes instruction-like sentences from every string in a tool result; reports what was removed.
 export function sanitizeOutput(value, found = []) {
   if (typeof value === "string") {
@@ -163,12 +163,14 @@ export class Executor {
     // 3 input
     const input = buildInput(tool, task, { attachments: this.attachments, simulate: this.mode === "dry-run" }), verrs = validateInput(tool.input, input);
     if (verrs.length) return fail("failed", "invalid input: " + verrs.join("; ") + (tool.input && Object.values(tool.input).some((x) => x.type === "file") && !this.attachments.length && this.mode !== "dry-run" ? " (no file is attached)" : ""));
+    // 3b a sealed-only tool (code.run) never carries a request for anything outside its boundary: that is a separate authority, refused here as well as inside the runtime
+    if (tool.sealed_only && Array.isArray(input.needs) && input.needs.some((n) => n !== "sealed_compute")) return fail("denied", "outside_boundary: " + name + " runs inside its sealed boundary only; \"" + input.needs.filter((n) => n !== "sealed_compute").join(", ") + "\" is a separate authority that needs its own approval and is not granted");
     // 4 permission and runtime
     if (tool.auth !== "none" && !this.grants.has(tool.auth)) return fail("needs_permission", "invalid permission: " + name + " needs \"" + tool.auth + "\" authorisation, which has not been granted");
     if (!this.runtime.supports(tool)) return fail("failed", "no runtime available for " + name + " (it runs in: " + tool.runtime.join(", ") + ")");
     // 5 idempotency (BEFORE approval: something that already ran, or may have run, is never re-approved or run again)
     const key = await keyOf([planId, task.id, name, JSON.stringify(input)].join("|"));
-    const prior = await this.ledger.get(key), ctxL = { objectiveId: planId, taskKey: task.id, tool: name };
+    const ctxL = { objectiveId: planId, taskKey: task.id, tool: name }, prior = await this.ledger.get(key, ctxL);
     if (prior && prior.started && tool.risk === "write") return fail("uncertain_outcome", "an earlier attempt at " + name + " started and did not record how it ended: it may already have happened, so it is not run again until a person confirms");
     if (prior && prior.ok) { await this.log(Object.assign({ event: "deduplicated", tool: name, key }, base)); return { ok: true, status: "done", tool: name, output: prior.output, deduplicated: true, attempts: 0, notes: ["already executed: not run again"] }; }
     // 6 risk and approval

@@ -1,6 +1,13 @@
 node_modules/
 .env
+.dev.vars
 *.log
 .DS_Store
 noria-ai/wrangler.dev.toml
 noria-ai/.wrangler/
+.wrangler/
+# secrets / local-only state that must never be committed
+*.pem
+*.key
+.pro_key.txt
+noria-pro-codes.txt

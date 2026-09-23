@@ -41,7 +41,7 @@ export class SimulatedRuntime {
   // behaviors: { "tool.name": (callNumber, input, ctx) => { ok?, output?, error?, retryable?, delayMs? } }  (callNumber counts from 1 per tool)
   constructor(behaviors = {}, opts = {}) {
     this.id = "simulated"; this.dryRun = true; this.behaviors = behaviors; this.calls = []; this.touched = []; // touched is always empty: nothing real is ever reached
-    this.count = {}; this.running = 0; this.maxRunning = 0; this.supportedRuntimes = opts.runtimes || ["server", "browser"];
+    this.count = {}; this.running = 0; this.maxRunning = 0; this.supportedRuntimes = opts.runtimes || ["server", "browser", "graph"];
   }
   supports(tool) { return (tool.runtime || []).some((r) => this.supportedRuntimes.includes(r)); }
   async run(step, tool, input, ctx = {}) {

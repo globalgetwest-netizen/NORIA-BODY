@@ -176,7 +176,10 @@ export class Brain {
   }
 
   // Stream an answer. Calls onToken(delta) as text arrives; resolves to full text.
-  async ask(query, { onToken = () => {}, system = '', signal = null, ground = false, voice = false } = {}) {
+  // historyOverride: an optional { role, content }[] replacing the default "last 8 messages" — set by the
+  // conversation-state context builder (conversation-state.js's buildContext()) when it is wired in by the caller.
+  // Left unset, behaviour is exactly what it always was: the last 8 messages, nothing more.
+  async ask(query, { onToken = () => {}, system = '', signal = null, ground = false, voice = false, historyOverride = null } = {}) {
     // Own timeout (aborts a stalled stream) merged with any caller signal (Stop button).
     const ac = new AbortController()
     const to = setTimeout(() => ac.abort(), 90000)
@@ -184,7 +187,7 @@ export class Brain {
     // ground: false = the client already grounded (skip server search); 'auto' =
     // the client did NOT ground, so let the ROUTER decide and search if the query
     // needs live facts (a second safety-net layer so nothing current slips through).
-    const payload = { query, history: this.history.slice(-8), system, tz: userTz() }
+    const payload = { query, history: historyOverride || this.history.slice(-8), system, tz: userTz() }
     if (voice) payload.voice = true // a spoken turn: the server answers briefly and with less deliberation
     if (ground === false) payload.ground = false
     else if (ground === true) payload.ground = true // 'auto' → omit → server uses serverNeedsWeb
@@ -252,7 +255,7 @@ export class Brain {
   // Structured ask: returns { reply, controls } where controls is the full
   // PHYSICAL HUMAN PRESENCE JSON (situation/condition/face/eyes/body/voice).
   // Falls back gracefully to plain text if the model doesn't return clean JSON.
-  async ask2(query, { system = '' } = {}) {
+  async ask2(query, { system = '', historyOverride = null } = {}) {
     // Bounded so a stalled model shows an error instead of an endless spinner.
     const ac = new AbortController()
     const to = setTimeout(() => ac.abort(), 70000)
@@ -261,7 +264,7 @@ export class Brain {
       res = await fetch('/brain/ask', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         // ground:false — the workspace already injected live web + vector memory.
-        body: JSON.stringify({ query, history: this.history.slice(-8), system, ground: false, tz: userTz() }),
+        body: JSON.stringify({ query, history: historyOverride || this.history.slice(-8), system, ground: false, tz: userTz() }),
         signal: ac.signal,
       })
     } catch (e) { clearTimeout(to); throw new Error(ac.signal.aborted ? 'Brain timed out' : 'Brain unreachable') }

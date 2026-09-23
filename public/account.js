@@ -30,14 +30,21 @@ function signedOutLocally() { del(K.token); del(K.user); render() }
 // ── conversations ↔ account ────────────────────────────────────────────────────────────────────────────────────────
 function pack(c) {
   const msgs = (c.messages || []).map((m) => (m.img ? { role: m.role, text: '[Image: ' + (m.cap || 'generated image') + ']' } : { role: m.role, text: m.text, sources: m.sources, files: m.files }))
-  const make = () => JSON.stringify({ v: 1, titled: !!c.titled, created: c.created, messages: msgs })
+  // v2: adds `state` (public/conversation-state.js) — the active objective, entities, decisions, corrections
+  // tracked for this conversation. Still just JSON inside the same opaque payload; no new server column, no
+  // change to what the server can read. KNOWN LIMIT: state.*.msgIndex values point into the FULL message array;
+  // if a very long conversation is truncated below (oldest messages dropped to fit the sync size cap), an index
+  // recorded before the cut can point past what this device still has after a reload elsewhere. buildContext()'s
+  // lookups are guarded (a stale index is silently skipped, never a crash) so this degrades gracefully rather
+  // than breaking, but it is not yet re-indexed on truncation — a disclosed gap, not a silent one.
+  const make = () => JSON.stringify({ v: 2, titled: !!c.titled, created: c.created, messages: msgs, state: c.state || undefined })
   let payload = make()
   while (payload.length > 235000 && msgs.length > 2) { msgs.splice(0, 2); payload = make() } // keep the newest part of a very long conversation
   return { id: c.id, title: c.title || 'Conversation', payload, updated_at: c.updated || Date.now() }
 }
 function unpack(id, title, payload, updated) {
   let p = {}; try { p = JSON.parse(payload) } catch {}
-  return { id, title: title || 'Conversation', titled: p.titled !== false, created: p.created || updated, updated, messages: Array.isArray(p.messages) ? p.messages : [] }
+  return { id, title: title || 'Conversation', titled: p.titled !== false, created: p.created || updated, updated, messages: Array.isArray(p.messages) ? p.messages : [], state: p.state || null }
 }
 let hooks = null, syncing = false, pushTimers = {}
 async function pushOne(c) {

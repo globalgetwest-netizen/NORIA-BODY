@@ -5,6 +5,13 @@ import { safeCalc } from "./agent/calc.js";
 import { FAMILIES, validateFamilies, summarizeFamilies, explainFamilies } from "./agent/families.js";
 import { validateInput, sanitizeOutput } from "./agent/executor.js";
 import { buildPlannerMessages, extractJson, validatePlan } from "./agent/planner.js";
+import { buildReplanMessages, parseProposal } from "./agent/control.js";
+import { describeReality, classifyUrl, detectLockDomain, admissible, ANSWERABLE } from "./agent/reality.js";
+import { makeWebReadTool } from "./agent/web-read.js";
+import { fxVerdict, cryptoVerdict, weatherVerdict } from "./agent/reality-feeds.js";
+import { routeRequest, answerContract, LAYERS } from "./agent/reality-router.js";
+import { buildMap } from "./agent/capability-map.js";
+import { describeCodeRuntimes } from "./agent/code-exec.js";
 // Cloudflare Pages (Advanced Mode) — Noria's front door AND her brain, served
 // entirely from Cloudflare's edge. The workspace UI is static assets (instant,
 // global, never suspends). Live web search runs here. And /brain/* now calls a
@@ -404,8 +411,13 @@ function buildMessages(body) {
   if (body.system) messages.push({ role: "system", content: String(body.system) });
   const history = Array.isArray(body.history) ? body.history : [];
   // Only the live thread travels, and long earlier messages are shortened: what was said a few turns ago is context,
-  // not something to re-send in full on every turn (this is most of the cost of a long conversation).
-  for (const h of history.slice(-8)) if (h && h.content) { const c = String(h.content); messages.push({ role: h.role === "assistant" ? "assistant" : "user", content: c.length > 700 ? c.slice(0, 700) + "…" : c }); }
+  // not something to re-send in full on every turn (this is most of the cost of a long conversation). The cap is
+  // 12, not 8: the client's conversation-state layer (public/conversation-state.js) sends up to 8 recent messages
+  // PLUS up to 4 older ones it has identified as still relevant (the message that started the active objective, or
+  // that produced something the person is now referring back to) — those are prepended, so a plain trailing
+  // slice(-8) here would silently cut exactly the messages that fix was built to keep. Still bounded, still cheap
+  // for a client that sends only the default 8 (a slice(-12) of 8 items is a no-op).
+  for (const h of history.slice(-12)) if (h && h.content) { const c = String(h.content); messages.push({ role: h.role === "assistant" ? "assistant" : "user", content: c.length > 700 ? c.slice(0, 700) + "…" : c }); }
   if (body.query) messages.push({ role: "user", content: String(body.query) });
   return messages;
 }
@@ -1258,11 +1270,53 @@ const CAPS = [
 ];
 // The read-only tools that run on the server. Each returns data only; none writes, sends or changes anything.
 const toolFail = (message, status) => Object.assign(new Error(message), { status });
+// A verified answer carries its value, its verdict and its evidence; anything else is a failure with the plain statement (the NO-ANSWER state).
+function realityOut(r, key) {
+  const v = r.verdict;
+  if (!ANSWERABLE.has(v.status)) throw toolFail(v.statement, v.status === "UNAVAILABLE" || v.status === "STALE" ? 503 : 422);
+  return { [key]: v.statement + (r.note ? " " + r.note : ""), value: v.value, unit: v.unit || null, status: v.status, confidence: v.confidence, as_of: new Date(v.as_of).toISOString(), sources: v.agreeing_sources, evidence: r.graph };
+}
+// web.read's real dependencies: DNS-over-HTTPS pre-resolution (catches rebinding), a plain fetch, and a body reader that enforces the byte
+// cap WHILE STREAMING — Content-Length is attacker-controlled and often absent, so the cap cannot rely on that header alone.
+async function webReadResolveDns(host, type) {
+  try {
+    const res = await fetch("https://cloudflare-dns.com/dns-query?name=" + encodeURIComponent(host) + "&type=" + type, { headers: { Accept: "application/dns-json" }, signal: AbortSignal.timeout(3000) });
+    if (!res.ok) return [];
+    const j = await res.json();
+    const want = type === "AAAA" ? 28 : 1;
+    return (j.Answer || []).filter((a) => a.type === want).map((a) => a.data);
+  } catch (_) { return []; }
+}
+async function webReadFetchRaw(url, opts) { return fetch(url, { redirect: "manual", signal: opts.signal, headers: opts.headers }); }
+async function webReadBody(res, maxBytes) {
+  if (!res.body || !res.body.getReader) { const text = await res.text(); const bytes = new TextEncoder().encode(text).length; return { text: bytes > maxBytes ? text.slice(0, maxBytes) : text, bytes, truncated: bytes > maxBytes }; }
+  const reader = res.body.getReader(); const chunks = []; let total = 0, truncated = false;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.length;
+    if (total > maxBytes) { const room = maxBytes - (total - value.length); if (room > 0) chunks.push(value.slice(0, room)); truncated = true; try { await reader.cancel(); } catch (_) {} break; }
+    chunks.push(value);
+  }
+  const buf = new Uint8Array(chunks.reduce((n, c) => n + c.length, 0)); let off = 0;
+  for (const c of chunks) { buf.set(c, off); off += c.length; }
+  return { text: new TextDecoder("utf-8", { fatal: false }).decode(buf), bytes: total, truncated };
+}
+const webReadTool = makeWebReadTool({ fetchRaw: webReadFetchRaw, resolveDns: webReadResolveDns, readBody: webReadBody, sanitize: sanitizeOutput, classifyUrl, userAgent: "NoriaBot/1.0 (+https://noria.africa; read-only research; respects robots.txt)" });
 const TOOL_HANDLERS = {
   "web.search": async (i, env) => {
     const items = await webSearch(String(i.query).slice(0, 300), env, i.fresh !== false);
-    return { sources: items.slice(0, 8).map((x) => ({ title: x.title, snippet: String(x.snippet || "").slice(0, 300), url: x.url || "", date: x.date || x.pub || "", provider: x.via || x.src || "" })) };
+    const lockDomain = detectLockDomain(i.query);
+    const sources = items.slice(0, 8).map((x) => {
+      const cls = classifyUrl(x.url || ""), lock = lockDomain ? admissible(lockDomain, { level: cls.level, host: cls.host }) : { ok: true };
+      return { title: x.title, snippet: String(x.snippet || "").slice(0, 300), url: x.url || "", date: x.date || x.pub || "", provider: x.via || x.src || "", authority: { level: cls.level, official: cls.official }, admissible: lock.ok };
+    });
+    // In a source-locked domain (immigration, law, medicine, finance) only official or approved sources may support an answer.
+    const out = { sources };
+    if (lockDomain) { const ok = sources.filter((x) => x.admissible); out.source_lock = { domain: lockDomain, admissible_sources: ok.length, status: ok.length ? "OFFICIAL_SOURCE_PRESENT" : "UNVERIFIED", statement: ok.length ? "Only the sources marked admissible may support an answer about this." : "No official or approved source was found for this " + lockDomain + " question, so nothing here may be stated as fact." }; }
+    return out;
   },
+  "web.read": async (i) => webReadTool({ url: i.url }),
   "clock.now": async (i, env, ctx) => { const a = clockDirect(String(i.question), ctx && ctx.tz); if (!a) throw toolFail("that is not a question the clock can answer exactly", 422); return { answer: a }; },
   // a worded question ("17% of 2,340") goes to the calculator that already handles words; a written expression ("(15 / 100) * 2480") to the safe parser (no eval)
   "calc.math": async (i) => {
@@ -1271,9 +1325,11 @@ const TOOL_HANDLERS = {
     const c = safeCalc(text); if (c && c.error) throw toolFail(c.error, 422); if (!c) throw toolFail("that is not a plain calculation", 422);
     return { answer: c.text, value: c.value };
   },
-  "weather.get": async (i, env, ctx) => { const b = await weatherBlock("What is the weather in " + String(i.place).slice(0, 80) + "?", ctx && ctx.tz); if (!b) throw toolFail("no weather data for that place", 404); return { report: b.trim() }; },
-  "fx.rate": async (i) => { const b = await currencyBlock("How much is 1 " + String(i.from).slice(0, 12) + " in " + String(i.to).slice(0, 12) + "?"); if (!b) throw toolFail("no exchange rate for that pair", 404); return { report: b.trim() }; },
-  "crypto.price": async (i) => { const b = await cryptoBlock("What is the price of " + String(i.asset).slice(0, 40) + " now?"); if (!b) throw toolFail("no price for that asset", 404); return { report: b.trim() }; },
+  // The three live-data tools run through the reality layer: every source is asked, compared, and a value is returned ONLY when it is verified.
+  // Otherwise the tool fails with the plain no-answer statement (conflict, stale, unavailable or unverified): a number is never invented or guessed.
+  "weather.get": async (i, env, ctx) => { const place = String(i.place).slice(0, 80).replace(/^(?:the\s+)?weather\s+(?:in|at|for)\s+/i, "").trim(); const r = await weatherVerdict(place, { jget: jretry }); if (!r) throw toolFail("no weather data for that place", 404); return realityOut(r, "report"); },
+  "fx.rate": async (i) => { curIndex(); const code = (x) => { const t = String(x || "").trim(); return /^[A-Za-z]{3}$/.test(t) ? t.toUpperCase() : curCode(t); }, from = code(i.from), to = code(i.to); if (!from || !to || from === to) throw toolFail("give two different currencies", 422); return realityOut(await fxVerdict(from, to, { jget: jretry }), "report"); },
+  "crypto.price": async (i) => { const r = await cryptoVerdict(String(i.asset).slice(0, 40), { jget: jretry }); if (!r) throw toolFail("no price for that asset", 404); return realityOut(r, "report"); },
   "reference.list": async (i) => { const a = refDirect("List the " + String(i.list).slice(0, 80)); if (!a) throw toolFail("that reference list is not in the library", 404); return { answer: a }; },
 };
 // Each dependency is ok only after a FRESH successful observation (within 15 minutes); a fresh failure is degraded; otherwise unknown.
@@ -1969,6 +2025,44 @@ data: ${JSON.stringify({ done: true })}
       return new Response(JSON.stringify({ valid: res.valid, plan: res.plan, issues: res.issues, health: { search: health.search, ai: health.ai } }), { headers: JSON_H });
     }
 
+    // Proposes a revision of a task graph after a failure or a change. It only PROPOSES: the caller validates the proposal (control.js validateProposal)
+    // and applies it through the store; nothing here touches the person's projects, and nothing runs.
+    if (path === "/brain/replan" && request.method === "POST") {
+      let b; try { b = await request.json(); } catch (_) { b = {}; }
+      const code = String(b.pro || ""), state = b.state;
+      const fail = (msg, status) => new Response(JSON.stringify({ error: msg }), { status: status || 400, headers: JSON_H });
+      if (!state || typeof state !== "object" || JSON.stringify(state).length > 12000) return fail("Send the task graph state to revise.");
+      if (!(await proValid(env, code))) return fail("Revising a plan is part of Noria Pro.", 402);
+      const q = await takeQuota(code, "replan", 40, false);
+      if (!q || !q.ok) return fail(q && q.error === "limit" ? "You have used today's plan revisions (40 a day)." : "Plan revision is unavailable right now. Please try again in a moment.", 429);
+      const health = await toolHealth(env);
+      const msgs = buildReplanMessages(state, plannerCatalog(health), new Date().toISOString().slice(0, 10));
+      let raw = null;
+      try {
+        for (let attempt = 0; attempt < 2 && !raw; attempt++) {
+          const text = await brainComplete(attempt ? msgs.concat([{ role: "user", content: "Return ONLY the JSON object described above, nothing else." }]) : msgs, env, { maxTokens: 1600, temperature: 0.2, timeoutMs: 40000 });
+          raw = parseProposal(text);
+        }
+      } catch (e) { return fail("The planner could not reach a model just now.", 503); }
+      return new Response(JSON.stringify({ proposal: raw }), { headers: JSON_H });
+    }
+
+    // The full capability map: every target capability with what is implemented and verified (derived from the registry), what is connected, what is authorised,
+    // what is missing and the next engineering step. It measures progress toward the complete system; it does not define its limits.
+    if (path === "/brain/capability-map") { const h = await toolHealth(env); return new Response(JSON.stringify({ generated: new Date().toISOString(), ...buildMap(FAMILIES, listTools(h)) }), { headers: JSON_H }); }
+    // Code execution: the authority levels (what is inside the sealed boundary and what is not), and every runtime Noria knows about with its honest state.
+    // The SERVER never executes code: runtimes live where the isolation does (today: the person's browser), so "available" is decided there.
+    if (path === "/brain/code-runtimes") return new Response(JSON.stringify({ generated: new Date().toISOString(), ...describeCodeRuntimes([]), note: "The server does not run code. The browser JavaScript runtime is available in the person's browser; the others are planned or need infrastructure." }), { headers: JSON_H });
+    if (path === "/brain/reality") return new Response(JSON.stringify({ generated: new Date().toISOString(), ...describeReality(), layers: LAYERS }), { headers: JSON_H });
+    // A read-only diagnostic: how would a request be routed (needs outside verification? which source? or "cannot be verified")? Pure computation: no model, no network,
+    // no account. It is NOT connected to the chat, which is unchanged; it lets the routing be tested on real phrases before any connection is considered.
+    if (path === "/brain/reality/route" && request.method === "POST") {
+      let b; try { b = await request.json(); } catch (_) { b = {}; }
+      const text = String(b.text || "").slice(0, 500);
+      if (text.trim().length < 2) return new Response(JSON.stringify({ error: "send { text }" }), { status: 400, headers: JSON_H });
+      const route = routeRequest(text, {});
+      return new Response(JSON.stringify({ route, contract: answerContract(route.decision), connected_to_chat: false }), { headers: JSON_H });
+    }
     if (path === "/brain/capabilities") {
       const rep = await capabilityReport(env);
       return new Response(JSON.stringify(rep), { headers: JSON_H });

@@ -9,6 +9,7 @@ import { noriaSystem } from './persona.js'
 import { initMemory, memoryContext, applyMemoryUpdate, forgetMemory } from './memory.js'
 import { retrieveKnowledge } from './knowledge.js?v=6'
 import { NoriaPresenceEngine } from './noria-presence.js'
+import { ensureState, buildContext, updateStateAfterUser, updateStateAfterAssistant } from './conversation-state.js'
 
 const $ = (id) => document.getElementById(id)
 const brain = new Brain()
@@ -24,6 +25,16 @@ const thread = $('thread'), stream = $('stream'), input = $('input'),
       send = $('send'), stop = $('stop'), status = $('status'), empty = $('empty'),
       memCard = $('memCard')
 const DOTS = '<span class="dots"><i></i><i></i><i></i></span>'
+// Shared with addFeedback()'s whole-message copy button, and with the per-code-block copy button added in enhance() below —
+// one icon pair, one clipboard fallback, so both behave identically.
+const COPY_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>'
+const CHECK_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 13l4 4L19 7"/></svg>'
+async function copyToClipboard(text) {
+  try { await navigator.clipboard.writeText(text); return }
+  catch (_) {}
+  const ta = document.createElement('textarea'); ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0'
+  document.body.appendChild(ta); ta.select(); try { document.execCommand('copy') } catch (_) {} ta.remove()
+}
 let busy = false, cancelled = false, curStream = null
 
 // Brain status → the discreet presence line
@@ -94,6 +105,25 @@ async function enhance(el) {
       await lazyScript('https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js')
       codes.forEach((c) => { try { window.hljs.highlightElement(c) } catch (_) {} })
     }
+  } catch (_) {}
+  try {
+    // A copy button on every code block (like ChatGPT/Gemini), not just a copy-the-whole-message button: a reply that mixes
+    // prose and code should let a person copy exactly the code, with no manual selecting and no risk of grabbing a stray
+    // character. Reads from the (possibly syntax-highlighted) <code> element's textContent, which is always the exact
+    // original text regardless of the <span> markup highlighting adds around it.
+    el.querySelectorAll('pre.code:not([data-copy-wired])').forEach((pre) => {
+      pre.dataset.copyWired = '1'
+      const code = pre.querySelector('code'); if (!code) return
+      const btn = document.createElement('button')
+      btn.type = 'button'; btn.className = 'codecopybtn'; btn.title = 'Copy code'; btn.setAttribute('aria-label', 'Copy code')
+      btn.innerHTML = COPY_ICON
+      btn.addEventListener('click', async () => {
+        await copyToClipboard(code.textContent || '')
+        btn.innerHTML = CHECK_ICON; btn.classList.add('on')
+        setTimeout(() => { btn.innerHTML = COPY_ICON; btn.classList.remove('on') }, 1400)
+      })
+      pre.appendChild(btn)
+    })
   } catch (_) {}
   try {
     const charts = el.querySelectorAll('.noria-chart')
@@ -535,11 +565,24 @@ document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && vmCtl) e
 function syncSend() { send.disabled = busy || (!input.value.trim() && attachments.length === 0) }
 function grow() { input.style.height = 'auto'; input.style.height = Math.min(input.scrollHeight, 180) + 'px'; syncSend() }
 input.addEventListener('input', () => { grow(); cmdOnInput() })
+// ROOT-CAUSE HARDENING (2026-09-22): both ways to send (click, Enter) used to read input.value and pass it straight into
+// respond(), which only cleared the box internally, several lines into its own body. That gap was never reachable by a real
+// keystroke (busy is checked first thing inside respond(), and the whole capture-through-clear sequence runs in one
+// synchronous tick with no await in between) — verified by reading the exact code path, not assumed. But "verified safe"
+// is not the same as "structurally impossible", and a caller should not have to re-derive that proof to trust it. So the
+// capture-and-clear is now atomic and OWNED by the two places a person actually triggers a send, checked against `busy`
+// before a single character is read — no gap can exist here even in principle, regardless of what respond() does later.
+function sendFromInput() {
+  if (busy) return
+  const q = input.value
+  input.value = ''; grow()
+  respond(q)
+}
 input.addEventListener('keydown', (e) => {
   if (cmdOpen && cmdHandleKey(e)) return // command palette gets arrows / enter / escape first
-  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); respond(input.value) }
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendFromInput() }
 })
-send.addEventListener('click', () => respond(input.value))
+send.addEventListener('click', sendFromInput)
 stop.addEventListener('click', () => { cancelled = true; try { curStream && curStream.abort() } catch {} stopSpeaking() })
 
 // ── Real file upload: text/code direct, PDF via pdf.js, photos via on-device OCR ─
@@ -678,16 +721,36 @@ const looksMeta = (t) => META_RX.test(t || '')
 // A web address in an answer is kept only if it came from somewhere real: the person's own message, an attached file, a document
 // search, or the sources the answer was built on. A link a model writes from memory can be invented (a plausible-looking address
 // that leads nowhere), so any other link is reduced to its plain words. This never touches the sources chips under the answer.
+// ROOT CAUSE FIX (2026-09-22): every text-cleanup pass below this point (stripUnverifiedLinks, cleanDocText) used to
+// run over the WHOLE answer, code included, looking for "leftover placeholder" patterns — an empty "()" left behind
+// by a stripped citation, a "[...]" fill-in-the-blank left behind in a template. Neither pass could tell a real
+// citation leftover from a real, meaningful "()" or "[...]" in actual code, so ordinary code was silently mangled or
+// had whole lines deleted before the person ever saw or copied it: a `def f():` losing its parentheses, a Python
+// `SUBJECTS = ["a", "b", "c"]` list literal vanishing entirely because its square brackets looked like a template
+// placeholder. Proven both ways by comparing the raw model stream (always correct) against the rendered/copied text
+// (corrupted) for the same answer. Fix, applied once here and reused by every pass that needs it: pull fenced
+// ```code blocks``` and inline `code spans` out to a placeholder BEFORE any cleanup runs, and restore them
+// byte-for-byte afterward — the same isolation renderMd() already uses to keep code separate from prose. No
+// cleanup pass may run on code text again; each one runs only on what hideCode() leaves behind.
+function hideCode(text) {
+  const hidden = [], S0 = '', S1 = ''
+  const out = String(text || '').replace(/```[\s\S]*?```/g, (m) => { hidden.push(m); return S0 + (hidden.length - 1) + S1 })
+    .replace(/`[^`\n]+`/g, (m) => { hidden.push(m); return S0 + (hidden.length - 1) + S1 })
+  return { text: out, unhide: (s) => s.replace(new RegExp(S0 + '(\\d+)' + S1, 'g'), (_, i) => hidden[+i]) }
+}
 function stripUnverifiedLinks(text, allowedText, sources) {
   const hosts = new Set()
   const add = (u) => { try { hosts.add(new URL(u).hostname.replace(/^www\./, '')) } catch (_) {} }
   String(allowedText || '').replace(/https?:\/\/[^\s)\]>"']+/g, (u) => { add(u); return u })
   for (const x of sources || []) if (x && x.url) add(x.url)
   const ok = (u) => { try { return hosts.has(new URL(u).hostname.replace(/^www\./, '')) } catch (_) { return false } }
-  return String(text || '')
+  const { text: hiddenText, unhide } = hideCode(text)
+  const cleaned = hiddenText
     .replace(/\[([^\]\n]+)\]\((https?:\/\/[^)\s]+)\)/g, (m, label, url) => (ok(url) ? m : label))
+    .replace(/[ \t]?\(\s*(https?:\/\/[^\s)\]>"']+)\s*\)/g, (m, url) => (ok(url) ? m : ''))
     .replace(/(^|[\s(])(https?:\/\/[^\s)\]>"']+)[ ]?/g, (m, pre, url) => (ok(url) ? m : pre))
-    .replace(/[ \t]+\n/g, '\n').replace(/\(\s*\)/g, '')
+    .replace(/[ \t]+\n/g, '\n').replace(/[ \t]{2,}/g, ' ')
+  return unhide(cleaned)
 }
 function cleanMeta(t) {
   if (!looksMeta(t)) return t
@@ -937,12 +1000,18 @@ async function respond(q, opts = {}) {
   try {
     const kb = retrieveKnowledge(q)
     const capNote = CAP_RX.test(q) ? await capabilityNote() : '' // what can you do is answered from the live capability registry
+    // Conversation state: what this conversation is actually about, tracked across turns — replaces a blind
+    // "last 8 messages" with recency PLUS whatever older message is still relevant (the one that started the
+    // active objective, or produced something the person is now referring back to). See conversation-state.js.
+    const stateConvo = currentConvo()
+    const priorMessages = stateConvo ? stateConvo.messages.slice(0, -1) : [] // exclude the just-recorded current query — it is sent separately
+    const convoCtx = buildContext(stateConvo ? stateConvo.state : null, priorMessages, q, 8)
     const systemCommon = memoryContext(mem) +
       capNote +
       (kb ? `\n\n[BACKGROUND KNOWLEDGE — vetted reference notes. Prefer these where they apply, and follow all safety rules]\n${kb}` : '') +
       DOC_QUALITY + RICH_OUTPUT +
       (opts.system ? '\n\n' + opts.system : '') +
-      memBlock + attBlock + webBlock
+      memBlock + attBlock + webBlock + convoCtx.addendum
 
     started = true; clearTimers()
     if (cancelled) { finish(); return }
@@ -960,6 +1029,7 @@ async function respond(q, opts = {}) {
     try {
       askRes = await brain.ask(q, {
         system: noriaSystem({ json: false, topic: q + ' ' + (brain.history || []).slice(-4).map((m) => m.content).join(' ') }) + systemCommon,
+        historyOverride: convoCtx.history,
         signal: curStream.signal,
         // If the client already grounded (webBlock present), skip a server search;
         // otherwise let the router decide — a second layer so live facts aren't missed.
@@ -974,13 +1044,13 @@ async function respond(q, opts = {}) {
     } catch (streamErr) {
       // A stream failure must never lose the answer: fall back to the structured path.
       if (!acc.trim() && !cancelled) {
-        try { const r = await brain.ask2(q, { system: noriaSystem({ json: false, topic: q + ' ' + (brain.history || []).slice(-4).map((m) => m.content).join(' ') }) + systemCommon }); acc = r.display || r.spoken || ''; if (!sources.length && Array.isArray(r.sources)) sources = r.sources.filter((x) => x && x.url).slice(0, 5) } catch (_) {}
+        try { const r = await brain.ask2(q, { system: noriaSystem({ json: false, topic: q + ' ' + (brain.history || []).slice(-4).map((m) => m.content).join(' ') }) + systemCommon, historyOverride: convoCtx.history }); acc = r.display || r.spoken || ''; if (!sources.length && Array.isArray(r.sources)) sources = r.sources.filter((x) => x && x.url).slice(0, 5) } catch (_) {}
       }
     } finally { curStream = null }
     if (!sources.length && askRes && Array.isArray(askRes.sources)) sources = askRes.sources.filter((x) => x && x.url).slice(0, 5)
     // An answer that has lost its thread is never shown: ask again through the guarded path.
     if (acc && !cancelled && brain.isRambling && brain.isRambling(acc)) {
-      acc = ''; try { const r = await brain.ask2(q, { system: noriaSystem({ json: false, topic: q + ' ' + (brain.history || []).slice(-4).map((m) => m.content).join(' ') }) + systemCommon }); acc = r.display || '' } catch (_) {}
+      acc = ''; try { const r = await brain.ask2(q, { system: noriaSystem({ json: false, topic: q + ' ' + (brain.history || []).slice(-4).map((m) => m.content).join(' ') }) + systemCommon, historyOverride: convoCtx.history }); acc = r.display || '' } catch (_) {}
     }
     if (raf) { cancelAnimationFrame(raf); raf = 0 }
     if (cancelled) { if (!acc.trim()) el.closest('.msg').remove(); else renderMd(el, acc); finish(); return }
@@ -992,7 +1062,7 @@ async function respond(q, opts = {}) {
     // Nothing came back: a busy moment usually clears in seconds, so she quietly tries once more, and only then says so.
     if (!display.trim() && !cancelled && q.length < 20000) {
       await new Promise((r) => setTimeout(r, 2500))
-      try { const r = await brain.ask2(q, { system: noriaSystem({ json: false, topic: q + ' ' + (brain.history || []).slice(-4).map((m) => m.content).join(' ') }) + systemCommon }); acc = r.display || ''; display = cleanMeta(acc); if (display && brain.isRambling && brain.isRambling(display)) display = '' } catch (_) {}
+      try { const r = await brain.ask2(q, { system: noriaSystem({ json: false, topic: q + ' ' + (brain.history || []).slice(-4).map((m) => m.content).join(' ') }) + systemCommon, historyOverride: convoCtx.history }); acc = r.display || ''; display = cleanMeta(acc); if (display && brain.isRambling && brain.isRambling(display)) display = '' } catch (_) {}
     }
     if (!display.trim()) {
       // Keep the thread: the next message ("why?", "try again") must know what was being asked.
@@ -1002,7 +1072,10 @@ async function respond(q, opts = {}) {
         ? "I couldn't finish reading that just now: it is a lot to take in at once and I'm busy. Please try again in a minute, or ask about one section at a time."
         : "I couldn't answer that just now. Please try again in a moment."
     }
-    const isDocLike = display && (/^#{1,3}\s/m.test(display) || /^\s*\|.*\|\s*$/m.test(display) || /\[[^\]\n]{1,80}\]|\((?:insert|add|list|your |e\.g\.)/i.test(display))
+    // Detected on the PROSE only: code hidden first, so a Python/JS array literal's "[...]" never gets mistaken
+    // for a fill-in-the-blank placeholder and routes an ordinary code answer through the document cleanup at all.
+    const displayProse = hideCode(display).text
+    const isDocLike = display && (/^#{1,3}\s/m.test(displayProse) || /^\s*\|.*\|\s*$/m.test(displayProse) || /\[[^\]\n]{1,80}\]|\((?:insert|add|list|your |e\.g\.)/i.test(displayProse))
     const dsp = ((opts.doc || isDocLike) && display) ? cleanDocText(display) : display
     renderMd(el, dsp)
     // If the user asked to see a chart and Noria answered with a data table,
@@ -1011,6 +1084,18 @@ async function respond(q, opts = {}) {
     if (sources.length) addSources(el.closest('.msg'), sources) // sources read first (the trust signal), then the actions
     addFeedback(el.closest('.msg'), q, dsp)
     convoRecord({ role: 'noria', text: dsp, sources: sources.map((s) => ({ url: s.url })) })
+    // Update this conversation's state: what the objective is now, what was just produced, any correction made —
+    // real, mechanical signals (see conversation-state.js), not a re-parse of the whole conversation every turn.
+    { const c2 = currentConvo(); if (c2) {
+      c2.state = ensureState(c2.state)
+      const uIdx = c2.messages.length - 2, aIdx = c2.messages.length - 1
+      if (uIdx >= 0) c2.state = updateStateAfterUser(c2.state, shown, uIdx)
+      // Paired fence match (opener..closer as ONE match), the same pattern renderMd() itself uses — a naive match on
+      // every ``` occurrence double-counts, since a closing fence matches "```" + optional word + newline too.
+      const codeLangs = [...dsp.matchAll(/```(\w+)?\n?[\s\S]*?```/g)].map((m) => ({ language: m[1] || '' }))
+      c2.state = updateStateAfterAssistant(c2.state, dsp, aIdx, { code: codeLangs })
+      saveStore()
+    } }
     if (!opts.doc && !/\?\s*$/.test(shown)) SMem.add(shown) // remember the user's statements (not questions); device-only, fire-and-forget
     const sug = presence.suggestMemory(q)
     if (sug) suggestMemory(sug.value)
@@ -1203,15 +1288,12 @@ function addFeedback(msg, q, a) {
     return b
   }
   bar.append(mk(UP, 'up', 'Good response'), mk(DN, 'down', 'Bad response'))
-  // Copy button (like ChatGPT/Gemini)
-  const COPY = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>'
-  const CHECK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 13l4 4L19 7"/></svg>'
-  const cp = document.createElement('button'); cp.type = 'button'; cp.title = 'Copy'; cp.setAttribute('aria-label', 'Copy'); cp.innerHTML = COPY
+  // Copy button (like ChatGPT/Gemini) — copies the whole reply; each code block also has its own copy button (see enhance())
+  const cp = document.createElement('button'); cp.type = 'button'; cp.title = 'Copy'; cp.setAttribute('aria-label', 'Copy'); cp.innerHTML = COPY_ICON
   cp.addEventListener('click', async () => {
     const text = (a && a.trim()) || (msg.querySelector('.text') ? msg.querySelector('.text').textContent : '')
-    try { await navigator.clipboard.writeText(text) }
-    catch { const ta = document.createElement('textarea'); ta.value = text; document.body.appendChild(ta); ta.select(); try { document.execCommand('copy') } catch {} ta.remove() }
-    cp.innerHTML = CHECK; cp.classList.add('on'); setTimeout(() => { cp.innerHTML = COPY; cp.classList.remove('on') }, 1400)
+    await copyToClipboard(text)
+    cp.innerHTML = CHECK_ICON; cp.classList.add('on'); setTimeout(() => { cp.innerHTML = COPY_ICON; cp.classList.remove('on') }, 1400)
   })
   bar.append(cp)
   // Download PDF (Pro feature)
@@ -1341,7 +1423,7 @@ const canvasFlash = (btn, label) => { const o = btn.dataset.label || btn.textCon
 canvasBackdrop && canvasBackdrop.addEventListener('click', closeCanvas)
 $('canvasClose') && $('canvasClose').addEventListener('click', closeCanvas)
 $('canvasCopy') && $('canvasCopy').addEventListener('click', async () => {
-  try { await navigator.clipboard.writeText(curCanvasMd) } catch { const ta = document.createElement('textarea'); ta.value = curCanvasMd; document.body.appendChild(ta); ta.select(); try { document.execCommand('copy') } catch {} ta.remove() }
+  await copyToClipboard(curCanvasMd)
   canvasFlash($('canvasCopy'), 'Copied')
 })
 $('canvasMd') && $('canvasMd').addEventListener('click', () => { downloadBlob(new Blob([curCanvasMd], { type: 'text/markdown' }), slug(curCanvasTitle) + '.md'); canvasFlash($('canvasMd'), 'Saved') })
@@ -1627,9 +1709,12 @@ const DOC_RULES = '\n\nFORMAT RULES (critical — a finished, ready-to-use docum
 // the whole line is dropped — and any section left with no body is removed too.
 const PH_RE = /\[[^\]\n]{1,100}\]|\((?:add|insert|list|repeat|include|fill in|e\.g\.[^)]*optional)\b[^)]*\)/i
 function cleanDocText(t) {
+  // Code is hidden FIRST, before anything else: a "[...]" list/array literal or an empty "()" call is real code,
+  // never a leftover fill-in-the-blank placeholder, no matter which line it sits on. See hideCode()'s comment.
+  const { text: hiddenText, unhide } = hideCode(t)
   // Pre-pass: remove conversational meta-announcements and broken structural tags
   // (artifacts) so the document opens directly on its own content.
-  let s0 = String(t || '')
+  let s0 = hiddenText
   s0 = s0.replace(/<\/?(step|section|document|response|answer|output|thinking|tool_call|tool_result)[^>]*>/gi, '')
   s0 = s0.replace(/^\s*(sure|certainly|of course|absolutely|great|no problem)[!,.:][^\n]*\n+/i, '')
   s0 = s0.replace(/^\s*(here(?:'s| is| are)|below (?:is|are)|i(?:'ve| have) (?:created|drafted|prepared|put together|written))[^\n]*:\s*\n+/i, '')
@@ -1654,7 +1739,7 @@ function cleanDocText(t) {
     }
     out.push(l)
   }
-  return out.join('\n').replace(/\n{3,}/g, '\n\n').trim()
+  return unhide(out.join('\n').replace(/\n{3,}/g, '\n\n').trim())
 }
 
 const MODERN_STANDARD = '\n\n[MODERN STANDARD — match or exceed today\'s best assistants]\n' +

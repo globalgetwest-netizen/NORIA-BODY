@@ -1,4 +1,5 @@
 import { graphDeleteStatements } from './graph-api.js'
+import { kbDeleteStatements } from './kb.js'
 /**
  * NORIA ACCOUNTS — people, profiles, preferences and saved conversations, kept in Cloudflare D1 (SQLite at the edge).
  *
@@ -275,6 +276,7 @@ export async function handleAccounts(request, env, url, json, ctx) {
     if (!u || !(await verifyPassword(String(body.password || ''), u.pw_hash))) return json({ error: 'Your password is not right.' }, 403)
     await env.DB.batch([
       ...graphDeleteStatements(env.DB, me.userId), // projects, task graphs, artifacts, memory and history are deleted with the account
+      ...kbDeleteStatements(env.DB, me.userId), // stored documents are deleted with the account
       env.DB.prepare('DELETE FROM convos WHERE user_id = ?').bind(me.userId),
       env.DB.prepare('DELETE FROM sessions WHERE user_id = ?').bind(me.userId),
       env.DB.prepare('DELETE FROM profiles WHERE user_id = ?').bind(me.userId),

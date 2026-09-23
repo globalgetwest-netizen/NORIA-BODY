@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Noria — Owner check: the model-to-code loop</title>
+  <link rel="stylesheet" href="styles.css" />
+  <style>
+    .wrap { max-width: 760px; margin: 0 auto; padding: 18px; }
+    .card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 18px; margin-bottom: 14px; }
+    h1 { font-size: 18px; margin: 6px 0 2px; } h2 { font-size: 15px; margin: 0 0 8px; }
+    p, li { color: var(--muted); font-size: 13.5px; line-height: 1.5; }
+    button.primary { background: var(--gold); color: #2a2000; border-color: var(--gold); font-weight: 700; }
+    .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-top: 10px; }
+    .line { font-size: 13.5px; padding: 3px 0; border-bottom: 1px solid var(--line); }
+    .ok { color: var(--ok); } .bad { color: var(--bad); } .info { color: var(--muted); }
+    pre.result { background: #071522; border: 1px solid var(--line); border-radius: 8px; padding: 10px; font-size: 12.5px; overflow-x: auto; white-space: pre-wrap; }
+    a.back { color: var(--gold); font-size: 13px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <a class="back" href="/">← Noria</a>
+    <h1>Owner check: the real model-to-code loop</h1>
+    <div class="card">
+      <p>Whether Noria can <i>intelligently use</i> the code-execution infrastructure, not just run developer-authored test code. Four objectives, each planned
+      (and, where needed, revised) by a live call to <code>/brain/plan</code> / <code>/brain/replan</code> — nothing here writes a task's own code:</p>
+      <p><b>1</b> — straightforward success: a real data-analysis objective, coded live by the model, checked against an independently computed value; also
+      checks an artifact or memory update actually persisted, and that the plan requested <code>code.run</code> only (never a runtime directly).<br/>
+      <b>2</b> — the model's <i>own</i> first code may contain a real bug (no seeded code): reports honestly whether it did, and if so, that the failure was
+      handled as a live, non-scripted revision, not a blind retry.<br/>
+      <b>3</b> — the model's own code may look right but be a plausible, wrong number (a classic monthly/annual rate mix-up): an independent, hardcoded
+      cross-check — disclosed as the one part not model-written — is attached to the model's own task, and must be what decides, not just "it ran".<br/>
+      <b>4</b> — the model's own code may need something outside the sealed sandbox (fetching a URL): authority must refuse it safely and never silently
+      allow it, checked both by the graph's own classification and by confirming nothing actually reached the real network.</p>
+      <p>Needs your own signed-in session <i>and</i> a saved Pro code (this calls the real planner and re-planner). One test project, deleted afterwards
+      unless kept.</p>
+      <div class="row">
+        <button id="run" class="primary">Run the check</button>
+        <label class="info"><input type="checkbox" id="del" checked /> delete the test project afterwards</label>
+      </div>
+      <div id="who" class="info" style="margin-top:8px"></div>
+    </div>
+    <div class="card"><h2>Results</h2><div id="out"><p>Not run yet.</p></div></div>
+    <div class="card"><h2>Copy this to Claude</h2><pre id="json" class="result">(nothing yet)</pre></div>
+  </div>
+  <script type="module" src="verify-model-loop.js"></script>
+</body>
+</html>

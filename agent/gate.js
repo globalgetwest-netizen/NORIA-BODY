@@ -6,6 +6,10 @@
 // Phase authorised by the owner (2026-09-21): READ-ONLY live execution. Nothing that changes anything outside Noria is permitted, and
 // approval cannot override that: email, messages, calendar changes, purchases, deletion, account changes, publishing, database writes,
 // arbitrary code execution and irreversible actions are all blocked here, whatever anyone approves.
+//
+// Owner decision (2026-09-21): code execution INSIDE a sealed sandbox (no network, no files, no credentials, no side effects) is authorised without per-run
+// approval, as the tool code.run. That is not "arbitrary" execution: it is bounded by the runtime, and every capability outside the boundary stays a separate,
+// unauthorised authority (see agent/code-exec.js AUTHORITY). The tool declares sealed_only; the executor and the runtime both refuse a request for more.
 
 import { testState } from "./tools.js";
 

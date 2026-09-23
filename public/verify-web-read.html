@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Noria — Owner check: web.read</title>
+  <link rel="stylesheet" href="styles.css" />
+  <style>
+    .wrap { max-width: 760px; margin: 0 auto; padding: 18px; }
+    .card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 18px; margin-bottom: 14px; }
+    h1 { font-size: 18px; margin: 6px 0 2px; } h2 { font-size: 15px; margin: 0 0 8px; }
+    p, li { color: var(--muted); font-size: 13.5px; line-height: 1.5; }
+    button.primary { background: var(--gold); color: #2a2000; border-color: var(--gold); font-weight: 700; }
+    .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-top: 10px; }
+    .line { font-size: 13.5px; padding: 3px 0; border-bottom: 1px solid var(--line); }
+    .ok { color: var(--ok); } .bad { color: var(--bad); } .info { color: var(--muted); }
+    pre.result { background: #071522; border: 1px solid var(--line); border-radius: 8px; padding: 10px; font-size: 12.5px; overflow-x: auto; white-space: pre-wrap; }
+    a.back { color: var(--gold); font-size: 13px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <a class="back" href="/">← Noria</a>
+    <h1>Owner check: web.read against the real internet</h1>
+    <div class="card">
+      <p>Calls the real <code>web.read</code> tool through the live <code>/brain/tool</code> route: reads one genuine public page (example.com) and checks
+      the extracted text and provenance; then proves private-network protection against the real network — a loopback address, the cloud metadata address,
+      an obfuscated hex address, the hostname "localhost", and (the one thing an offline test cannot do) a real public domain, <code>localtest.me</code>,
+      that by design resolves to 127.0.0.1 — proving the real Cloudflare DNS-over-HTTPS rebinding check, not just the logic in isolation. No sign-in needed.</p>
+      <div class="row"><button id="run" class="primary">Run the check</button></div>
+      <div id="who" class="info" style="margin-top:8px"></div>
+    </div>
+    <div class="card"><h2>Results</h2><div id="out"><p>Not run yet.</p></div></div>
+    <div class="card"><h2>Copy this to Claude</h2><pre id="json" class="result">(nothing yet)</pre></div>
+  </div>
+  <script type="module" src="verify-web-read.js"></script>
+</body>
+</html>
