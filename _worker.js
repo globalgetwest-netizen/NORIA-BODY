@@ -956,6 +956,15 @@ const mathWordProblem = (q) => ((String(q || "").match(/\d+(?:[.,]\d+)?/g) || []
 const PROMPT_LEAK = /IDENTITY & DISCRETION|PRESENCE & CONFIDENCE|HANDLING QUESTIONS ABOUT YOURSELF|YOUR HIGHEST DUTY IS TRUTH|SAFETY IS NON-NEGOTIABLE/i;
 const LEAK_REPLY = "I keep my inner instructions private, but I am glad to tell you what I can help with and how I work. What would you like to do?";
 const noLeak = (t) => (PROMPT_LEAK.test(String(t || "")) ? LEAK_REPLY : t);
+// Some models cite with their own bracket tokens (e.g. 【3†L1-L3】) instead of the plain [n] the context asks for.
+// Those are internal retrieval artifacts, not readable sources, and they must never reach the reader as raw glyphs.
+// Only bracket blocks that contain a dagger (the citation separator) are removed, so ordinary text is untouched.
+const stripCiteArtifacts = (s) => String(s || "")
+  .replace(/[【〖〚][^】〗〛]*†[^】〗〛]*[】〗〛]/g, "") // 【N†L1-L3】 and kin
+  .replace(/\[[^\]\n]*†[^\]\n]*\]/g, "")                                                                // ascii [N†L1-L3] variant
+  .replace(/[ \t]+([.,;:!?])/g, "$1")                                                                        // tidy any space left before punctuation
+  .replace(/[ \t]{2,}/g, " ")
+  .trim();
 let _logicDbg = "";
 async function logicChecked(messages, env, text, opts) {
   try {
@@ -2030,9 +2039,9 @@ export default {
           let r;
           try { r = await liveAnswer(messages, env, g, q, { deep, maxTokens: deep ? 8000 : 2600, temperature: Math.min(temperature, 0.2) }); }
           catch (_) { r = { text: fromSources(g.live, NEWS_INTENT.test(q)), verified: false }; } // the brain is down: the sources themselves still answer
-          return new Response(JSON.stringify(Object.assign({ answer: r.text, sources: g.live.sources, verified: r.verified }, body.debug ? { judge: _judgeDbg, unsupported: r.unsupported || [], context: g.live.ctx.slice(0, 1500) } : {})), { headers: JSON_H });
+          return new Response(JSON.stringify(Object.assign({ answer: stripCiteArtifacts(r.text), sources: g.live.sources, verified: r.verified }, body.debug ? { judge: _judgeDbg, unsupported: r.unsupported || [], context: g.live.ctx.slice(0, 1500) } : {})), { headers: JSON_H });
         }
-        const text = noLeak(await plainVerified(messages, env, { deep, maxTokens: deep ? 8000 : 2600, temperature }));
+        const text = stripCiteArtifacts(noLeak(await plainVerified(messages, env, { deep, maxTokens: deep ? 8000 : 2600, temperature })));
         return new Response(JSON.stringify(body.debug ? { answer: text, usage: _lastUsage, logic: _logicDbg } : { answer: text }), { headers: JSON_H });
       } catch (e) {
         return new Response(JSON.stringify({ error: e.message }), { status: 503, headers: JSON_H });
@@ -2084,7 +2093,7 @@ data: ${JSON.stringify({ done: true })}
         let r;
         try { r = await liveAnswer(messages, env, gr, String(body.query || ""), { deep: false, maxTokens: body.voice ? 600 : 3000, temperature: 0.2 }); }
         catch (_) { r = { text: fromSources(gr.live), verified: false }; }
-        return new Response(`data: ${JSON.stringify({ token: r.text })}\n\ndata: ${JSON.stringify({ done: true, sources: gr.live.sources, verified: r.verified })}\n\n`, { headers: SSE_H });
+        return new Response(`data: ${JSON.stringify({ token: stripCiteArtifacts(r.text) })}\n\ndata: ${JSON.stringify({ done: true, sources: gr.live.sources, verified: r.verified })}\n\n`, { headers: SSE_H });
       }
       const gkeys = rotate(groqKeys(env));
       if (!gkeys.length) return new Response(`data: ${JSON.stringify({ error: "no brain key" })}\n\n`, { status: 502, headers: SSE_H });
