@@ -231,6 +231,10 @@
   .memsug button.save{background:var(--ink);color:var(--paper);border-color:var(--ink)}
   .memitem{display:flex;gap:9px;align-items:flex-start;font-size:.86rem;color:var(--ink-2);padding:7px 0;border-bottom:1px solid var(--line)}
   .memitem:last-child{border-bottom:0} .memitem .k{color:var(--accent-2);margin-top:1px}
+  .memitem .mtext{flex:1;min-width:0}
+  .memitem .mwhen{flex:none;font-size:.74rem;color:var(--muted);margin-top:2px;white-space:nowrap}
+  .memitem .memdel{flex:none;width:20px;height:20px;line-height:18px;text-align:center;border:0;background:transparent;color:var(--muted);cursor:pointer;border-radius:5px;font-size:.95rem;padding:0}
+  .memitem .memdel:hover{color:var(--ink);background:var(--raise)}
   .ctx .privacy{font-size:.8rem;color:var(--muted);line-height:1.55} .ctx .privacy a{color:var(--accent-2);font-weight:600}
   .ctx .forget{margin-top:10px;width:100%;height:34px;border-radius:9px;border:1px solid var(--line-2);background:var(--raise);color:var(--muted);font-weight:600;font-size:.8rem;cursor:pointer;transition:color var(--t-fast),border-color var(--t-fast)}
   .ctx .forget:hover{color:var(--danger);border-color:var(--danger)}
@@ -536,6 +540,6 @@
   <div class="vm-caption" id="vmCaption"></div>
   <button class="vm-end" id="vmEnd" type="button">End</button>
 </div>
-<script type="module" src="workspace.js?v=84"></script>
+<script type="module" src="workspace.js?v=88"></script>
 </body>
 </html>

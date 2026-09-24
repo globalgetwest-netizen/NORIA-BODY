@@ -1,5 +1,6 @@
 /* AUTO-GENERATED from openFDA drug labels (public domain, U.S. FDA).
-   Mechanism + indication from single-ingredient prescription labels. Regenerate: scratchpad/ingest2.js */
+   Mechanism + indication from single-ingredient prescription labels. Regenerate: scratchpad/ingest2.js
+   2026-09-23: truncated fragments cleaned (see fix_fda_truncation.mjs) — marked with "…", never reconstructed. */
 export const FDA_NOTES = [
  {
   "id": "fda-sertraline",
@@ -7,7 +8,7 @@ export const FDA_NOTES = [
    "sertraline",
    "sertraline"
   ],
-  "text": "Sertraline potentiates serotonergic activity in the central nervous system through inhibition of neuronal reuptake of serotonin (5-HT). Indicated for: Sertraline hydrochloride oral solution is indicated for the treatment of the following: Major depressive disorder (MDD) Obsessive-compulsive disorder (OCD) Panic disorder (PD) Posttraumatic stress disorder (PTSD) Social anxiety di (Source: U.S. FDA label.)"
+  "text": "Sertraline potentiates serotonergic activity in the central nervous system through inhibition of neuronal reuptake of serotonin (5-HT). Indicated for: Sertraline hydrochloride oral solution is indicated for the treatment of the following: Major depressive disorder (MDD) Obsessive-compulsive disorder (OCD) Panic disorder (PD) Posttraumatic stress disorder (PTSD) Social anxiety… (Source: U.S. FDA label.)"
  },
  {
   "id": "fda-fluoxetine",
@@ -23,7 +24,7 @@ export const FDA_NOTES = [
    "escitalopram",
    "escitalopram"
   ],
-  "text": "The mechanism of antidepressant action of escitalopram, the S-enantiomer of racemic citalopram, is presumed to be linked to potentiation of serotonergic activity in the central nervous system (CNS) resulting from its inhibition of CNS neuronal reuptake of sero Indicated for: Escitalopram is a selective serotonin reuptake inhibitor (SSRI) indicated for the: • treatment of major depressive disorder (MDD) in adults and pediatric patients 12 years of age and older ( 1 ) • treatment of generalized anxiety disorder (GAD) in adults ( 1 ) (Source: U.S. FDA label.)"
+  "text": "The mechanism of antidepressant action of escitalopram, the S-enantiomer of racemic citalopram, is presumed to be linked to potentiation of serotonergic activity in the central nervous system (CNS) resulting from its inhibition of CNS neuronal reuptake of… Indicated for: Escitalopram is a selective serotonin reuptake inhibitor (SSRI) indicated for the: • treatment of major depressive disorder (MDD) in adults and pediatric patients 12 years of age and older ( 1 ) • treatment of generalized anxiety disorder (GAD) in adults ( 1 ) (Source: U.S. FDA label.)"
  },
  {
   "id": "fda-citalopram",
@@ -39,7 +40,7 @@ export const FDA_NOTES = [
    "paroxetine",
    "paroxetine"
   ],
-  "text": "The mechanism of action of paroxetine tablets in the treatment of MDD, SAD, OCD, PD, GAD, and PTSD is unknown, but is presumed to be linked to potentiation of serotonergic activity in the central nervous system resulting from inhibition of neuronal reuptake of Indicated for: Paroxetine tablets are indicated in adults for the treatment of: Major depressive disorder (MDD) Obsessive compulsive disorder (OCD) Panic disorder (PD) Social anxiety disorder (SAD) Generalized anxiety disorder (GAD) Posttraumatic stress disorder (PTSD) Parox (Source: U.S. FDA label.)"
+  "text": "The mechanism of action of paroxetine tablets in the treatment of MDD, SAD, OCD, PD, GAD, and PTSD is unknown, but is presumed to be linked to potentiation of serotonergic activity in the central nervous system resulting from inhibition of neuronal reuptake… Indicated for: Paroxetine tablets are indicated in adults for the treatment of: Major depressive disorder (MDD) Obsessive compulsive disorder (OCD) Panic disorder (PD) Social anxiety disorder (SAD) Generalized anxiety disorder (GAD) Posttraumatic stress disorder (PTSD)… (Source: U.S. FDA label.)"
  },
  {
   "id": "fda-venlafaxine",
@@ -47,7 +48,7 @@ export const FDA_NOTES = [
    "venlafaxine",
    "venlafaxine"
   ],
-  "text": "The mechanism of action of venlafaxine in the treatment of MDD, GAD, SAD, and PD is unclear, but is thought to be related to the potentiation of serotonin and norepinephrine in the central nervous system, through inhibition of their reuptake. Indicated for: Venlafaxine hydrochloride extended-release capsules are indicated in adults for the treatment of: Major Depressive Disorder (MDD) Generalized Anxiety Disorder (GAD) Social Anxiety Disorder (SAD) [se (Source: U.S. FDA label.)"
+  "text": "The mechanism of action of venlafaxine in the treatment of MDD, GAD, SAD, and PD is unclear, but is thought to be related to the potentiation of serotonin and norepinephrine in the central nervous system, through inhibition of their reuptake. Indicated for: Venlafaxine hydrochloride extended-release capsules are indicated in adults for the treatment of: Major Depressive Disorder (MDD) Generalized Anxiety Disorder (GAD) Social Anxiety Disorder (SAD)… (Source: U.S. FDA label.)"
  },
  {
   "id": "fda-duloxetine",
@@ -55,7 +56,7 @@ export const FDA_NOTES = [
    "duloxetine",
    "duloxetine"
   ],
-  "text": "Although the exact mechanisms of the antidepressant, central pain inhibitory and anxiolytic actions of duloxetine in humans are unknown, these actions are believed to be related to its potentiation of serotonergic and noradrenergic activity in the CNS. Indicated for: Duloxetine delayed-release capsules is indicated for the treatment of: Major depressive disorder in adults Generalized anxiety disorder in adults and pediatric patients 7 years of age and older Diabetic peripheral neuropathic pain in adults Fibromyalgia in adu (Source: U.S. FDA label.)"
+  "text": "Although the exact mechanisms of the antidepressant, central pain inhibitory and anxiolytic actions of duloxetine in humans are unknown, these actions are believed to be related to its potentiation of serotonergic and noradrenergic activity in the CNS. Indicated for: Duloxetine delayed-release capsules is indicated for the treatment of: Major depressive disorder in adults Generalized anxiety disorder in adults and pediatric patients 7 years of age and older Diabetic peripheral neuropathic pain in adults Fibromyalgia in… (Source: U.S. FDA label.)"
  },
  {
   "id": "fda-bupropion",
@@ -63,7 +64,7 @@ export const FDA_NOTES = [
    "bupropion",
    "bupropion"
   ],
-  "text": "The mechanism of action of bupropion is unknown, as is the case with other antidepressants. Indicated for: Bupropion hydrochloride extended-release tablets (XL) are an aminoketone antidepressant, indicated for: treatment of major depressive disorder (MDD) (1.1) prevention of seasonal affective disorder (SAD) ( 1.2) 1.1 Major Depressive Disorder (MDD) Bupropion hydr (Source: U.S. FDA label.)"
+  "text": "The mechanism of action of bupropion is unknown, as is the case with other antidepressants. Indicated for: Bupropion hydrochloride extended-release tablets (XL) are an aminoketone antidepressant, indicated for: treatment of major depressive disorder (MDD) (1.1) prevention of seasonal affective disorder (SAD) ( 1.2) 1.1 Major Depressive Disorder (MDD) Bupropion… (Source: U.S. FDA label.)"
  },
  {
   "id": "fda-mirtazapine",
@@ -79,7 +80,7 @@ export const FDA_NOTES = [
    "amlodipine",
    "amlodipine"
   ],
-  "text": "Amlodipine is a dihydropyridine calcium antagonist (calcium ion antagonist or slow-channel blocker) that inhibits the transmembrane influx of calcium ions into vascular smooth muscle and cardiac muscle. Indicated for: Amlodipine besylate tablets are calcium channel blocker and may be used alone or in combination with other antihypertensive and antianginal agents for the treatment of: •Hypertension ( 1.1 ) о Amlodipine besylate tablets are indicated for the treatment of hype (Source: U.S. FDA label.)"
+  "text": "Amlodipine is a dihydropyridine calcium antagonist (calcium ion antagonist or slow-channel blocker) that inhibits the transmembrane influx of calcium ions into vascular smooth muscle and cardiac muscle. Indicated for: Amlodipine besylate tablets are calcium channel blocker and may be used alone or in combination with other antihypertensive and antianginal agents for the treatment of: •Hypertension ( 1.1 ) о Amlodipine besylate tablets are indicated for the treatment of… (Source: U.S. FDA label.)"
  },
  {
   "id": "fda-atorvastatin",
@@ -87,7 +88,7 @@ export const FDA_NOTES = [
    "atorvastatin",
    "atorvastatin"
   ],
-  "text": "Atorvastatin is a selective, competitive inhibitor of HMG-CoA reductase, the rate-limiting enzyme that converts 3-hydroxy-3-­methylglutaryl-coenzyme A to mevalonate, a precursor of sterols, including cholesterol. Indicated for: Atorvastatin calcium tablets are indicated: To reduce the risk of: Myocardial infarction (MI), stroke, revascularization procedures, and angina in adults with multiple risk factors for coronary heart disease (CHD) but without clinically evident CHD MI and stro (Source: U.S. FDA label.)"
+  "text": "Atorvastatin is a selective, competitive inhibitor of HMG-CoA reductase, the rate-limiting enzyme that converts 3-hydroxy-3-­methylglutaryl-coenzyme A to mevalonate, a precursor of sterols, including cholesterol. Indicated for: Atorvastatin calcium tablets are indicated: To reduce the risk of: Myocardial infarction (MI), stroke, revascularization procedures, and angina in adults with multiple risk factors for coronary heart disease (CHD) but without clinically evident CHD MI and… (Source: U.S. FDA label.)"
  },
  {
   "id": "fda-rosuvastatin",
@@ -95,7 +96,7 @@ export const FDA_NOTES = [
    "rosuvastatin",
    "rosuvastatin"
   ],
-  "text": "Rosuvastatin is an inhibitor of HMG-CoA reductase, the rate-limiting enzyme that converts 3‑hydroxy‑3‑methylglutaryl coenzyme A to mevalonate, a precursor of cholesterol. Indicated for: Rosuvastatin tablets is indicated: To reduce the risk major adverse cardiovascular (CV) events (CV death, nonfatal myocardial infarction, nonfatal stroke, or an arterial revascularization procedure) in adults without established coronary heart disease who are (Source: U.S. FDA label.)"
+  "text": "Rosuvastatin is an inhibitor of HMG-CoA reductase, the rate-limiting enzyme that converts 3‑hydroxy‑3‑methylglutaryl coenzyme A to mevalonate, a precursor of cholesterol. Indicated for: Rosuvastatin tablets is indicated: To reduce the risk major adverse cardiovascular (CV) events (CV death, nonfatal myocardial infarction, nonfatal stroke, or an arterial revascularization procedure) in adults without established coronary heart disease who… (Source: U.S. FDA label.)"
  },
  {
   "id": "fda-simvastatin",
@@ -103,7 +104,7 @@ export const FDA_NOTES = [
    "simvastatin",
    "simvastatin"
   ],
-  "text": "Simvastatin is a prodrug and is hydrolyzed to its active β-hydroxyacid form, simvastatin acid, after administration. Indicated for: Simvastatin tablets USP are indicated: To reduce the risk of total mortality by reducing risk of coronary heart disease death, non-fatal myocardial infarction and stroke, and the need for coronary and non-coronary revascularization procedures in adults with es (Source: U.S. FDA label.)"
+  "text": "Simvastatin is a prodrug and is hydrolyzed to its active β-hydroxyacid form, simvastatin acid, after administration. Indicated for: Simvastatin tablets USP are indicated: To reduce the risk of total mortality by reducing risk of coronary heart disease death, non-fatal myocardial infarction and stroke, and the need for coronary and non-coronary revascularization procedures in adults with… (Source: U.S. FDA label.)"
  },
  {
   "id": "fda-pravastatin",
@@ -119,7 +120,7 @@ export const FDA_NOTES = [
    "lisinopril",
    "lisinopril"
   ],
-  "text": "Lisinopril inhibits angiotensin-converting enzyme (ACE) in human subjects and animals. Indicated for: Lisinopril tablet USP is an angiotensin converting enzyme (ACE) inhibitor indicated for: Treatment of hypertension in adults and pediatric patients 6 years of age and older ( 1.1 ) Adjunct therapy for heart failure ( 1.2 ) Treatment of Acute Myocardial Infarct (Source: U.S. FDA label.)"
+  "text": "Lisinopril inhibits angiotensin-converting enzyme (ACE) in human subjects and animals. Indicated for: Lisinopril tablet USP is an angiotensin converting enzyme (ACE) inhibitor indicated for: Treatment of hypertension in adults and pediatric patients 6 years of age and older ( 1.1 ) Adjunct therapy for heart failure ( 1.2 ) Treatment of Acute Myocardial… (Source: U.S. FDA label.)"
  },
  {
   "id": "fda-enalapril",
@@ -143,7 +144,7 @@ export const FDA_NOTES = [
    "losartan",
    "losartan"
   ],
-  "text": "Angiotensin II is a potent vasoconstrictor, the primary vasoactive hormone of the renin-angiotensin system, and an important component in the pathophysiolog Indicated for: Losartan potassium tablets are an angiotensin II receptor blocker (ARB) indicated for: • Treatment of hypertension, to lower blood pressure in adults and children greater than 6 years old. (Source: U.S. FDA label.)"
+  "text": "Angiotensin II is a potent vasoconstrictor, the primary vasoactive hormone of the renin-angiotensin system, and an important component in the… Indicated for: Losartan potassium tablets are an angiotensin II receptor blocker (ARB) indicated for: • Treatment of hypertension, to lower blood pressure in adults and children greater than 6 years old. (Source: U.S. FDA label.)"
  },
  {
   "id": "fda-valsartan",
@@ -191,7 +192,7 @@ export const FDA_NOTES = [
    "furosemide",
    "furosemide"
   ],
-  "text": "Furosemide inhibits primarily the reabsorption of sodium and chloride not only in the proximal and distal tubules but also in the loop of Henle. Indicated for: Furosemide Injection is a loop diuretic indicated for: • The treatment of edema associated with heart failure, cirrhosis of the liver, and renal disease ( 1.1 ) • Acute pulmonary edema as adjunctive therapy ( 1.2 ) 1.1 Edema Furosemide Injection is indicated i (Source: U.S. FDA label.)"
+  "text": "Furosemide inhibits primarily the reabsorption of sodium and chloride not only in the proximal and distal tubules but also in the loop of Henle. Indicated for: Furosemide Injection is a loop diuretic indicated for: • The treatment of edema associated with heart failure, cirrhosis of the liver, and renal disease ( 1.1 ) • Acute pulmonary edema as adjunctive therapy ( 1.2 ) 1.1 Edema Furosemide Injection is indicated… (Source: U.S. FDA label.)"
  },
  {
   "id": "fda-spironolactone",
@@ -207,7 +208,7 @@ export const FDA_NOTES = [
    "digoxin",
    "digoxin"
   ],
-  "text": "All of digoxin’s actions are mediated through its effects on Na-K ATPase. Indicated for: Digoxin is a cardiac glycoside indicated for: • Treatment of mild to moderate heart failure in adults (1.1). • Increasing myocardial contractility in pediatric patients with heart failure (1.2). • Control of resting ventricular rate in patients with chronic a (Source: U.S. FDA label.)"
+  "text": "All of digoxin’s actions are mediated through its effects on Na-K ATPase. Indicated for: Digoxin is a cardiac glycoside indicated for: • Treatment of mild to moderate heart failure in adults (1.1). • Increasing myocardial contractility in pediatric patients with heart failure (1.2). • Control of resting ventricular rate in patients with chronic… (Source: U.S. FDA label.)"
  },
  {
   "id": "fda-clopidogrel",
@@ -215,7 +216,7 @@ export const FDA_NOTES = [
    "clopidogrel",
    "clopidogrel"
   ],
-  "text": "Clopidogrel is an inhibitor of platelet activation and aggregation through the irreversible binding of its active metabolite to the P2Y 12 class of ADP receptors on platelets. Indicated for: Clopidogrel tablets are a P2Y 12 platelet inhibitor indicated for: Acute coronary syndrome – For patients with non–ST-segment elevation ACS (unstable angina /non–ST-elevation myocardial infarction ), clopidogrel tablets have been shown to reduce th (Source: U.S. FDA label.)"
+  "text": "Clopidogrel is an inhibitor of platelet activation and aggregation through the irreversible binding of its active metabolite to the P2Y 12 class of ADP receptors on platelets. Indicated for: Clopidogrel tablets are a P2Y 12 platelet inhibitor indicated for: Acute coronary syndrome – For patients with non–ST-segment elevation ACS (unstable angina /non–ST-elevation myocardial infarction ), clopidogrel tablets have been shown to reduce… (Source: U.S. FDA label.)"
  },
  {
   "id": "fda-warfarin",
@@ -239,7 +240,7 @@ export const FDA_NOTES = [
    "rivaroxaban",
    "rivaroxaban"
   ],
-  "text": "XARELTO is a selective inhibitor of FXa. Indicated for: XARELTO is a factor Xa inhibitor indicated: to reduce risk of stroke and systemic embolism in nonvalvular atrial fibrillation ( 1.1 ) for treatment of deep vein thrombosis (DVT) ( 1.2 ) for treatment of pulmonary embolism (PE) ( 1.3 ) for reduction in the risk (Source: U.S. FDA label.)"
+  "text": "XARELTO is a selective inhibitor of FXa. Indicated for: XARELTO is a factor Xa inhibitor indicated: to reduce risk of stroke and systemic embolism in nonvalvular atrial fibrillation ( 1.1 ) for treatment of deep vein thrombosis (DVT) ( 1.2 ) for treatment of pulmonary embolism (PE) ( 1.3 ) for reduction in the… (Source: U.S. FDA label.)"
  },
  {
   "id": "fda-diltiazem",
@@ -255,7 +256,7 @@ export const FDA_NOTES = [
    "verapamil",
    "verapamil"
   ],
-  "text": "Verapamil inhibits the calcium ion (and possibly sodium ion) influx through slow channels into conductile and contractile myocardial cells and vascular smooth muscle cells. Indicated for: Verapamil Hydrochloride Injection, USP is indicated for the following: • Rapid conversion to sinus rhythm of paroxysmal supraventricular tachycardias, including those associated with accessory bypass tracts (Wolff-Parkinson-White and Lown-Ganong- Levin (Source: U.S. FDA label.)"
+  "text": "Verapamil inhibits the calcium ion (and possibly sodium ion) influx through slow channels into conductile and contractile myocardial cells and vascular smooth muscle cells. Indicated for: Verapamil Hydrochloride Injection, USP is indicated for the following: • Rapid conversion to sinus rhythm of paroxysmal supraventricular tachycardias, including those associated with accessory bypass tracts (Wolff-Parkinson-White and Lown-Ganong-… (Source: U.S. FDA label.)"
  },
  {
   "id": "fda-nifedipine",
@@ -271,7 +272,7 @@ export const FDA_NOTES = [
    "doxazosin",
    "doxazosin"
   ],
-  "text": "Benign Prostatic Hyperplasia (BPH) The symptoms associated with benign prostatic hyperplasia (BPH), such as urinary frequency, nocturia, weak stream, hesitancy, and incomplete emptying are related to two components, anatomical (static) and functional (dynamic) Indicated for: Doxazosin tablets are an alpha 1 adrenergic antagonist indicated for: Signs and symptoms of Benign Prostatic Hyperplasia (BPH) Treatment of Hypertension 1.1 Benign Prostatic Hyperplasia (BPH) Doxazosin tablets are indicated for the treatment of the signs and s (Source: U.S. FDA label.)"
+  "text": "Benign Prostatic Hyperplasia (BPH) The symptoms associated with benign prostatic hyperplasia (BPH), such as urinary frequency, nocturia, weak stream, hesitancy, and incomplete emptying are related to two components, anatomical (static) and functional (dynamic) Indicated for: Doxazosin tablets are an alpha 1 adrenergic antagonist indicated for: Signs and symptoms of Benign Prostatic Hyperplasia (BPH) Treatment of Hypertension 1.1 Benign Prostatic Hyperplasia (BPH) Doxazosin tablets are indicated for the treatment of the signs and… (Source: U.S. FDA label.)"
  },
  {
   "id": "fda-glipizide",
@@ -303,7 +304,7 @@ export const FDA_NOTES = [
    "empagliflozin",
    "empagliflozin"
   ],
-  "text": "Empagliflozin is an inhibitor of the sodium-glucose co-transporter 2 (SGLT2), the predominant transporter responsible for reabsorption of glucose from the glomerular filtrate back into the circulation. Indicated for: JARDIANCE is indicated: to reduce the risk of cardiovascular death and hospitalization for heart failure in adults with heart failure. to reduce the risk of cardiovascular death in adults with type 2 diabetes mellitus and established cardiovascular disease. as (Source: U.S. FDA label.)"
+  "text": "Empagliflozin is an inhibitor of the sodium-glucose co-transporter 2 (SGLT2), the predominant transporter responsible for reabsorption of glucose from the glomerular filtrate back into the circulation. Indicated for: JARDIANCE is indicated: to reduce the risk of cardiovascular death and hospitalization for heart failure in adults with heart failure. to reduce the risk of cardiovascular death in adults with type 2 diabetes mellitus and established cardiovascular disease.… (Source: U.S. FDA label.)"
  },
  {
   "id": "fda-dapagliflozin",
@@ -311,7 +312,7 @@ export const FDA_NOTES = [
    "dapagliflozin",
    "dapagliflozin"
   ],
-  "text": "Sodium-glucose cotransporter 2 (SGLT2), expressed in the proximal renal tubules, is responsible for the majority of the reabsorption of filtered glucose from the tubular lumen. Indicated for: FARXIGA (dapagliflozin) is indicated: • To reduce the risk of sustained eGFR decline, end-stage kidney disease, cardiovascular (CV) death, and hospitalization for heart failure in adults with chronic kidney disease at risk of progression. • To reduce the risk (Source: U.S. FDA label.)"
+  "text": "Sodium-glucose cotransporter 2 (SGLT2), expressed in the proximal renal tubules, is responsible for the majority of the reabsorption of filtered glucose from the tubular lumen. Indicated for: FARXIGA (dapagliflozin) is indicated: • To reduce the risk of sustained eGFR decline, end-stage kidney disease, cardiovascular (CV) death, and hospitalization for heart failure in adults with chronic kidney disease at risk of progression. • To reduce the… (Source: U.S. FDA label.)"
  },
  {
   "id": "fda-pioglitazone",
@@ -343,7 +344,7 @@ export const FDA_NOTES = [
    "clarithromycin",
    "clarithromycin"
   ],
-  "text": "Clarithromycin is a macrolide antimicrobial drug. Indicated for: Clarithromycin is a macrolide antimicrobial indicated for mild to moderate infections caused by designated, susceptible bacteria in the following: Acute Bacterial Exacerbation of Chronic Bronchitis in Adults ( 1.1 ) Acute Maxillary Sinusitis ( 1.2 ) Community- (Source: U.S. FDA label.)"
+  "text": "Clarithromycin is a macrolide antimicrobial drug. Indicated for: Clarithromycin is a macrolide antimicrobial indicated for mild to moderate infections caused by designated, susceptible bacteria in the following: Acute Bacterial Exacerbation of Chronic Bronchitis in Adults ( 1.1 ) Acute Maxillary Sinusitis ( 1.2 )… (Source: U.S. FDA label.)"
  },
  {
   "id": "fda-ciprofloxacin",
@@ -351,7 +352,7 @@ export const FDA_NOTES = [
    "ciprofloxacin",
    "ciprofloxacin"
   ],
-  "text": "Ciprofloxacin is a member of the fluoroquinolone class of antibacterial agents. Indicated for: Ciprofloxacin is a fluoroquinolone antibacterial indicated in adults (18 years of age and older) with the following infections caused by designated, susceptible bacteria and in pediatric patients where indicated: Skin and Skin Structure Infections ( 1.1 ) Bone (Source: U.S. FDA label.)"
+  "text": "Ciprofloxacin is a member of the fluoroquinolone class of antibacterial agents. Indicated for: Ciprofloxacin is a fluoroquinolone antibacterial indicated in adults (18 years of age and older) with the following infections caused by designated, susceptible bacteria and in pediatric patients where indicated: Skin and Skin Structure Infections ( 1.1 )… (Source: U.S. FDA label.)"
  },
  {
   "id": "fda-levofloxacin",
@@ -359,7 +360,7 @@ export const FDA_NOTES = [
    "levofloxacin",
    "levofloxacin"
   ],
-  "text": "Levofloxacin is a member of the fluoroquinolone class of antibacterial agents. Indicated for: Levofloxacin is a fluoroquinolone antibacterial indicated in adults (18 years of age and older) with infections caused by designated, susceptible bacteria and in pediatric patients where indicated (1, 12.4). • Pneumonia: Nosocomial (1.1) an (Source: U.S. FDA label.)"
+  "text": "Levofloxacin is a member of the fluoroquinolone class of antibacterial agents. Indicated for: Levofloxacin is a fluoroquinolone antibacterial indicated in adults (18 years of age and older) with infections caused by designated, susceptible bacteria and in pediatric patients where indicated (1, 12.4). • Pneumonia: Nosocomial (1.1)… (Source: U.S. FDA label.)"
  },
  {
   "id": "fda-doxycycline",
@@ -367,7 +368,7 @@ export const FDA_NOTES = [
    "doxycycline",
    "doxycycline"
   ],
-  "text": "Doxycycline inhibits bacterial protein synthesis by binding to the 30S ribosomal subunit. Indicated for: To reduce the development of drug-resistant bacteria and maintain effectiveness of doxycycline hyclate and other antibacterial drugs, doxycycline hyclate should be used only to treat or prevent infections that are proven or strongly suspected to be caused by s (Source: U.S. FDA label.)"
+  "text": "Doxycycline inhibits bacterial protein synthesis by binding to the 30S ribosomal subunit. Indicated for: To reduce the development of drug-resistant bacteria and maintain effectiveness of doxycycline hyclate and other antibacterial drugs, doxycycline hyclate should be used only to treat or prevent infections that are proven or strongly suspected to be caused by… (Source: U.S. FDA label.)"
  },
  {
   "id": "fda-metronidazole",
@@ -375,7 +376,7 @@ export const FDA_NOTES = [
    "metronidazole",
    "metronidazole"
   ],
-  "text": "Metronidazole is a nitroimidazole antimicrobial drug. Indicated for: LIKMEZ is a nitroimidazole antimicrobial indicated for Trichomoniasis in adults ( 1.1 ) Amebiasis in adults and pediatric patients ( 1.2 ) Anaerobic Bacterial Infections in adults ( 1.3 ) To reduce the development of drug-resistant bacteria and maintain the ef (Source: U.S. FDA label.)"
+  "text": "Metronidazole is a nitroimidazole antimicrobial drug. Indicated for: LIKMEZ is a nitroimidazole antimicrobial indicated for Trichomoniasis in adults ( 1.1 ) Amebiasis in adults and pediatric patients ( 1.2 ) Anaerobic Bacterial Infections in adults ( 1.3 ) To reduce the development of drug-resistant bacteria and maintain the… (Source: U.S. FDA label.)"
  },
  {
   "id": "fda-clindamycin",
@@ -391,7 +392,7 @@ export const FDA_NOTES = [
    "cephalexin",
    "cephalexin"
   ],
-  "text": "Cephalexin is a cephalosporin antibacterial drug. Indicated for: Cephalexin capsules are a cephalosporin antibacterial drug indicated for the treatment of the following infections caused by susceptible isolates of designated bacteria: Respiratory tract infection ( 1.1 ) Otitis media ( 1.2 ) Skin and skin structure infection (Source: U.S. FDA label.)"
+  "text": "Cephalexin is a cephalosporin antibacterial drug. Indicated for: Cephalexin capsules are a cephalosporin antibacterial drug indicated for the treatment of the following infections caused by susceptible isolates of designated bacteria: Respiratory tract infection ( 1.1 ) Otitis media ( 1.2 ) Skin and skin structure… (Source: U.S. FDA label.)"
  },
  {
   "id": "fda-nitrofurantoin",
@@ -399,7 +400,7 @@ export const FDA_NOTES = [
    "nitrofurantoin",
    "nitrofurantoin"
   ],
-  "text": "Nitrofurantoin is an antibacterial drug. Indicated for: Nitrofurantoin is indicated in adults and pediatric patients 1 month of age and older for the treatment of urinary tract infections due to susceptible strains of Escherichia coli, Enterococcus species, Staphylococcus aureus, Klebsiella sp (Source: U.S. FDA label.)"
+  "text": "Nitrofurantoin is an antibacterial drug. Indicated for: Nitrofurantoin is indicated in adults and pediatric patients 1 month of age and older for the treatment of urinary tract infections due to susceptible strains of Escherichia coli, Enterococcus species, Staphylococcus aureus, Klebsiella… (Source: U.S. FDA label.)"
  },
  {
   "id": "fda-linezolid",
@@ -407,7 +408,7 @@ export const FDA_NOTES = [
    "linezolid",
    "linezolid"
   ],
-  "text": "Linezolid is an antibacterial drug. Indicated for: Linezolid for Oral Suspension is an oxazolidinone-class antibacterial indicated in adults and children for the treatment of the following infections caused by susceptible Gram-positive bacteria: Nosocomial pneumonia ( 1.1 ); Community-acquired pneumonia ( 1. 2 (Source: U.S. FDA label.)"
+  "text": "Linezolid is an antibacterial drug. Indicated for: Linezolid for Oral Suspension is an oxazolidinone-class antibacterial indicated in adults and children for the treatment of the following infections caused by susceptible Gram-positive bacteria: Nosocomial pneumonia ( 1.1 ); Community-acquired pneumonia ( 1.… (Source: U.S. FDA label.)"
  },
  {
   "id": "fda-vancomycin",
@@ -415,7 +416,7 @@ export const FDA_NOTES = [
    "vancomycin",
    "vancomycin"
   ],
-  "text": "Vancomycin is an antibacterial drug. Indicated for: Vancomycin Hydrochloride for Injection is a glycopeptide antibacterial indicated in adult and pediatric patients (neonates and older) for the treatment of: • Septicemia ( 1.1 ) • Infective Endocarditis ( 1.2 ) • Skin and Skin Structure Infections ( 1.3 ) • Bon (Source: U.S. FDA label.)"
+  "text": "Vancomycin is an antibacterial drug. Indicated for: Vancomycin Hydrochloride for Injection is a glycopeptide antibacterial indicated in adult and pediatric patients (neonates and older) for the treatment of: • Septicemia ( 1.1 ) • Infective Endocarditis ( 1.2 ) • Skin and Skin Structure Infections ( 1.3 ) •… (Source: U.S. FDA label.)"
  },
  {
   "id": "fda-acyclovir",
@@ -431,7 +432,7 @@ export const FDA_NOTES = [
    "valacyclovir",
    "valacyclovir"
   ],
-  "text": "Valacyclovir is an antiviral drug active against α-herpes viruses. Indicated for: Valacyclovir tablets are a deoxynucleoside analogue DNA polymerase inhibitor indicated for: Adult Patients ( 1.1 ) Cold Sores (Herpes Labialis) Genital Herpes Treatment in immunocompetent patients (initial or recurrent episode) Suppression in immunocompetent o (Source: U.S. FDA label.)"
+  "text": "Valacyclovir is an antiviral drug active against α-herpes viruses. Indicated for: Valacyclovir tablets are a deoxynucleoside analogue DNA polymerase inhibitor indicated for: Adult Patients ( 1.1 ) Cold Sores (Herpes Labialis) Genital Herpes Treatment in immunocompetent patients (initial or recurrent episode) Suppression in immunocompetent… (Source: U.S. FDA label.)"
  },
  {
   "id": "fda-oseltamivir",
@@ -447,7 +448,7 @@ export const FDA_NOTES = [
    "tenofovir",
    "tenofovir"
   ],
-  "text": "Tenofovir disoproxil fumarate is an antiviral drug. Indicated for: Tenofovir disoproxil fumarate tablets are a nucleotide analog HIV-1 reverse transcriptase inhibitor and an HBV reverse transcriptase inhibitor. • Tenofovir disoproxil fumarate tablets are indicated in combination with other antiretroviral a (Source: U.S. FDA label.)"
+  "text": "Tenofovir disoproxil fumarate is an antiviral drug. Indicated for: Tenofovir disoproxil fumarate tablets are a nucleotide analog HIV-1 reverse transcriptase inhibitor and an HBV reverse transcriptase inhibitor. • Tenofovir disoproxil fumarate tablets are indicated in combination with other antiretroviral… (Source: U.S. FDA label.)"
  },
  {
   "id": "fda-fluconazole",
@@ -471,7 +472,7 @@ export const FDA_NOTES = [
    "itraconazole",
    "itraconazole"
   ],
-  "text": "Itraconazole is an azole antifungal drug. Indicated for: TOLSURA is indicated for the treatment of the following fungal infections in immunocompromised and non-immunocompromised adult patients: Blastomycosis, pulmonary and extrapulmonary Histoplasmosis, including chronic cavitary pulmonary disease and disseminated, (Source: U.S. FDA label.)"
+  "text": "Itraconazole is an azole antifungal drug. Indicated for: TOLSURA is indicated for the treatment of the following fungal infections in immunocompromised and non-immunocompromised adult patients: Blastomycosis, pulmonary and extrapulmonary Histoplasmosis, including chronic cavitary pulmonary disease and… (Source: U.S. FDA label.)"
  },
  {
   "id": "fda-albuterol",
@@ -487,7 +488,7 @@ export const FDA_NOTES = [
    "montelukast",
    "montelukast"
   ],
-  "text": "The cysteinyl leukotrienes (LTC 4, LTD 4, LTE 4 ) are products of arachidonic acid metabolism and are released from various cells, including mast cells and eosinophils. Indicated for: Montelukast sodium chewable tablets are a leukotriene receptor antagonist indicated for: • Prophylaxis and chronic treatment of asthma in patients 2 years of age and older ( 1.1 ). • Acute prevention of exercise-induced bronchoconstriction (EIB) in patients 6 (Source: U.S. FDA label.)"
+  "text": "The cysteinyl leukotrienes (LTC 4, LTD 4, LTE 4 ) are products of arachidonic acid metabolism and are released from various cells, including mast cells and eosinophils. Indicated for: Montelukast sodium chewable tablets are a leukotriene receptor antagonist indicated for: • Prophylaxis and chronic treatment of asthma in patients 2 years of age and older ( 1.1 ). • Acute prevention of exercise-induced bronchoconstriction (EIB) in patients… (Source: U.S. FDA label.)"
  },
  {
   "id": "fda-tiotropium",
@@ -511,7 +512,7 @@ export const FDA_NOTES = [
    "ipratropium",
    "ipratropium"
   ],
-  "text": "Ipratropium bromide is an anticholinergic (parasympatholytic) agent which, based on animal studies, appears to inhibit vagally-mediated reflexes by antagonizing the action of acetylcholine, the transmitter agent released at the neuromuscular junctions in the l Indicated for: ATROVENT HFA Inhalation Aerosol is indicated as a bronchodilator for maintenance treatment of bronchospasm associated with chronic obstructive pulmonary disease (COPD), including chronic bronchitis and emphysema. (Source: U.S. FDA label.)"
+  "text": "Ipratropium bromide is an anticholinergic (parasympatholytic) agent which, based on animal studies, appears to inhibit vagally-mediated reflexes by antagonizing the action of acetylcholine, the transmitter agent released at the neuromuscular junctions in the… Indicated for: ATROVENT HFA Inhalation Aerosol is indicated as a bronchodilator for maintenance treatment of bronchospasm associated with chronic obstructive pulmonary disease (COPD), including chronic bronchitis and emphysema. (Source: U.S. FDA label.)"
  },
  {
   "id": "fda-pantoprazole",
@@ -519,7 +520,7 @@ export const FDA_NOTES = [
    "pantoprazole",
    "pantoprazole"
   ],
-  "text": "Pantoprazole is a PPI that suppresses the final step in gastric acid production by covalently binding to the (H +, K + )-ATPase enzyme system at the secretory surface of the gastric parietal cell. Indicated for: Pantoprazole Sodium for Injection is indicated for treatment of: gastroesophageal reflux disease (GERD) and a history of erosive esophagitis (EE) for up to 10 days in adults. pathological hypersecretory conditions including Zollinger-Ellison (ZE) Syndrome in a (Source: U.S. FDA label.)"
+  "text": "Pantoprazole is a PPI that suppresses the final step in gastric acid production by covalently binding to the (H +, K + )-ATPase enzyme system at the secretory surface of the gastric parietal cell. Indicated for: Pantoprazole Sodium for Injection is indicated for treatment of: gastroesophageal reflux disease (GERD) and a history of erosive esophagitis (EE) for up to 10 days in adults. pathological hypersecretory conditions including Zollinger-Ellison (ZE) Syndrome in… (Source: U.S. FDA label.)"
  },
  {
   "id": "fda-famotidine",
@@ -527,7 +528,7 @@ export const FDA_NOTES = [
    "famotidine",
    "famotidine"
   ],
-  "text": "Famotidine is a competitive inhibitor of histamine-2 (H 2 ) receptors. Indicated for: Famotidine tablets are indicated in adult and pediatric patients 40 kg and greater for the treatment of: • active duodenal ulcer (DU). • active gastric ulcer (GU). • symptomatic nonerosive gastroesophageal reflux disease (GERD). • erosive esophagitis due to GE (Source: U.S. FDA label.)"
+  "text": "Famotidine is a competitive inhibitor of histamine-2 (H 2 ) receptors. Indicated for: Famotidine tablets are indicated in adult and pediatric patients 40 kg and greater for the treatment of: • active duodenal ulcer (DU). • active gastric ulcer (GU). • symptomatic nonerosive gastroesophageal reflux disease (GERD). • erosive esophagitis due to… (Source: U.S. FDA label.)"
  },
  {
   "id": "fda-ondansetron",
@@ -535,7 +536,7 @@ export const FDA_NOTES = [
    "ondansetron",
    "ondansetron"
   ],
-  "text": "Ondansetron is a selective 5-HT 3 receptor antagonist. Indicated for: Ondansetron tablets are indicated for the prevention of nausea and vomiting associated with: highly emetogenic cancer chemotherapy, including cisplatin greater than or equal to 50 mg/m 2. initial and repeat courses of moderately emetogenic cancer chemotherapy (Source: U.S. FDA label.)"
+  "text": "Ondansetron is a selective 5-HT 3 receptor antagonist. Indicated for: Ondansetron tablets are indicated for the prevention of nausea and vomiting associated with: highly emetogenic cancer chemotherapy, including cisplatin greater than or equal to 50 mg/m 2. initial and repeat courses of moderately emetogenic cancer… (Source: U.S. FDA label.)"
  },
  {
   "id": "fda-metoclopramide",
@@ -551,7 +552,7 @@ export const FDA_NOTES = [
    "gabapentin",
    "gabapentin"
   ],
-  "text": "The precise mechanisms by which gabapentin produces its analgesic and antiepileptic actions are unknown. Indicated for: Gabapentin Capsules, USP are indicated for: Management of postherpetic neuralgia in adults Adjunctive therapy in the treatment of partial onset seizures, with and without secondary generalization, in adults and pediatric patients 3 years and older with epileps (Source: U.S. FDA label.)"
+  "text": "The precise mechanisms by which gabapentin produces its analgesic and antiepileptic actions are unknown. Indicated for: Gabapentin Capsules, USP are indicated for: Management of postherpetic neuralgia in adults Adjunctive therapy in the treatment of partial onset seizures, with and without secondary generalization, in adults and pediatric patients 3 years and older with… (Source: U.S. FDA label.)"
  },
  {
   "id": "fda-pregabalin",
@@ -559,7 +560,7 @@ export const FDA_NOTES = [
    "pregabalin",
    "pregabalin"
   ],
-  "text": "Pregabalin binds with high affinity to the alpha 2 -delta site (an auxiliary subunit of voltage-gated calcium channels) in central nervous system tissues. Indicated for: Pregabalin capsules are indicated for: • Management of neuropathic pain associated with diabetic peripheral neuropathy • Management of postherpetic neuralgia • Adjunctive therapy for the treatment of partial-onset seizures in patients 1 month of age and older (Source: U.S. FDA label.)"
+  "text": "Pregabalin binds with high affinity to the alpha 2 -delta site (an auxiliary subunit of voltage-gated calcium channels) in central nervous system tissues. Indicated for: Pregabalin capsules are indicated for: • Management of neuropathic pain associated with diabetic peripheral neuropathy • Management of postherpetic neuralgia • Adjunctive therapy for the treatment of partial-onset seizures in patients 1 month of age and… (Source: U.S. FDA label.)"
  },
  {
   "id": "fda-tramadol",
@@ -575,7 +576,7 @@ export const FDA_NOTES = [
    "morphine",
    "morphine"
   ],
-  "text": "Morphine is a full opioid agonist and is relatively selective for the mu-opioid receptor, although it can bind to other opioid receptors at higher doses. Indicated for: Morphine sulfate tablets are indicated for the management of: adult and pediatric patients weighing at least 50 kg and above with acute pain severe enough to require an opioid analgesic and for which alternative treatments are inadequate. adults with chronic p (Source: U.S. FDA label.)"
+  "text": "Morphine is a full opioid agonist and is relatively selective for the mu-opioid receptor, although it can bind to other opioid receptors at higher doses. Indicated for: Morphine sulfate tablets are indicated for the management of: adult and pediatric patients weighing at least 50 kg and above with acute pain severe enough to require an opioid analgesic and for which alternative treatments are inadequate. adults with chronic… (Source: U.S. FDA label.)"
  },
  {
   "id": "fda-sumatriptan",
@@ -591,7 +592,7 @@ export const FDA_NOTES = [
    "levetiracetam",
    "levetiracetam"
   ],
-  "text": "The precise mechanism(s) by which levetiracetam exerts its antiepileptic effect is unknown. Indicated for: Levetiracetam is indicated for the treatment of partial-onset seizures in patients 1 month of age and older (1.1) Levetiracetam is indicated for adjunctive therapy for the treatment of: Myoclonic seizures in patients 12 years of age and older with juvenile myo (Source: U.S. FDA label.)"
+  "text": "The precise mechanism(s) by which levetiracetam exerts its antiepileptic effect is unknown. Indicated for: Levetiracetam is indicated for the treatment of partial-onset seizures in patients 1 month of age and older (1.1) Levetiracetam is indicated for adjunctive therapy for the treatment of: Myoclonic seizures in patients 12 years of age and older with juvenile… (Source: U.S. FDA label.)"
  },
  {
   "id": "fda-lamotrigine",
@@ -639,7 +640,7 @@ export const FDA_NOTES = [
    "quetiapine",
    "quetiapine"
   ],
-  "text": "The mechanism of action of quetiapine in the listed indications is unclear. Indicated for: Quetiapine is an atypical antipsychotic indicated for the treatment of: Schizophrenia ( 1.1 ) Bipolar I disorder manic episodes ( 1.2 ) Bipolar disorder, depressive episodes ( 1.2 ) 1.1 Schizophrenia Quetiapine is indicated for the treatmen (Source: U.S. FDA label.)"
+  "text": "The mechanism of action of quetiapine in the listed indications is unclear. Indicated for: Quetiapine is an atypical antipsychotic indicated for the treatment of: Schizophrenia ( 1.1 ) Bipolar I disorder manic episodes ( 1.2 ) Bipolar disorder, depressive episodes ( 1.2 ) 1.1 Schizophrenia Quetiapine is indicated for the… (Source: U.S. FDA label.)"
  },
  {
   "id": "fda-risperidone",
@@ -647,7 +648,7 @@ export const FDA_NOTES = [
    "risperidone",
    "risperidone"
   ],
-  "text": "The mechanism of action of risperidone in schizophrenia is unclear. Indicated for: Risperidone tablets are an atypical antipsychotic indicated for: Treatment of schizophrenia ( 1.1 ) As monotherapy or adjunctive therapy with lithium or valproate, for the treatment of acute manic or mixed episodes associated with Bipolar I Disorder ( 1.2 ) Tr (Source: U.S. FDA label.)"
+  "text": "The mechanism of action of risperidone in schizophrenia is unclear. Indicated for: Risperidone tablets are an atypical antipsychotic indicated for: Treatment of schizophrenia ( 1.1 ) As monotherapy or adjunctive therapy with lithium or valproate, for the treatment of acute manic or mixed episodes associated with Bipolar I Disorder ( 1.2 )… (Source: U.S. FDA label.)"
  },
  {
   "id": "fda-olanzapine",
@@ -679,7 +680,7 @@ export const FDA_NOTES = [
    "lithium",
    "lithium"
   ],
-  "text": "The mechanism of action of lithium as a mood stabilizing agent is unknown. Indicated for: Lithium is a mood-stabilizing agent indicated as monotherapy for the treatment of bipolar I disorder: • Treatment of acute manic and mixed episodes in patients 7 years and older • Maintenance treatment in patients 7 years and olde (Source: U.S. FDA label.)"
+  "text": "The mechanism of action of lithium as a mood stabilizing agent is unknown. Indicated for: Lithium is a mood-stabilizing agent indicated as monotherapy for the treatment of bipolar I disorder: • Treatment of acute manic and mixed episodes in patients 7 years and older • Maintenance treatment in patients 7 years and… (Source: U.S. FDA label.)"
  },
  {
   "id": "fda-diazepam",
@@ -687,7 +688,7 @@ export const FDA_NOTES = [
    "diazepam",
    "diazepam"
   ],
-  "text": "The exact mechanism of action for diazepam is not fully understood, but it is thought to involve potentiation of GABAergic neurotransmission resulting from binding at the benzodiazepine site of the GABA A receptor. Indicated for: VALTOCO ® is indicated for the acute treatment of intermittent, stereotypic episodes of frequent seizure activity (i.e., seizure clusters, acute repetitive seizures) that are distinct from a patient's usual seizure pattern in patients with epilepsy 2 years of (Source: U.S. FDA label.)"
+  "text": "The exact mechanism of action for diazepam is not fully understood, but it is thought to involve potentiation of GABAergic neurotransmission resulting from binding at the benzodiazepine site of the GABA A receptor. Indicated for: VALTOCO ® is indicated for the acute treatment of intermittent, stereotypic episodes of frequent seizure activity (i.e., seizure clusters, acute repetitive seizures) that are distinct from a patient's usual seizure pattern in patients with epilepsy 2 years… (Source: U.S. FDA label.)"
  },
  {
   "id": "fda-alprazolam",
@@ -711,7 +712,7 @@ export const FDA_NOTES = [
    "prednisone",
    "prednisone"
   ],
-  "text": "Naturally occurring corticosteroids (hydrocortisone and cortisone), which also have salt-retaining properties, are used as replacement therapy in adrenocortical deficiency states. Indicated for: Prednisone delayed-release tablets are indicated in the treatment of the following diseases or conditions: Prednisone delayed-release tablets are a corticosteroid indicated as an anti-inflammatory or immunosuppressive agent for certain allergic, dermatologic, (Source: U.S. FDA label.)"
+  "text": "Naturally occurring corticosteroids (hydrocortisone and cortisone), which also have salt-retaining properties, are used as replacement therapy in adrenocortical deficiency states. Indicated for: Prednisone delayed-release tablets are indicated in the treatment of the following diseases or conditions: Prednisone delayed-release tablets are a corticosteroid indicated as an anti-inflammatory or immunosuppressive agent for certain allergic,… (Source: U.S. FDA label.)"
  },
  {
   "id": "fda-methotrexate",
@@ -719,7 +720,7 @@ export const FDA_NOTES = [
    "methotrexate",
    "methotrexate"
   ],
-  "text": "Methotrexate inhibits dihydrofolic acid reductase. Indicated for: Methotrexate tablets are a diydrofolate reductase inhibitor indicated for the: • Treatment of adults and pediatric patients with acute lymphoblastic leukemia (ALL) as part of a combination chemotherapy maintenance regimen (1.1) • Treatment of adults with mycos (Source: U.S. FDA label.)"
+  "text": "Methotrexate inhibits dihydrofolic acid reductase. Indicated for: Methotrexate tablets are a diydrofolate reductase inhibitor indicated for the: • Treatment of adults and pediatric patients with acute lymphoblastic leukemia (ALL) as part of a combination chemotherapy maintenance regimen (1.1) • Treatment of adults with… (Source: U.S. FDA label.)"
  },
  {
   "id": "fda-allopurinol",
@@ -727,7 +728,7 @@ export const FDA_NOTES = [
    "allopurinol",
    "allopurinol"
   ],
-  "text": "Allopurinol tablets are a structural analogue of the natural purine base, hypoxanthine. Indicated for: Allopurinol tablets are indicated for: The management of adults with signs and symptoms of primary or secondary gout (acute attacks, tophi, joint destruction, uric acid lithiasis, and/or nephropathy) The management of adult and pediatric patients with leukemia (Source: U.S. FDA label.)"
+  "text": "Allopurinol tablets are a structural analogue of the natural purine base, hypoxanthine. Indicated for: Allopurinol tablets are indicated for: The management of adults with signs and symptoms of primary or secondary gout (acute attacks, tophi, joint destruction, uric acid lithiasis, and/or nephropathy) The management of adult and pediatric patients with… (Source: U.S. FDA label.)"
  },
  {
   "id": "fda-tamsulosin",
@@ -767,6 +768,6 @@ export const FDA_NOTES = [
    "colchicine",
    "colchicine"
   ],
-  "text": "The mechanism by which colchicine tablets exert its beneficial effect in patients with FMF has not been fully elucidated; however, evidence suggests that colchicine may interfere with the intracellular assembly of the inflammasome complex present in neutrophil Indicated for: Colchicine tablets are an alkaloid indicated for: • Prophylaxis and treatment of gout flares in adults ( 1.1 ). • Familial Mediterranean fever (FMF) in adults and children 4 years or older ( Error! Hyperlink reference not valid. ). 1.1 Gout Flares Colchicine t (Source: U.S. FDA label.)"
+  "text": "The mechanism by which colchicine tablets exert its beneficial effect in patients with FMF has not been fully elucidated; however, evidence suggests that colchicine may interfere with the intracellular assembly of the inflammasome complex present in… Indicated for: Colchicine tablets are an alkaloid indicated for: • Prophylaxis and treatment of gout flares in adults ( 1.1 ). • Familial Mediterranean fever (FMF) in adults and children 4 years or older. 1.1 Gout Flares Colchicine… (Source: U.S. FDA label.)"
  }
 ]

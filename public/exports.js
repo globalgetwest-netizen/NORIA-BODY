@@ -38,9 +38,18 @@ export function mdToBlocks(md) {
   const blocks = []
   let i = 0
   const isTableSep = (l) => /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$/.test(l) && l.includes('-') && l.includes('|')
+  // A "|" inside inline code (a regex, a shell pipe, a log format) is real content, not a column
+  // delimiter — hide code spans before splitting the row so they can never be mistaken for table
+  // syntax, then restore them untouched in whichever cell they land in.
+  const hideInlineCode = (l) => {
+    const saved = []
+    const out = l.replace(/`[^`\n]+`/g, (m) => { saved.push(m); return '' + (saved.length - 1) + '' })
+    return { out, restore: (s) => s.replace(/(\d+)/g, (_, i) => saved[+i]) }
+  }
   const splitRow = (l) => {
     let t = l.trim(); if (t.startsWith('|')) t = t.slice(1); if (t.endsWith('|')) t = t.slice(0, -1)
-    return t.split(/(?<!\\)\|/).map((c) => c.trim().replace(/\\\|/g, '|'))
+    const h = hideInlineCode(t)
+    return h.out.split(/(?<!\\)\|/).map((c) => h.restore(c.trim().replace(/\\\|/g, '|')))
   }
   while (i < lines.length) {
     const line = lines[i]

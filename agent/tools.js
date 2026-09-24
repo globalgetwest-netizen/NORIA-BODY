@@ -41,6 +41,9 @@ export const TOOLS = [
     output: { report: { type: "string" }, value: { type: "number" }, unit: { type: "string" }, status: { type: "string" }, as_of: { type: "string" }, evidence: { type: "object" } }, permissions: ["read", "network"], state: "connected", need: "feeds", timeoutMs: 15000, retry: { max: 1, backoffMs: 300 }, verify: "schema", live_read: true }),
   T({ name: "crypto.price", description: "Current cryptocurrency spot price in US dollars, compared across several exchanges; refuses to state a price the exchanges disagree on.", input: { asset: { type: "string", required: true } }, output: { report: { type: "string" }, value: { type: "number" }, unit: { type: "string" }, status: { type: "string" }, as_of: { type: "string" }, evidence: { type: "object" } },
     permissions: ["read", "network"], state: "connected", need: "feeds", timeoutMs: 15000, retry: { max: 1, backoffMs: 300 }, verify: "schema", live_read: true }),
+  T({ name: "stock.price", description: "Last-trade stock price in US dollars for a small, explicit set of well-known tickers, cross-checked between Nasdaq's own public quote and Yahoo Finance; refuses to state a price the two disagree on. NOT a general market-data feed — a ticker outside the known set is refused, never guessed.", input: { symbol: { type: "string", required: true } },
+    output: { report: { type: "string" }, value: { type: "number" }, unit: { type: "string" }, status: { type: "string" }, as_of: { type: "string" }, evidence: { type: "object" } },
+    permissions: ["read", "network"], state: "connected", need: "feeds", timeoutMs: 15000, retry: { max: 1, backoffMs: 300 }, verify: "schema", live_read: true }),
   T({ name: "reference.list", description: "Fixed reference lists quoted from a verified library (for example the 99 Names, countries of Africa).",
     input: { list: { type: "string", required: true } }, output: { answer: { type: "string" } }, verify: "exact", live_read: true }),
   // ── the person's own files and data (run on their device) ──
@@ -108,6 +111,7 @@ const META = {
   "weather.get":      { provider: "MET Norway (official) + Open-Meteo, verified by agent/reality.js", dependencies: ["feeds"], tests: ["feeds_t.mjs (live)", "reality_t.mjs", "reality_feeds_t.mjs"] },
   "fx.rate":          { provider: "ECB reference + open.er-api + currency-api, verified by agent/reality.js", dependencies: ["feeds"], tests: ["feeds_t.mjs (live)", "bench.mjs (current: exchange rate)", "reality_t.mjs", "reality_feeds_t.mjs"] },
   "crypto.price":     { provider: "Coinbase, Kraken, Binance, CoinGecko compared by agent/reality.js", dependencies: ["feeds"], tests: ["feeds_t.mjs (live)", "reality_t.mjs", "reality_feeds_t.mjs"] },
+  "stock.price":      { provider: "Nasdaq public quote API + Yahoo Finance, compared by agent/reality.js; small known-ticker list only", dependencies: ["feeds"], tests: ["reality_feeds_t.mjs", "reality_stock_chat_t.mjs (live)"] },
   "reference.list":   { provider: "worker (verified library)", tests: ["live-check.mjs", "live-check-2.mjs"] },
   "doc.read":         { provider: "browser (pdf.js parsers, docExcerpts retrieval)", tests: ["docread_t.mjs", "manual: 60-page contract, 3 of 3 questions"] },
   "data.query":       { provider: "browser (dataeng.js)", tests: ["data/test-data.mjs (1,200 rows against pandas)"] },

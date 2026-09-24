@@ -6,8 +6,8 @@
  */
 import { Brain, toSpeech } from './brain.js'
 import { noriaSystem } from './persona.js'
-import { initMemory, memoryContext, applyMemoryUpdate, forgetMemory } from './memory.js'
-import { retrieveKnowledge } from './knowledge.js?v=6'
+import { initMemory, memoryContext, applyMemoryUpdate, forgetMemory, forgetFact, factAge } from './memory.js'
+import { retrieveKnowledge } from './knowledge.js?v=7'
 import { NoriaPresenceEngine } from './noria-presence.js'
 import { ensureState, buildContext, updateStateAfterUser, updateStateAfterAssistant } from './conversation-state.js'
 
@@ -63,7 +63,15 @@ function renderMd(el, text) {
   const flushPara = () => { if (para.length) { html += '<p>' + para.join('<br>') + '</p>'; para = [] } }
   const closeList = () => { if (list) { html += '</' + list + '>'; list = null } }
   const flush = () => { flushPara(); closeList() }
-  const rowCells = (r) => r.replace(/^\s*\|/, '').replace(/\|\s*$/, '').split('|').map((c) => c.trim())
+  // A "|" inside inline code (a regex, a shell pipe, a log format) is real content, not a column
+  // delimiter — hide code spans before splitting the row so they can never be mistaken for table
+  // syntax, then restore them untouched in whichever cell they land in.
+  const hideInlineCode = (l) => {
+    const saved = []
+    const out = l.replace(/`[^`\n]+`/g, (m) => { saved.push(m); return '' + (saved.length - 1) + '' })
+    return { out, restore: (s) => s.replace(/(\d+)/g, (_, i) => saved[+i]) }
+  }
+  const rowCells = (r) => { const h = hideInlineCode(r.replace(/^\s*\|/, '').replace(/\|\s*$/, '')); return h.out.split('|').map((c) => h.restore(c.trim())) }
   const lines = src.split('\n')
   for (let li = 0; li < lines.length; li++) {
     const line = lines[li].replace(/\s+$/, ''); let m
@@ -1331,7 +1339,12 @@ function mdInline(t) {
 function mdToPdf(md) {
   const out = []; let buf = null, type = null
   const flush = () => { if (buf) { out.push({ [type]: buf, margin: [0, 2, 0, 9] }); buf = null; type = null } }
-  const rowCells = (r) => r.replace(/^\s*\|/, '').replace(/\|\s*$/, '').split('|').map((c) => c.trim())
+  const hideInlineCode = (l) => {
+    const saved = []
+    const out = l.replace(/`[^`\n]+`/g, (m) => { saved.push(m); return '' + (saved.length - 1) + '' })
+    return { out, restore: (s) => s.replace(/(\d+)/g, (_, i) => saved[+i]) }
+  }
+  const rowCells = (r) => { const h = hideInlineCode(r.replace(/^\s*\|/, '').replace(/\|\s*$/, '')); return h.out.split('|').map((c) => h.restore(c.trim())) }
   const lines = String(md).split('\n')
   for (let li = 0; li < lines.length; li++) {
     const line = lines[li].replace(/\s+$/, ''); let m
@@ -1431,7 +1444,7 @@ $('canvasPdf') && $('canvasPdf').addEventListener('click', () => exportPdf(curCa
 $('canvasDocx') && $('canvasDocx').addEventListener('click', async () => {
   const btn = $('canvasDocx')
   try { // a real Word file (headings, lists, tables, page numbers) — the earlier HTML-based method below is the fallback
-    const X = await import('./exports.js?v=1')
+    const X = await import('./exports.js?v=2')
     await lazyScript('https://cdn.jsdelivr.net/npm/docx@8.5.0/build/index.umd.js')
     downloadBlob(await X.buildDocx(X.mdToBlocks(curCanvasMd), curCanvasTitle, window.docx), slug(curCanvasTitle) + '.docx'); canvasFlash(btn, 'Saved'); return
   } catch (e) { /* fall through to the previous method */ }
@@ -1448,7 +1461,7 @@ $('canvasXlsx') && $('canvasXlsx').addEventListener('click', async () => {
   const btn = $('canvasXlsx')
   try {
     canvasFlash(btn, 'Building…')
-    const X = await import('./exports.js?v=1')
+    const X = await import('./exports.js?v=2')
     await lazyScript('https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js')
     downloadBlob(await X.buildXlsx(X.mdToBlocks(curCanvasMd), curCanvasTitle, window.ExcelJS), slug(curCanvasTitle) + '.xlsx'); canvasFlash(btn, 'Saved')
   } catch (e) { canvasFlash(btn, 'Failed') }
@@ -1458,13 +1471,30 @@ $('canvasPptx') && $('canvasPptx').addEventListener('click', async () => {
   const btn = $('canvasPptx')
   try {
     canvasFlash(btn, 'Building…')
-    const X = await import('./exports.js?v=1')
+    const X = await import('./exports.js?v=2')
     await lazyScript('https://cdn.jsdelivr.net/npm/pptxgenjs@3.12.0/dist/pptxgen.bundle.js')
     downloadBlob(await X.buildPptx(X.mdToBlocks(curCanvasMd), curCanvasTitle, window.PptxGenJS), slug(curCanvasTitle) + '.pptx'); canvasFlash(btn, 'Saved')
   } catch (e) { canvasFlash(btn, 'Failed') }
 })
 
 // ── Consent-based memory ──────────────────────────────────────────────────────
+// One item in the "Memory & privacy" card. A profile field (like the person's name) has no `text`
+// to forget individually — it changes by being overwritten, not accumulated — so only real facts
+// get an age badge and a "forget this" control; wrong or outdated ones can be removed one at a
+// time now, without wiping everything else remembered.
+function memItemEl(label, factText, ts) {
+  const it = document.createElement('div'); it.className = 'memitem'
+  const t = document.createElement('span'); t.className = 'k'; t.textContent = '•'
+  const body = document.createElement('span'); body.className = 'mtext'; body.textContent = label
+  it.append(t, body)
+  if (factText) {
+    const when = document.createElement('span'); when.className = 'mwhen'; when.textContent = factAge(ts)
+    const del = document.createElement('button'); del.type = 'button'; del.className = 'memdel'; del.title = 'Forget this'; del.setAttribute('aria-label', 'Forget this'); del.textContent = '×'
+    del.addEventListener('click', () => { forgetFact(mem, factText); it.remove(); if (!memCard.querySelector('.memitem')) memCard.innerHTML = '<div class="memitem memempty">Nothing remembered yet.</div>' })
+    it.append(when, del)
+  }
+  return it
+}
 function suggestMemory(text) {
   if (document.getElementById('sugg') || !memCard) return
   const c = document.createElement('div'); c.className = 'card memsug'; c.id = 'sugg'
@@ -1473,21 +1503,20 @@ function suggestMemory(text) {
   wrap.parentNode.insertBefore(c, wrap)
   c.querySelector('.save').addEventListener('click', () => {
     applyMemoryUpdate(mem, { facts: [text] })
-    const it = document.createElement('div'); it.className = 'memitem'; it.innerHTML = '<span class="k">•</span> ' + esc(text)
     const none = memCard.querySelector('.memempty'); if (none) none.remove() // the "nothing remembered yet" line goes once there is something
-    memCard.appendChild(it); c.remove()
+    memCard.appendChild(memItemEl(text, text, Date.now())); c.remove()
   })
   c.querySelector('.no').addEventListener('click', () => c.remove())
 }
 // Render any facts already remembered on this device
 ;(function seedMemory() {
   if (!memCard) return
-  const facts = (mem && mem.profile && mem.profile.facts) || []
+  const facts = (mem && mem.facts) || []
   const name = mem && mem.profile && mem.profile.name
   const items = []
-  if (name) items.push('Name: ' + name)
-  facts.slice(0, 6).forEach((f) => items.push(f))
-  if (items.length) memCard.innerHTML = items.map((t) => '<div class="memitem"><span class="k">•</span> ' + esc(t) + '</div>').join('')
+  if (name) items.push(memItemEl('Name: ' + name))
+  facts.slice(0, 6).forEach((f) => items.push(memItemEl(f.text, f.text, f.ts)))
+  if (items.length) { memCard.innerHTML = ''; items.forEach((it) => memCard.appendChild(it)) }
 })()
 
 // ── Conversations: real, saved, searchable (per device) ───────────────────────

@@ -8,7 +8,7 @@ import { buildPlannerMessages, extractJson, validatePlan } from "./agent/planner
 import { buildReplanMessages, parseProposal } from "./agent/control.js";
 import { describeReality, classifyUrl, detectLockDomain, admissible, ANSWERABLE } from "./agent/reality.js";
 import { makeWebReadTool } from "./agent/web-read.js";
-import { fxVerdict, cryptoVerdict, weatherVerdict } from "./agent/reality-feeds.js";
+import { fxVerdict, cryptoVerdict, weatherVerdict, stockVerdict, countryFactVerdict, COUNTRY_ISO3 } from "./agent/reality-feeds.js";
 import { routeRequest, answerContract, LAYERS } from "./agent/reality-router.js";
 import { buildMap } from "./agent/capability-map.js";
 import { describeCodeRuntimes } from "./agent/code-exec.js";
@@ -303,7 +303,11 @@ async function webSearch(q, env, fresh, o) {
     if (hit) { const j = await hit.json(); if (Array.isArray(j) && j.length) return j; }
   } catch (_) {}
   const out = await webSearchRaw(q, env, fresh, o);
-  try { if (cache && key && Array.isArray(out) && out.length >= 3) await cache.put(key, new Response(JSON.stringify(out), { headers: { "Cache-Control": "public, max-age=" + (isFresh ? 600 : 3600) } })); } catch (_) {}
+  // Shortened 2026-09-24 at the owner's request, for more current live data: 600s/3600s -> 60s/300s. This
+  // trades some Tavily-quota efficiency for freshness; it does not change what gets cached (thin/failed
+  // results still never are) or how staleness is judged (that runs on each result's own reported date,
+  // never on cache age).
+  try { if (cache && key && Array.isArray(out) && out.length >= 3) await cache.put(key, new Response(JSON.stringify(out), { headers: { "Cache-Control": "public, max-age=" + (isFresh ? 60 : 300) } })); } catch (_) {}
   return out;
 }
 // The health store shared by every instance (Cloudflare's Cache API): which providers answered, which are out of quota.
@@ -715,6 +719,52 @@ async function realityCryptoBlock(q) {
   const extra = withheld.length ? "\n\nLIVE CRYPTO PRICE [withheld] For the other asset(s), answer with EXACTLY this and state no number of your own: " + withheld.join(" ") : "";
   return { text: texts.join("") + extra, refuse: null };                               // some verified, any withheld carried as an honest instruction
 }
+// A small, explicit set of well-known tickers — NOT a market-data feed. Verified live 2026-09-24 against Yahoo
+// Finance's chart endpoint and Nasdaq's own public quote API (Stooq's old free CSV endpoint was checked and found
+// dead — a real 404 — so it is not used). A company not in this list is not silently guessed at: it falls through
+// to realityRouteBlock's honest "no source connected" refusal, same as before this list existed.
+const STOCKS = [["apple", "AAPL"], ["microsoft", "MSFT"], ["google|alphabet", "GOOGL"], ["amazon", "AMZN"], ["tesla", "TSLA"], ["meta platforms|\\bmeta\\b|facebook", "META"], ["nvidia", "NVDA"], ["netflix", "NFLX"], ["ibm|international business machines", "IBM"], ["coca-cola|coca cola", "KO"], ["disney", "DIS"], ["walmart", "WMT"], ["jpmorgan|jp morgan", "JPM"], ["visa", "V"], ["exxon\\s?mobil|exxon", "XOM"]];
+async function realityStockBlock(q) {
+  const none = { text: "", refuse: null };
+  const s = String(q || "").toLowerCase();
+  if (!/\b(price|cost|worth|trading|value|share|shares|stock)\b/.test(s)) return none;
+  const hits = STOCKS.filter(([names]) => new RegExp("(?<![a-z])(?:" + names + ")(?![a-z])", "i").test(s)).slice(0, 3);
+  if (!hits.length) return none;
+  let rs; try { rs = await Promise.all(hits.map(([, ticker]) => stockVerdict(ticker, { jget: jretry }).catch(() => null))); } catch (_) { return none; }
+  const results = rs.filter(Boolean).map((r) => verdictResult(r, "STOCK PRICE", { line: (v) => v.entity + " = $" + fmtNum(v.value, 2) + " USD" }));
+  if (!results.length) return none;
+  const texts = results.filter((x) => x.text).map((x) => x.text);
+  const withheld = results.filter((x) => x.refuse).map((x) => x.refuse);
+  if (!texts.length) return { text: "", refuse: withheld.join(" ") };                 // every recognized ticker withheld → structural refuse
+  const extra = withheld.length ? "\n\nLIVE STOCK PRICE [withheld] For the other compan(y/ies), answer with EXACTLY this and state no number of your own: " + withheld.join(" ") : "";
+  return { text: texts.join("") + extra, refuse: null };
+}
+// Real, official national statistics (population, GDP, life expectancy, literacy) for ANY of the ~230 country
+// names/aliases World Bank recognises — not a hardcoded per-country list, and not the model's memory. Checked
+// longest-name-first so "north korea" is never mistaken for the shorter "korea" alias it contains.
+const COUNTRY_NAMES_SORTED = Object.keys(COUNTRY_ISO3).sort((a, b) => b.length - a.length);
+function extractCountryName(q) {
+  const s = " " + String(q || "").toLowerCase().replace(/[?!.,;:]/g, " ") + " ";
+  for (const name of COUNTRY_NAMES_SORTED) if (s.includes(" " + name + " ") || s.includes(" " + name + "'")) return name;
+  return null;
+}
+const COUNTRY_ATTR_WORDS = [
+  [/\b(?:gdp per capita|gross domestic product per capita|income per (?:person|capita))\b/i, "gdp_per_capita"],
+  [/\b(?:gdp|gross domestic product)\b/i, "gdp"],
+  [/\b(?:population|how many people|inhabitants|residents)\b/i, "population"],
+  [/\blife expectancy\b/i, "life_expectancy"],
+  [/\bliteracy(?: rate)?\b/i, "literacy_rate"],
+];
+function extractCountryAttribute(q) { for (const [rx, attr] of COUNTRY_ATTR_WORDS) if (rx.test(q)) return attr; return null; }
+const COUNTRY_ATTR_UNIT_SUFFIX = { people: " people", USD: "", "%": "%", years: " years" };
+async function realityCountryFactBlock(q) {
+  const none = { text: "", refuse: null };
+  const attr = extractCountryAttribute(q); if (!attr) return none;
+  const country = extractCountryName(q); if (!country) return none;
+  let r; try { r = await countryFactVerdict(country, attr, { jget: jretry }); } catch (_) { return none; }
+  if (!r) return none;
+  return verdictResult(r, "COUNTRY FACT", { line: (v) => v.attribute + " of " + v.entity + " = " + (v.unit === "USD" ? "$" : "") + fmtNum(v.value, v.unit === "years" || v.unit === "%" ? 1 : 0) + (COUNTRY_ATTR_UNIT_SUFFIX[v.unit] || (v.unit ? " " + v.unit : "")) });
+}
 
 // Calendar + arithmetic ----------------------------------------------------------------------------
 const MON_RE = "jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sept?(?:ember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?";
@@ -1085,7 +1135,11 @@ const STABLE_TASK = /\b(write|compose|draft|poem|story|essay|lyrics|code|functio
 const LIVE_CUE = /\b(current|currently|latest|newest|recent|recently|today|tonight|yesterday|last (?:night|week|weekend|month)|this (?:week|month|year|season|morning|afternoon|evening|weekend)|earlier today|right now|as of|still|upcoming|nowadays|these days|at the moment|at present|present-day|so far this)\b|\bnow\b(?!\s+that)/i;
 const EVENT_VERB = /\b(announce[ds]?|announcement|unveil(?:ed|s)?|launch(?:ed|es)?|acquir(?:e|ed|es)|acquisition|merge[ds]?|resign(?:ed|s)?|appointed|sacked|arrested|indicted)\b/i;
 const MOVING_VALUE = /\b(price|cost of|rate|worth|net worth|population|score|scores|standings?|results?|forecast|schedule|fixtures?|ranking|rankings|salary|version|release date|stock|share price|exchange rate|inflation|unemployment|market cap|record|odds|winner|winners|champions?|how many (people|residents|inhabitants|users|customers|members))\b/i;
-const STATE_Q = /\b(who|what|which)\s+(is|are|was|were)\b|\bwho\s+(leads|runs|heads|owns|manages|coaches|captains|founded|won|wins|plays|represents|replaced|succeeded|replaces|took over)\b|\bhow (much|many)\b|\bis\s+.{2,40}\b(still|alive|dead|married|open|closed|available|legal|banned|real|true|dating|retired)\b/i;
+// TRUTH-ARCHITECTURE FIX (2026-09-24): "what (is|are)" only matched when directly adjacent, missing the
+// very common "what NOUN-PHRASE is/are ..." shape ("what languages ARE spoken in Burkina Faso", "what
+// crops are grown in X", "what religions are practised in Y") — proven live: this exact phrasing about
+// Burkina Faso's languages produced an unsourced table with invented population-share percentages.
+const STATE_Q = /\b(who|what|which)\s+(is|are|was|were)\b|\b(?:what|which)\s+\w+(?:\s+\w+){0,3}\s+(?:is|are|was|were)\b|\bwho\s+(leads|runs|heads|owns|manages|coaches|captains|founded|won|wins|plays|represents|replaced|succeeded|replaces|took over)\b|\bhow (much|many)\b|\bis\s+.{2,40}\b(still|alive|dead|married|open|closed|available|legal|banned|real|true|dating|retired)\b/i;
 const STABLE_FACT = /\b(capital of|currency of|official language|largest (country|city|ocean)|who (wrote|invented|discovered|painted|composed)|meaning of|definition of|synonym|antonym|boiling point|melting point|formula for|symbol for|atomic number)\b/i;
 const STATUS_Q = /\bis\s+.{2,40}\b(available|open|closed|legal|banned|allowed|working|down|operating)\b/i;
 const NOT_ENTITY = new Set("I,I'm,I've,I'd,I'll,Noria,The,A,An,What,Who,Which,Where,When,Why,How,Is,Are,Was,Were,Do,Does,Did,Can,Could,Should,Would,Will,Tell,Give,Show,Please,Monday,Tuesday,Wednesday,Thursday,Friday,Saturday,Sunday,January,February,March,April,May,June,July,August,September,October,November,December,English,Ok,Okay,Hi,Hello,Hey,Thanks".split(","));
@@ -1099,17 +1153,48 @@ function hasEntity(q) { // a capitalised name somewhere after the first word: a 
 const ACTION_ASK = /\b(?:can|could|will|would) you (?:please )?(?:send|book|buy|order|pay(?: for)?|call|phone|text|e-?mail|message|schedule|post|transfer|delete|remind|set (?:a|an) (?:reminder|alarm)|make (?:a|an) (?:call|payment|booking|appointment))\b/i;
 // A short question asking what a specific named thing IS or SAID (a quoted title, a titled person, a work "by" someone) must be checked
 // against live sources first: with no source she says she found nothing, instead of describing something that may not exist.
-const ENTITY_PROBE = /\b(?:[Ss]ummari[sz]e|[Tt]ell me about|[Ww]hat (?:did|does|is|was)|[Ww]ho (?:is|was)|[Dd]escribe|[Rr]eview|[Ee]xplain|[Dd]etails (?:about|on)|[Ii]nformation (?:about|on)|[Ww]hat do you know about)\b[^?]{0,100}(?:"[^"]{4,90}"|\u201c[^\u201d]{4,90}\u201d|\b(?:Dr|Prof|Professor|Mr|Mrs|Ms|Chief|Nana|Hon)\.?\s+[A-Z][\w'-]+(?:[ -][A-Z][\w'-]+)+|\b(?:book|novel|film|movie|speech|paper|study|report|album|song|lecture|poem)\b[^?.]{0,60}\bby\s+[A-Z][\w'-]+(?:[ -][A-Z][\w'-]+)+)/;
+// TRUTH-ARCHITECTURE FIX (2026-09-24), generalised beyond the administrative-geography case: this used
+// to require the "tell me about / describe / ..." phrasing to be followed by ONE OF three narrow
+// shapes \u2014 a quoted title, a "Dr/Prof/Mr Full Name" pattern, or "book/film/... by Author" \u2014 so it only
+// protected people and named works. Proven live that this let ANY other topic through completely
+// unverified: "tell me about the economy of Chad" produced a confident table with a specific GDP figure
+// and growth-rate percentages labelled "World Bank estimate"; "tell me about healthcare in Malawi" and
+// "tell me about agriculture in Niger" did the same for their own invented specifics \u2014 none carried a
+// single source. The three old shapes are really just three ways of saying "a specific named entity is
+// being asked about" \u2014 which is exactly what hasEntity() already detects, generally, for ANY entity
+// (a country, a region, an organisation, a person, not just people and titled works). Replacing the
+// narrow suffix with hasEntity() is strictly broader, not a different rule: every case the old pattern
+// caught (a capitalised full name, a quoted title) still has a capitalised word hasEntity finds.
+const ENTITY_PROBE_VERB = /\b(?:[Ss]ummari[sz]e|[Tt]ell me about|[Ww]hat (?:did|does|is|was)|[Ww]ho (?:is|was)|[Dd]escribe|[Rr]eview|[Ee]xplain|[Dd]etails (?:about|on)|[Ii]nformation (?:about|on)|[Ww]hat do you know about|[Gg]ive me (?:information|details|an overview) (?:about|on)|[Hh]ow (?:is|does|has)\b.{0,30}\b(?:doing|develop(?:ed|ing)|grown|grow|perform(?:ed|ing)|chang(?:ed|ing))\b)\b/;
+const ENTITY_PROBE = { test: (s) => ENTITY_PROBE_VERB.test(s) && (hasEntity(s) || /"[^"]{4,90}"|\u201c[^\u201d]{4,90}\u201d/.test(s)) };
+// TRUTH-ARCHITECTURE FIX (2026-09-24): a country's administrative divisions (its regions, states,
+// provinces...) and their attributes (capitals, populations) are exactly the kind of enumerable,
+// specific-sounding factual list a model fabricates confidently and undetectably when given no
+// evidence to check itself against — proven live: "what are the counties of Kenya" correctly
+// triggered grounding and honestly said the sources didn't list the names, but "tell me about the
+// regions in Ivory Coast" (the SAME underlying question, a different verb) matched none of the
+// existing topic checks below, was never grounded, and returned a detailed, fabricated table (a
+// garbled country name, invented "2024 population" figures, invented "notable features") with no
+// sources at all. Two hardcoded exceptions already existed for this exact topic (REFS: Nigeria,
+// Ghana) — proof the gap was already known for those two countries, just never generalised to the
+// other ~190. This is a TOPIC check, like MOVING_VALUE, not a verb check like STABLE_TASK: it must
+// override "tell me about" / "describe" / "write about" the same way a stock price already does.
+const ADMIN_DIVISION = /\b(regions?|states?|provinces?|counties|districts?|departments?|prefectures?|governorates?|cantons?|territories|wards?|municipalit(?:y|ies)|subdivisions?|administrative divisions?|parishes|oblasts?|voivodeships?|emirates?)\b/i;
 function liveStrength(q) {
   const s = String(q || "");
   if (ACTION_ASK.test(s)) return "no";
   if (s.length < 400 && ENTITY_PROBE.test(s)) return "must";
+  const adminGeo = ADMIN_DIVISION.test(s) && hasEntity(s);
   // a puzzle with its own numbers ("a bat and a ball cost 1.10 in total…") is worked out, not looked up; a market or rate word keeps it a lookup
   if (mathWordProblem(s) && !LIVE_CUE.test(s) && !officeAsk(s) && !/\b(bitcoin|btc|stock|share price|gold|oil|exchange|rate|dollar|cedi|euro|pound|crypto|market|today|now|current|latest)\b/i.test(s)) return "no";
+  // Deliberately NOT excluding adminGeo here: a genuine creative task ("write a poem about the regions of France")
+  // does not need factual verification the way an enumeration ("what are the regions of France") does — the failure
+  // this fix targets never matched a write/poem/STABLE_TASK verb in the first place ("tell me about..." is neither),
+  // so it is caught by adminGeo being added to the "must" check below instead, without touching this bypass at all.
   if (/\b(write|compose|draft|poem|story|essay|lyrics|code|function|refactor|debug|translate|rephrase|reword|summari[sz]e|brainstorm|pretend|role-?play)\b/i.test(s) && !MOVING_VALUE.test(s) && !officeAsk(s)) return "no"; // a creative or language task is never a lookup
   if (STABLE_TASK.test(s) && !LIVE_CUE.test(s) && !officeAsk(s)) return "no";
   if (STABLE_FACT.test(s) && !LIVE_CUE.test(s)) return "no";
-  if (officeAsk(s) || LIVE_CUE.test(s) || MOVING_VALUE.test(s) || STATUS_Q.test(s) || (EVENT_VERB.test(s) && hasEntity(s))) return "must";
+  if (officeAsk(s) || LIVE_CUE.test(s) || MOVING_VALUE.test(s) || STATUS_Q.test(s) || adminGeo || (EVENT_VERB.test(s) && hasEntity(s))) return "must";
   if (STATE_Q.test(s) && hasEntity(s)) return "maybe";
   if (serverNeedsWeb(s)) return "must";
   return "no";
@@ -1154,10 +1239,16 @@ function verifyAnswer(text, live, q) {
   }
   for (const y of years) if (!hay.includes(y)) bad.push(y);
   // A figure the sources never state (a net worth, a population, a price) is the model's memory, which stops before today.
-  // Three or more digits (not a year) must appear in the sources, the question, the clock or a tool result.
+  // Three or more digits (not a year) must appear in the sources, the question, the clock or a tool result — OR be a
+  // close rounding of one (within 0.5% or one cent, whichever is larger): a model naturally saying "$336.3" for an
+  // injected "$336.29" is correct, not a fabrication, and treating it as unsupported would wrongly discard a right
+  // answer. The tolerance is deliberately tight — a genuinely wrong figure like "$999.99" for "$336.29" is nowhere
+  // close and is still caught.
   const hayNum = hay.replace(/(\d),(?=\d{3})/g, "$1");
+  const hayNumbers = (hayNum.match(/\d+(?:\.\d+)?/g) || []).map(Number).filter((n) => isFinite(n));
+  const closeRounding = (nStr) => { const n = Number(nStr); return isFinite(n) && hayNumbers.some((h) => Math.abs(n - h) <= Math.max(0.01, h * 0.005)); };
   const badNums = [...new Set((String(text).replace(/(\d),(?=\d{3})/g, "$1").replace(/\[\d+\]/g, " ").match(/\d+(?:\.\d+)?/g) || [])
-    .filter((n) => n.replace(".", "").length >= 3 && !(/^(?:19|20)\d{2}$/.test(n)) && !hayNum.includes(n)))];
+    .filter((n) => n.replace(".", "").length >= 3 && !(/^(?:19|20)\d{2}$/.test(n)) && !hayNum.includes(n) && !closeRounding(n)))];
   for (const n of badNums) bad.push(n);
   // a short factual answer may not introduce two unsupported names; a long summary of many items is judged by proportion
   const recentYear = new Date().getUTCFullYear() - 1; // "in office since 2022" is history the model may know; a claim about this or last year must be in the sources
@@ -1165,7 +1256,12 @@ function verifyAnswer(text, live, q) {
   // Time: does the answer refer to the moment the question asks about? (see temporalIssues)
   const temporal = temporalIssues(q, text), stale = temporal.length > 0;
   for (const t of temporal) bad.push(t);
-  return { ok: !stale && !yearBad && !badNums.length && (badNames.length < 2 || badNames.length / Math.max(1, phrases.length) < 0.25), unsupported: bad };
+  // A short claim (few proper-noun-like phrases total, e.g. "The capital of Ghana is Kumasi") has no room for the
+  // 2-unsupported-names/25%-proportion tolerance below: with only 1-3 phrases total, a single wrong one either IS
+  // the whole claim or is close to it, so zero tolerance applies. The existing tolerance remains for a longer
+  // answer (a multi-paragraph brief), where one incidental name variance should not force an unnecessary rewrite.
+  const nameOk = phrases.length <= 3 ? badNames.length === 0 : (badNames.length < 2 || badNames.length / Math.max(1, phrases.length) < 0.25);
+  return { ok: !stale && !yearBad && !badNums.length && nameOk, unsupported: bad };
 }
 // ── TEMPORAL EVIDENCE RESOLVER ─────────────────────────────────────────────────────────────────────────────────────
 // One mechanism for every question whose answer depends on WHEN: it works out which moment the question means (the newest one, this
@@ -1208,6 +1304,14 @@ function temporalIssues(q, text) {
 const RECENT_EVENT_Q = /\b(?:most recent|latest|last|current|newest)\b[^?.]{0,60}\b(?:won|winner|champion|champions|final|edition|tournament|cup|league|title|election|season)\b|\bwho won\b[^?.]{0,40}\b(?:last|latest|most recent|recent)\b/i;
 function fromSources(live, news) {
   const host = (u) => { try { return new URL(u).hostname.replace(/^www\./, ""); } catch (_) { return ""; } };
+  // No search-result-shaped sources: this is an exact-data-tool answer (fx/crypto/weather/stock, or a read page)
+  // whose model draft failed verification three times in a row. Show the actual verified evidence directly rather
+  // than an empty list — the raw evidence, stripped of its model-facing instructions, is always safer than any
+  // paraphrase that already failed to match it.
+  if (!(live.sources || []).length && live.ctx) {
+    const clean = String(live.ctx).replace(/\[[^\]]*\]/g, "").replace(/Use exactly this verified figure[^.]*\./gi, "").replace(/State it plainly[^.]*\./gi, "").replace(/Do not add, round differently[^.]*\./gi, "").replace(/Answer using ONLY[^.]*\./gi, "").replace(/\n{3,}/g, "\n\n").trim();
+    return "I want to be exact here, so here is the verified information directly:\n\n" + clean;
+  }
   const rows = (live.sources || []).slice(0, news ? 6 : 4).map((r) => "• **" + String(r.title || "").replace(/\s+/g, " ").slice(0, 110) + "**" + (r.date ? " (" + String(r.date).slice(0, 16) + ")" : "") + (r.snippet ? " — " + String(r.snippet).replace(/\s+/g, " ").replace(/https?:\/\/\S+/g, "").slice(0, 200) : "") + (host(r.url) ? " *(" + host(r.url) + ")*" : ""));
   if (news) return "Here is what my live sources are reporting right now:\n\n" + rows.join("\n") + "\n\nTell me which story you want more on and I will look closer.";
   return "I couldn't confirm a precise answer to that from my live sources, and I don't want to guess. This is what they say:\n\n" + rows.join("\n") + "\n\nIf you tell me which part matters most, I can look again.";
@@ -1269,7 +1373,11 @@ async function liveAnswer(messages, env, g, q, opts) {
   const subj = [...new Set((String(q || "").match(/"[^"]{4,90}"|\b[A-Z][a-zA-Z'-]{3,}(?:[ -][A-Z][a-zA-Z'-]{2,})*/g) || []).map((x) => x.replace(/^"|"$/g, "")))].filter((x) => !/^(?:What|Who|When|Where|Why|How|Tell|Give|Summari[sz]e|Describe|Explain|Please|Which|Africa|Ghana|Nigeria|Kenya)$/i.test(x));
   const srcHay = fold((g.live.sources || []).map((r) => (r.title || "") + " " + (r.snippet || "")).join(" "));
   const firstWord = (x) => fold(x).split(/[^a-z0-9]+/).filter((w) => w.length > 3)[0] || "";
-  if (subj.length && subj.every((x) => firstWord(x) && !srcHay.includes(firstWord(x)))) {
+  // This "nothing found" branch only makes sense against real search-result snippets: for an exact-data-tool answer
+  // (fx/crypto/weather/stock, or a read page) there ARE no sources to check the subject against — g.live.sources is
+  // deliberately empty and the real evidence lives in g.live.ctx instead — so it must never fire here, or a genuine,
+  // real subject with a verified figure gets wrongly told it "may not exist".
+  if ((g.live.sources || []).length && subj.length && subj.every((x) => firstWord(x) && !srcHay.includes(firstWord(x)))) {
     return { text: "I couldn't find anything about " + subj.slice(0, 2).join(" or ") + " in my live sources, so I can't tell you about it and I won't guess. It may not exist, may be very new, or may be spelled differently. If you tell me where you came across it, I can help you check it.", verified: false, unsupported: v.unsupported };
   }
   const fictional = judgedFiction || ((g.live.sources || []).some((r) => FICTION_HOST.test(String(r.url || ""))) && (officeAsk(q) || /(?:king|queen|ruler|emperor|leader|capital|population) of/i.test(q)));
@@ -1366,6 +1474,55 @@ async function webReadBody(res, maxBytes) {
   return { text: new TextDecoder("utf-8", { fatal: false }).decode(buf), bytes: total, truncated };
 }
 const webReadTool = makeWebReadTool({ fetchRaw: webReadFetchRaw, resolveDns: webReadResolveDns, readBody: webReadBody, sanitize: sanitizeOutput, classifyUrl, userAgent: "NoriaBot/1.0 (+https://noria.africa; read-only research; respects robots.txt)" });
+// A person can paste a link in plain chat and ask about it: read it live, ground the answer in exactly
+// what it says, and never let the model guess when the page could not be read. Uses the same SSRF-safe,
+// redirect- and size-capped reader as the agentic web.read tool above — one implementation, two callers,
+// so plain chat gets the identical protection (private-network refusal, DNS-rebinding checks re-checked
+// on every redirect hop, instruction-stripping) without a second security surface to keep in sync.
+const PAGE_URL_RX = /https?:\/\/[^\s<>()"'“”]+/;
+async function pageReadBlock(q) {
+  const m = PAGE_URL_RX.exec(q);
+  if (!m) return null;
+  const url = m[0].replace(/[.,;:!?)\]]+$/, ""); // a URL at the end of a sentence often has trailing punctuation attached
+  try {
+    const r = await webReadTool({ url });
+    const cap = 6000, trimmed = r.text.length > cap;
+    const body = trimmed ? r.text.slice(0, cap) : r.text;
+    const text = "\n\n[PAGE READ — you fetched this address just now (" + r.retrieved_at + (r.redirects ? ", after " + r.redirects + " redirect" + (r.redirects > 1 ? "s" : "") : "") + "): " + r.final_url +
+      (r.title ? " — “" + r.title.slice(0, 140) + "”" : "") +
+      ". Answer using ONLY what is below; if it does not answer the question, say so plainly instead of guessing, and mention the address as your source." +
+      (r.truncated || trimmed ? " (only the first part of a long page was read.)" : "") + "]\n\n" + body;
+    return { text, refuse: null };
+  } catch (e) {
+    const code = e && e.code;
+    const why = code === "address_refused" ? "that address points somewhere I can't read (a private or disallowed network location)"
+      : code === "timeout" ? "that page did not answer in time"
+      : code === "too_large" ? "that page is too large for me to read"
+      : code === "unsupported_content_type" ? "that address is not a readable page"
+      : code === "too_many_redirects" ? "that address redirected too many times"
+      : /^http_/.test(String(code)) ? "that page answered with an error"
+      : "I could not read that page just now";
+    return { text: "", refuse: "I tried to read " + url + ", but " + why + ". I won't guess what it says — you're welcome to paste the text, or try a different link." };
+  }
+}
+// The reality router (agent/reality-router.js) classifies MANY domains, but several of them —
+// medical_guidance, appointment_availability (immigration), government_announcement (law) — are
+// marked state:"none" in DOMAINS (no connected tool) even though plain chat's own source-lock
+// filtering (added above pageReadBlock) can genuinely answer them when a real official source (e.g.
+// who.int) turns up in search. Routing those three through the router's blanket cannot_verify would
+// make Noria refuse questions it can, in fact, sometimes answer correctly — a real regression of
+// already-shipped, already-verified behavior, not an improvement. So only the domains with NO
+// existing coverage of any kind are handled here: flight status, traffic, stock/market prices and
+// company registration. Everything else is left entirely to the existing, already-tested handlers.
+const ROUTER_NEW_DOMAINS = new Set(["flight_status", "traffic", "stock_price", "company_registration"]);
+function realityRouteBlock(q) {
+  let route; try { route = routeRequest(q); } catch (_) { return null; }
+  if (!route.domains.some((d) => ROUTER_NEW_DOMAINS.has(d.domain))) return null; // nothing here is one of the newly-covered domains
+  if (route.domains.some((d) => !ROUTER_NEW_DOMAINS.has(d.domain) && d.tool)) return null; // a mixed question also touching an already-handled domain: defer entirely to the proven handlers rather than risk conflicting instructions
+  if (route.decision === "ask_clarification") return { refuse: "I would need to know " + route.clarify.join(" and ") + " before I can check that." };
+  if (route.decision === "cannot_verify") return { refuse: route.statement };
+  return null; // any other outcome (extremely unlikely for a state:"none" domain in isolation): let the existing pipeline decide, never assume
+}
 const TOOL_HANDLERS = {
   "web.search": async (i, env) => {
     const items = await webSearch(String(i.query).slice(0, 300), env, i.fresh !== false);
@@ -1393,6 +1550,13 @@ const TOOL_HANDLERS = {
   "weather.get": async (i, env, ctx) => { const place = String(i.place).slice(0, 80).replace(/^(?:the\s+)?weather\s+(?:in|at|for)\s+/i, "").trim(); const r = await weatherVerdict(place, { jget: jretry }); if (!r) throw toolFail("no weather data for that place", 404); return realityOut(r, "report"); },
   "fx.rate": async (i) => { curIndex(); const code = (x) => { const t = String(x || "").trim(); return /^[A-Za-z]{3}$/.test(t) ? t.toUpperCase() : curCode(t); }, from = code(i.from), to = code(i.to); if (!from || !to || from === to) throw toolFail("give two different currencies", 422); return realityOut(await fxVerdict(from, to, { jget: jretry }), "report"); },
   "crypto.price": async (i) => { const r = await cryptoVerdict(String(i.asset).slice(0, 40), { jget: jretry }); if (!r) throw toolFail("no price for that asset", 404); return realityOut(r, "report"); },
+  "stock.price": async (i) => {
+    let sym = String(i.symbol || "").trim().toUpperCase();
+    if (!/^[A-Z]{1,6}$/.test(sym)) { const hit = STOCKS.find(([names]) => new RegExp("(?:" + names + ")", "i").test(String(i.symbol || ""))); sym = hit ? hit[1] : sym; } // best-effort: a company name from the small known list resolves to its ticker
+    const r = await stockVerdict(sym, { jget: jretry });
+    if (!r) throw toolFail("give a stock ticker symbol (for example AAPL), not just any company name", 422);
+    return realityOut(r, "report");
+  },
   "reference.list": async (i) => { const a = refDirect("List the " + String(i.list).slice(0, 80)); if (!a) throw toolFail("that reference list is not in the library", 404); return { answer: a }; },
 };
 // Each dependency is ok only after a FRESH successful observation (within 15 minutes); a fresh failure is degraded; otherwise unknown.
@@ -1541,19 +1705,43 @@ async function groundMessages(messages, body, env) {
   if (rb) return { messages: addSystem(messages, rb), grounded: true }; // a fixed list is read off the library, not the web
   const fb = futureBlock(q);
   if (fb) return { messages: addSystem(messages, fb), grounded: true }; // no search: there is nothing true to find
-  // Exact-data tools first: clock, calendar/math (instant) and weather / exchange rates / crypto (live feeds).
-  const [wx, fx, cr] = await withTimeout(Promise.all([weatherBlock(q, body.tz), realityFxBlock(q), realityCryptoBlock(q)]), 9000, ["", null, null]);
+  // A pasted link is read live before anything else: it is the most specific source the person could give,
+  // and a failed read is delivered as its own honest statement (see pageReadBlock), never left for the
+  // model to paper over or guess about from training-data familiarity with the domain.
+  const pr = await withTimeout(pageReadBlock(q), 13000, null);
+  if (pr && pr.refuse) return { messages, grounded: true, refuse: pr.refuse };
+  // Exact-data tools first: clock, calendar/math (instant), weather / exchange rates / crypto / a small
+  // set of well-known stock tickers, and now real national statistics (population, GDP, life expectancy,
+  // literacy) for any World Bank-recognised country — all live feeds, cross-checked where more than one
+  // independent source exists.
+  const [wx, fx, cr, st, cf] = await withTimeout(Promise.all([weatherBlock(q, body.tz), realityFxBlock(q), realityCryptoBlock(q), realityStockBlock(q), realityCountryFactBlock(q)]), 9000, ["", null, null, null, null]);
   // A WITHHELD reality verdict (CONFLICTING / STALE / UNAVAILABLE / UNVERIFIED) is
   // delivered verbatim as its own honest statement, bypassing the model — so the
   // model can never state a value the evidence layer refused to confirm.
-  const withheld = (fx && fx.refuse) || (cr && cr.refuse) || null;
+  const withheld = (fx && fx.refuse) || (cr && cr.refuse) || (st && st.refuse) || (cf && cf.refuse) || null;
   if (withheld) return { messages, grounded: true, refuse: withheld };
-  const live = [typeof wx === "string" ? wx : "", fx && fx.text, cr && cr.text];
+  // A domain the reality router covers but nothing else does yet (flight status, traffic, company
+  // registration, and stock prices OUTSIDE the small known-ticker list above): say plainly that no
+  // source is connected, or ask for the one missing detail, rather than let an uncontrolled web
+  // search stand in for real verification. Skipped entirely when the stock or country-fact block above
+  // already answered — the router must never override a real answer with a refusal.
+  if (!(st && st.text) && !(cf && cf.text)) { const rr = realityRouteBlock(q); if (rr && rr.refuse) return { messages, grounded: true, refuse: rr.refuse }; }
+  const live = [typeof wx === "string" ? wx : "", fx && fx.text, cr && cr.text, pr && pr.text, st && st.text, cf && cf.text];
   const tools = [timeBlock(q, body.tz), calcBlock(q)].concat(live).filter(Boolean);
   if (tools.length) {
     messages = addSystem(messages, tools.join(""));
     // Web results would only add stale or conflicting numbers, so skip the search unless the question also needs it.
-    if (!/\b(news|headline|happen|happened|stock|score|scores|president|prime minister|who is|who won)\b/i.test(q)) return { messages, grounded: true };
+    // A resolved stock verdict always skips the search regardless of the "stock" keyword below: that keyword exists
+    // for a stock-market NEWS question, not to second-guess a price this same batch already verified.
+    // TRUTH-ARCHITECTURE FIX (2026-09-24): this branch used to return with no `live` field, which routed the answer
+    // through plainVerified() — a path that checks the model's own arithmetic but NEVER checks whether its stated
+    // figure actually matches the verified evidence it was just given. Proven exploitable: a model reply of "$999.99"
+    // for a verified $336.29 stock price passed through completely unchecked and reached the user labelled "checked
+    // against verified sources". Populating `live.ctx` with the exact tool text routes this through the SAME
+    // liveAnswer/checkLive/verifyAnswer pipeline already proven for search-grounded answers — verifyAnswer rejects
+    // any number of 3+ digits that does not appear in the evidence, forcing a correction, and self-corrects rather
+    // than silently letting the wrong figure through (see answer_evidence_drift_t.mjs).
+    if ((st && st.text) || (cf && cf.text) || !/\b(news|headline|happen|happened|stock|score|scores|president|prime minister|who is|who won)\b/i.test(q)) return { messages, grounded: true, live: { ctx: tools.join(""), sources: [] } };
   }
   if (CLOCK_Q.test(q) && !CLOCK_NOT.test(q)) return { messages, grounded: true }; // the clock line above is the whole answer
   const office = officeAsk(q);
@@ -1572,6 +1760,20 @@ async function groundMessages(messages, body, env) {
     const again = await withTimeout(webSearch(q.replace(/[?!.]+$/, ""), env, true), 9000, []);
     for (const r of again || []) { const k = r && (r.url || r.title); if (k && !seen.has(k)) { seen.add(k); results.push(r); } }
     if (!results.length) return { messages, grounded: true, refuse: NO_OFFICE_ANSWER };
+  }
+  // Source lock: immigration, law, medicine and finance may only be answered from official/approved sources — the same
+  // rule the agentic web.search tool already enforces (TOOL_HANDLERS above). Plain chat had no such check until now,
+  // so a locked-domain question could be grounded in whatever an ordinary web search returned, official or not.
+  const lockDomain = detectLockDomain(q);
+  if (lockDomain && results.length) {
+    let lockWhy = null;
+    const admissibleResults = results.filter((r) => {
+      const cls = classifyUrl(r.url || ""), a = admissible(lockDomain, { level: cls.level, host: cls.host });
+      if (!a.ok && !lockWhy) lockWhy = a.why;
+      return a.ok;
+    });
+    if (!admissibleResults.length) return { messages, grounded: true, refuse: "No official or approved source was found for this question, so I won't state anything here as fact" + (lockWhy ? " (" + lockWhy + ")" : "") + ". You're welcome to share an official source yourself and I will read it." };
+    results.length = 0; for (const r of admissibleResults) results.push(r);
   }
   if (!results.length && strength === "must" && !office) return { messages, grounded: true, refuse: NO_LIVE_ANSWER };
   const top = results.slice(0, 8);
@@ -2123,6 +2325,28 @@ data: ${JSON.stringify({ done: true })}
     // The SERVER never executes code: runtimes live where the isolation does (today: the person's browser), so "available" is decided there.
     if (path === "/brain/code-runtimes") return new Response(JSON.stringify({ generated: new Date().toISOString(), ...describeCodeRuntimes([]), note: "The server does not run code. The browser JavaScript runtime is available in the person's browser; the others are planned or need infrastructure." }), { headers: JSON_H });
     if (path === "/brain/reality") return new Response(JSON.stringify({ generated: new Date().toISOString(), ...describeReality(), layers: LAYERS }), { headers: JSON_H });
+    // Place lookup: geocode any city/town/district/village (GeoNames via Open-Meteo) and, for the
+    // top match, its cross-checked current temperature. Read-only, keyless; unknown places return
+    // an empty result set (never an invented place). Rate-limited per IP.
+    if (path === "/reality/place" && request.method === "GET") {
+      const q = (url.searchParams.get("q") || "").trim().slice(0, 80);
+      if (!q) return new Response(JSON.stringify({ error: "no query" }), { status: 400, headers: JSON_H });
+      const ip = request.headers.get("cf-connecting-ip") || "unknown", minute = Math.floor(Date.now() / 60000), rlKey = "rl/place/" + ip + "/" + minute;
+      const used = ((await HEALTH_STORE.get(rlKey)) || { n: 0 }).n; if (used >= 40) return new Response(JSON.stringify({ error: "too many lookups this minute" }), { status: 429, headers: JSON_H });
+      await HEALTH_STORE.put(rlKey, { n: used + 1 }, 90);
+      const g = await jretry("https://geocoding-api.open-meteo.com/v1/search?count=6&language=en&format=json&name=" + encodeURIComponent(q));
+      const results = (((g && g.results) || [])).map((r) => ({ name: r.name, admin1: r.admin1 || null, admin2: r.admin2 || null, admin3: r.admin3 || null, country: r.country || null, country_code: r.country_code || null, population: r.population != null ? r.population : null, elevation: r.elevation != null ? r.elevation : null, latitude: r.latitude, longitude: r.longitude, timezone: r.timezone || null, feature_code: r.feature_code || null }));
+      let weather = null;
+      if (results.length) {
+        const top = results[0];
+        try {
+          const wx = await weatherVerdict({ name: top.name, latitude: top.latitude, longitude: top.longitude, country: top.country }, { jget: jretry });
+          const v = wx && wx.verdict;
+          if (v) weather = { status: v.status, value: ANSWERABLE.has(v.status) ? v.value : null, unit: v.unit || "°C", sources: v.agreeing_sources || null, as_of: v.as_of ? new Date(v.as_of).toISOString() : null, statement: v.statement };
+        } catch (_) {}
+      }
+      return new Response(JSON.stringify({ query: q, count: results.length, results, weather, generated: new Date().toISOString() }), { headers: JSON_H });
+    }
     // A read-only diagnostic: how would a request be routed (needs outside verification? which source? or "cannot be verified")? Pure computation: no model, no network,
     // no account. It is NOT connected to the chat, which is unchanged; it lets the routing be tested on real phrases before any connection is considered.
     if (path === "/brain/reality/route" && request.method === "POST") {
@@ -2130,7 +2354,19 @@ data: ${JSON.stringify({ done: true })}
       const text = String(b.text || "").slice(0, 500);
       if (text.trim().length < 2) return new Response(JSON.stringify({ error: "send { text }" }), { status: 400, headers: JSON_H });
       const route = routeRequest(text, {});
-      return new Response(JSON.stringify({ route, contract: answerContract(route.decision), connected_to_chat: false }), { headers: JSON_H });
+      // Honest, specific status: fx/crypto/weather/time have their own dedicated, already-verified handlers in chat
+      // (not this router); immigration/medical/legal/financial go through chat's own source-lock filtering, which can
+      // answer correctly when an official source is found (this router alone would refuse them outright, since their
+      // DOMAINS state is "none" — using it for those would be a regression, not a connection); flight status, traffic,
+      // stock prices and company registration are the domains this router actually decides for chat, as of 2026-09-24.
+      const CHAT_HANDLED_ELSEWHERE = new Set(["fx", "crypto", "weather", "time"]);
+      const CHAT_HANDLED_VIA_SOURCE_LOCK = new Set(["appointment_availability", "government_announcement", "medical_guidance"]);
+      const chatRouterDomains = [...ROUTER_NEW_DOMAINS];
+      const connection = route.domains.some((d) => CHAT_HANDLED_ELSEWHERE.has(d.domain)) ? "handled_by_a_dedicated_chat_pipeline_not_this_router"
+        : route.domains.some((d) => CHAT_HANDLED_VIA_SOURCE_LOCK.has(d.domain)) ? "handled_by_chat_source_lock_filtering_not_this_router"
+        : route.domains.some((d) => ROUTER_NEW_DOMAINS.has(d.domain)) ? "connected_to_chat_via_this_router"
+        : "not_applicable_no_domain_matched";
+      return new Response(JSON.stringify({ route, contract: answerContract(route.decision), connected_to_chat: connection, chat_router_domains: chatRouterDomains }), { headers: JSON_H });
     }
     if (path === "/brain/capabilities") {
       const rep = await capabilityReport(env);

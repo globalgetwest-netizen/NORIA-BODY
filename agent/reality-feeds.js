@@ -47,10 +47,78 @@ export async function cryptoVerdict(asset, { jget, now = Date.now() }) {
   return finalise(verdict, label + " price in US dollars", facts, { note: "Spot price in US dollars, compared across exchanges at the moment of the request." });
 }
 
+// Two genuinely independent, keyless sources, checked live before building on them (2026-09-24):
+// Stooq's old free CSV quote endpoint (/q/l/) now returns a 404 and its download endpoint is behind a
+// JS bot-challenge — it is dead, not merely reformatted, so it is NOT used here despite being a common
+// choice in older write-ups. Yahoo Finance's unofficial chart endpoint and NASDAQ's own public quote API
+// both answered with real, current, independently-sourced last-trade prices for both a NASDAQ-listed
+// (AAPL) and a NYSE-listed (IBM) ticker in the same live check, so those two are used instead.
+export async function stockVerdict(ticker, { jget, now = Date.now() }) {
+  const sym = String(ticker || "").toUpperCase().trim();
+  if (!/^[A-Z]{1,6}$/.test(sym)) return null;
+  const mk = (source, price, updated, extra = {}) => makePassport({ entity: sym, attribute: "price", value: price, unit: "USD", source, domain: "stock", basis: "last trade", source_updated_at: updated, retrieved_at: now, ...extra }, now);
+  const facts = await settle([
+    ["yahoo", async () => { const j = await jget("https://query1.finance.yahoo.com/v8/finance/chart/" + sym, 6000); const m = j && j.chart && j.chart.result && j.chart.result[0] && j.chart.result[0].meta; const p = num(m && m.regularMarketPrice); return p ? mk("yahoo", p, m.regularMarketTime ? m.regularMarketTime * 1000 : now) : null; }],
+    ["nasdaq", async () => { const j = await jget("https://api.nasdaq.com/api/quote/" + sym + "/info?assetclass=stocks", 6000); const d = j && j.data && j.data.primaryData; const p = num(d && String(d.lastSalePrice || "").replace(/[$,]/g, "")); return p ? mk("nasdaq", p, now) : null; }], // NASDAQ's timestamp is a formatted local-time string, not reliably machine-parseable: the moment of the request is used instead
+  ], (id) => mk(id, null, null));
+  const verdict = resolveFacts(facts, { domain: "stock", tol: { rel: 0.015 }, now, entity: sym, attribute: "price", basis: "last trade" });
+  return finalise(verdict, sym + " stock price in US dollars", facts, { note: "Last-trade price in US dollars; outside trading hours this is the most recent session's close, not a currently-moving price." });
+}
+
+// A country's real, official, current statistics (population, GDP, life expectancy, literacy) — the exact
+// class of fact that was being confidently fabricated (a $13.8bn GDP figure invented for Chad, labelled
+// "World Bank estimate", when the real World Bank figure is $21.5bn). World Bank Open Data is free, needs
+// no key, and covers every country with one figure per indicator — a single OFFICIAL source of record, the
+// same standing already accepted for a single crypto exchange. The name->code table below was generated
+// from World Bank's own live country list (2026-09-24), not typed from memory, then given the common
+// aliases real people actually use (official statistical names often differ: "Egypt, Arab Rep.", "Congo,
+// Dem. Rep.", "Korea, Rep." and so on).
+const COUNTRY_ISO3_BASE = {"aruba":"ABW","afghanistan":"AFG","angola":"AGO","albania":"ALB","andorra":"AND","united arab emirates":"ARE","argentina":"ARG","armenia":"ARM","american samoa":"ASM","antigua and barbuda":"ATG","australia":"AUS","austria":"AUT","azerbaijan":"AZE","burundi":"BDI","belgium":"BEL","benin":"BEN","burkina faso":"BFA","bangladesh":"BGD","bulgaria":"BGR","bahrain":"BHR","bahamas, the":"BHS","bosnia and herzegovina":"BIH","belarus":"BLR","belize":"BLZ","bermuda":"BMU","bolivia":"BOL","brazil":"BRA","barbados":"BRB","brunei darussalam":"BRN","bhutan":"BTN","botswana":"BWA","central african republic":"CAF","canada":"CAN","switzerland":"CHE","channel islands":"CHI","chile":"CHL","china":"CHN","cote d'ivoire":"CIV","cameroon":"CMR","congo, dem. rep.":"COD","congo, rep.":"COG","colombia":"COL","comoros":"COM","cabo verde":"CPV","costa rica":"CRI","cuba":"CUB","curacao":"CUW","cayman islands":"CYM","cyprus":"CYP","czechia":"CZE","germany":"DEU","djibouti":"DJI","dominica":"DMA","denmark":"DNK","dominican republic":"DOM","algeria":"DZA","ecuador":"ECU","egypt, arab rep.":"EGY","eritrea":"ERI","spain":"ESP","estonia":"EST","ethiopia":"ETH","finland":"FIN","fiji":"FJI","france":"FRA","faroe islands":"FRO","micronesia, fed. sts.":"FSM","gabon":"GAB","united kingdom":"GBR","georgia":"GEO","ghana":"GHA","gibraltar":"GIB","guinea":"GIN","gambia, the":"GMB","guinea-bissau":"GNB","equatorial guinea":"GNQ","greece":"GRC","grenada":"GRD","greenland":"GRL","guatemala":"GTM","guam":"GUM","guyana":"GUY","hong kong sar, china":"HKG","honduras":"HND","croatia":"HRV","haiti":"HTI","hungary":"HUN","indonesia":"IDN","isle of man":"IMN","india":"IND","ireland":"IRL","iran, islamic rep.":"IRN","iraq":"IRQ","iceland":"ISL","israel":"ISR","italy":"ITA","jamaica":"JAM","jordan":"JOR","japan":"JPN","kazakhstan":"KAZ","kenya":"KEN","kyrgyz republic":"KGZ","cambodia":"KHM","kiribati":"KIR","st. kitts and nevis":"KNA","korea, rep.":"KOR","kuwait":"KWT","lao pdr":"LAO","lebanon":"LBN","liberia":"LBR","libya":"LBY","st. lucia":"LCA","liechtenstein":"LIE","sri lanka":"LKA","lesotho":"LSO","lithuania":"LTU","luxembourg":"LUX","latvia":"LVA","macao sar, china":"MAC","st. martin (french part)":"MAF","morocco":"MAR","monaco":"MCO","moldova":"MDA","madagascar":"MDG","maldives":"MDV","mexico":"MEX","marshall islands":"MHL","north macedonia":"MKD","mali":"MLI","malta":"MLT","myanmar":"MMR","montenegro":"MNE","mongolia":"MNG","northern mariana islands":"MNP","mozambique":"MOZ","mauritania":"MRT","mauritius":"MUS","malawi":"MWI","malaysia":"MYS","namibia":"NAM","new caledonia":"NCL","niger":"NER","nigeria":"NGA","nicaragua":"NIC","netherlands":"NLD","norway":"NOR","nepal":"NPL","naoero":"NRU","new zealand":"NZL","oman":"OMN","pakistan":"PAK","panama":"PAN","peru":"PER","philippines":"PHL","palau":"PLW","papua new guinea":"PNG","poland":"POL","puerto rico (us)":"PRI","korea, dem. people's rep.":"PRK","portugal":"PRT","paraguay":"PRY","west bank and gaza":"PSE","french polynesia":"PYF","qatar":"QAT","romania":"ROU","russian federation":"RUS","rwanda":"RWA","saudi arabia":"SAU","sudan":"SDN","senegal":"SEN","singapore":"SGP","solomon islands":"SLB","sierra leone":"SLE","el salvador":"SLV","san marino":"SMR","somalia, fed. rep.":"SOM","serbia":"SRB","south sudan":"SSD","sao tome and principe":"STP","suriname":"SUR","slovak republic":"SVK","slovenia":"SVN","sweden":"SWE","eswatini":"SWZ","sint maarten (dutch part)":"SXM","seychelles":"SYC","syrian arab republic":"SYR","turks and caicos islands":"TCA","chad":"TCD","togo":"TGO","thailand":"THA","tajikistan":"TJK","turkmenistan":"TKM","timor-leste":"TLS","tonga":"TON","trinidad and tobago":"TTO","tunisia":"TUN","turkiye":"TUR","tuvalu":"TUV","tanzania":"TZA","uganda":"UGA","ukraine":"UKR","uruguay":"URY","united states":"USA","uzbekistan":"UZB","st. vincent and the grenadines":"VCT","venezuela, rb":"VEN","british virgin islands":"VGB","virgin islands (u.s.)":"VIR","viet nam":"VNM","vanuatu":"VUT","samoa":"WSM","kosovo":"XKX","yemen, rep.":"YEM","south africa":"ZAF","zambia":"ZMB","zimbabwe":"ZWE"};
+const COUNTRY_ALIASES = {"ivory coast":"CIV","democratic republic of congo":"COD","democratic republic of the congo":"COD","dr congo":"COD","drc":"COD","congo-kinshasa":"COD","republic of congo":"COG","congo-brazzaville":"COG","the gambia":"GMB","gambia":"GMB","the bahamas":"BHS","bahamas":"BHS","czech republic":"CZE","south korea":"KOR","korea":"KOR","north korea":"PRK","russia":"RUS","iran":"IRN","egypt":"EGY","syria":"SYR","venezuela":"VEN","vietnam":"VNM","laos":"LAO","brunei":"BRN","cape verde":"CPV","swaziland":"SWZ","myanmar (burma)":"MMR","burma":"MMR","turkey":"TUR","macedonia":"MKD","usa":"USA","america":"USA","united states of america":"USA","u.s.":"USA","u.s.a.":"USA","uk":"GBR","britain":"GBR","great britain":"GBR","u.k.":"GBR","uae":"ARE","somalia":"SOM","yemen":"YEM","kyrgyzstan":"KGZ","slovakia":"SVK","hong kong":"HKG","macau":"MAC","macao":"MAC","palestine":"PSE","palestinian territories":"PSE","micronesia":"FSM","nauru":"NRU","trinidad":"TTO","ivory coast (cote d'ivoire)":"CIV"};
+export const COUNTRY_ISO3 = Object.assign({}, COUNTRY_ISO3_BASE, COUNTRY_ALIASES);
+export function countryCodeOf(name) { return COUNTRY_ISO3[String(name || "").toLowerCase().trim()] || null; }
+
+// Each indicator carries its OWN realistic reporting cadence, not one shared window: population/GDP are
+// compiled annually, but literacy is measured by infrequent household surveys — World Bank's own live figure
+// for Chad's literacy rate, checked 2026-09-24, was still dated 2019. A single "country_fact" window generous
+// enough for GDP (a few years) would be too strict for literacy and wrongly withhold the actual best-available
+// figure most of the time; a window generous enough for literacy would let genuinely outdated GDP data through
+// as if current. Each indicator names its own domain (see FRESHNESS in reality.js) for exactly this reason.
+const WB_INDICATORS = {
+  population: { code: "SP.POP.TOTL", unit: "people", label: "population", domain: "country_fact" },
+  gdp: { code: "NY.GDP.MKTP.CD", unit: "USD", label: "GDP (current US$)", domain: "country_fact" },
+  gdp_per_capita: { code: "NY.GDP.PCAP.CD", unit: "USD", label: "GDP per capita (current US$)", domain: "country_fact" },
+  life_expectancy: { code: "SP.DYN.LE00.IN", unit: "years", label: "life expectancy at birth", domain: "country_fact" },
+  literacy_rate: { code: "SE.ADT.LITR.ZS", unit: "%", label: "adult literacy rate", domain: "country_fact_survey" },
+};
+export const COUNTRY_FACT_ATTRIBUTES = Object.keys(WB_INDICATORS);
+
+export async function countryFactVerdict(country, attribute, { jget, now = Date.now() }) {
+  const iso3 = countryCodeOf(country); if (!iso3) return null;
+  const ind = WB_INDICATORS[attribute]; if (!ind) return null;
+  const j = await jget("https://api.worldbank.org/v2/country/" + iso3 + "/indicator/" + ind.code + "?format=json&mrnev=1", 8000);
+  const row = j && Array.isArray(j) && Array.isArray(j[1]) && j[1][0];
+  const v = row ? num(row.value) : null;
+  const name = (row && row.country && row.country.value) || country;
+  const mk = (value, updated) => makePassport({ entity: name, attribute: ind.label, value, unit: ind.unit, source: "worldbank", domain: ind.domain, basis: "official statistic", source_updated_at: updated, retrieved_at: now }, now);
+  // World Bank reports a bare year ("2025"), not a date: taken as mid-year, since the true within-year moment is not published.
+  const fact = v != null ? mk(v, row.date ? Date.parse(row.date + "-06-30T00:00:00Z") : now) : mk(null, null);
+  const verdict = resolveFacts([fact], { domain: ind.domain, now, entity: name, attribute: ind.label, basis: "official statistic" });
+  return finalise(verdict, ind.label + " of " + name, [fact], { note: "Official World Bank statistic" + (row && row.date ? ", most recently reported for " + row.date : "") + (ind.domain === "country_fact_survey" ? "; measured by periodic household surveys, so the most recent figure can genuinely be several years old — that is the real reporting cadence, not stale data being overlooked." : "; national statistics are annual and can lag real time by a year or more.") });
+}
+
 export async function weatherVerdict(place, { jget, now = Date.now() }) {
-  const g = await jget("https://geocoding-api.open-meteo.com/v1/search?count=1&language=en&format=json&name=" + encodeURIComponent(place), 5000);
-  const loc = g && g.results && g.results[0];
-  if (!loc) { if (g !== null) return null; const none = makePassport({ entity: place, attribute: "temperature", value: null, source: "open-meteo", domain: "weather" }, now); return finalise(resolveFacts([none], { domain: "weather", now, entity: place, attribute: "temperature" }), "current temperature in " + place, [none], {}); } // the geocoder did not answer
+  // `place` may be a name to geocode, or an already-resolved { name, latitude, longitude, country }
+  // so a caller that geocoded once reuses the exact coordinates — no second lookup, no ambiguity,
+  // no geocoder 404. Backward compatible: a string still geocodes.
+  let loc;
+  if (place && typeof place === "object" && place.latitude != null && place.longitude != null) {
+    loc = { name: place.name || "the location", latitude: place.latitude, longitude: place.longitude, country: place.country || "" };
+  } else {
+    const g = await jget("https://geocoding-api.open-meteo.com/v1/search?count=1&language=en&format=json&name=" + encodeURIComponent(place), 5000);
+    loc = g && g.results && g.results[0];
+    if (!loc) { if (g !== null) return null; const none = makePassport({ entity: place, attribute: "temperature", value: null, source: "open-meteo", domain: "weather" }, now); return finalise(resolveFacts([none], { domain: "weather", now, entity: place, attribute: "temperature" }), "current temperature in " + place, [none], {}); } // the geocoder did not answer
+  }
   const name = loc.name + (loc.country ? ", " + loc.country : "");
   const mk = (source, t, updated) => makePassport({ entity: name, attribute: "temperature", value: t, unit: "°C", source, domain: "weather", basis: "air temperature at 2 m", source_updated_at: updated, retrieved_at: now, location: { lat: loc.latitude, lon: loc.longitude } }, now);
   const facts = await settle([

@@ -174,7 +174,7 @@ export const KNOWLEDGE = [
   },
   {
     id: 'hiv-basics',
-    topics: ['hiv', 'aids', 'art', 'antiretroviral', 'prep', 'immune'],
+    topics: ['hiv', 'aids', 'antiretroviral', 'antiretroviral therapy', 'prep', 'immune'],
     text: 'HIV attacks CD4 immune cells; untreated it can progress to AIDS. Modern antiretroviral therapy (ART) suppresses the virus so people live long, healthy lives, and when the virus is undetectable it is untransmittable (U=U). Prevention includes condoms, PrEP (pre-exposure medicine), safe injecting, and testing. Care must be guided by an HIV clinician.',
   },
   {

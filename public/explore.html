@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Africa Place Explorer · Noria</title>
+<meta name="theme-color" content="#F4F2EA">
+<link rel="icon" href="/assets/icon-192.png?v=2" type="image/png">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,480;9..144,600&display=swap">
+<style>
+  :root{
+    --ground:#F4F2EA; --surface:#FFFFFF; --raise:#FBFAF5;
+    --ink:#1A1913; --ink2:#54514A; --muted:#8B8779; --line:#E6E2D6;
+    --gold:#A9791F; --green:#1F8A57; --green-bg:#E6F2EA; --amber:#B77A15; --amber-bg:#FBF0DC; --red:#B23B2E;
+    --shadow:0 1px 2px rgba(26,25,19,.04), 0 12px 34px rgba(26,25,19,.06);
+    --disp:"Fraunces",Georgia,"Times New Roman",serif;
+    --ui:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  }
+  @media (prefers-color-scheme:dark){ :root{ color-scheme:dark;
+    --ground:#111009; --surface:#1A1912; --raise:#211F16;
+    --ink:#F1EEE3; --ink2:#C7C3B6; --muted:#8F8B7E; --line:#2A2820;
+    --gold:#D8B15A; --green:#4CC48A; --green-bg:#16281F; --amber:#E0A64A; --amber-bg:#2A2113; --red:#E0785F;
+    --shadow:0 1px 2px rgba(0,0,0,.3), 0 14px 40px rgba(0,0,0,.5);
+  }}
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  body{background:var(--ground);color:var(--ink);font-family:var(--ui);line-height:1.5;-webkit-font-smoothing:antialiased;padding-bottom:calc(40px + env(safe-area-inset-bottom,0px))}
+  .wrap{max-width:820px;margin:0 auto;padding:0 max(16px,env(safe-area-inset-left))}
+  header{padding-top:calc(22px + env(safe-area-inset-top,0px))}
+  .eyebrow{display:inline-flex;align-items:center;gap:7px;font-size:.72rem;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--gold)}
+  .eyebrow a{color:var(--muted);text-decoration:none;font-weight:600;letter-spacing:0;text-transform:none}
+  .eyebrow a:hover{color:var(--ink)}
+  .star{width:15px;height:15px;flex:none}
+  h1{font-family:var(--disp);font-weight:600;font-size:clamp(1.8rem,5vw,2.6rem);letter-spacing:-.02em;margin:8px 0 6px;text-wrap:balance}
+  .thesis{color:var(--ink2);max-width:64ch;font-size:.96rem;margin:0 0 20px}
+  form{display:flex;gap:9px;margin-bottom:12px}
+  #q{flex:1;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:13px 16px;color:var(--ink);font:inherit;font-size:1rem;outline:none;box-shadow:var(--shadow)}
+  #q:focus{border-color:var(--gold)}
+  .go{flex:none;border:0;border-radius:12px;background:linear-gradient(135deg,var(--gold),#8C651C);color:#fff;font:inherit;font-weight:700;font-size:.95rem;padding:0 20px;cursor:pointer}
+  .go:active{transform:translateY(1px)}
+  .chips{display:flex;flex-wrap:wrap;gap:7px;margin-bottom:22px}
+  .chips span{font-size:.78rem;color:var(--muted);margin-right:2px;align-self:center}
+  .ex{background:var(--raise);border:1px solid var(--line);border-radius:20px;padding:5px 12px;font-size:.83rem;color:var(--ink2);cursor:pointer;font:inherit}
+  .ex:hover{border-color:var(--gold);color:var(--ink)}
+  #out{min-height:60px}
+  .msg{color:var(--muted);padding:22px 2px;font-size:.95rem}
+  .msg.err{color:var(--red)}
+  .card{background:var(--surface);border:1px solid var(--line);border-radius:18px;box-shadow:var(--shadow);overflow:hidden;animation:rise .25s ease both}
+  @keyframes rise{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+  .chead{padding:20px 22px 16px;display:flex;justify-content:space-between;align-items:flex-start;gap:14px;border-bottom:1px solid var(--line)}
+  .place{font-family:var(--disp);font-weight:600;font-size:1.7rem;letter-spacing:-.02em;line-height:1.1}
+  .where{color:var(--ink2);font-size:.92rem;margin-top:3px}
+  .kind{display:inline-block;margin-top:9px;font-size:.7rem;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--gold);background:color-mix(in srgb,var(--gold) 12%,transparent);border-radius:20px;padding:3px 10px}
+  .wx{text-align:right;flex:none}
+  .wxt{font-family:var(--disp);font-weight:600;font-size:2.3rem;letter-spacing:-.02em;line-height:1;font-variant-numeric:tabular-nums}
+  .badge{display:inline-flex;align-items:center;gap:5px;font-size:.68rem;font-weight:700;letter-spacing:.03em;border-radius:20px;padding:3px 9px 3px 7px;color:var(--green);background:var(--green-bg);margin-top:8px}
+  .badge svg{width:11px;height:11px}
+  .badge.part{color:var(--amber);background:var(--amber-bg)}
+  .badge.none{color:var(--muted);background:var(--raise)}
+  .facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:1px;background:var(--line)}
+  .fact{background:var(--surface);padding:14px 22px}
+  .fact .k{font-size:.7rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+  .fact .v{font-size:1.02rem;font-weight:600;margin-top:3px;font-variant-numeric:tabular-nums}
+  .fact .v small{font-weight:400;color:var(--muted);font-size:.8rem}
+  .clock{font-variant-numeric:tabular-nums}
+  .prov{padding:13px 22px;font-size:.76rem;color:var(--muted);border-top:1px solid var(--line);background:var(--raise)}
+  .prov b{color:var(--ink2);font-weight:600}
+  .others{margin-top:16px}
+  .others h3{font-size:.72rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin:0 0 8px}
+  .others .row{display:flex;flex-wrap:wrap;gap:7px}
+  .other{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:7px 11px;font-size:.83rem;color:var(--ink2);cursor:pointer;font:inherit}
+  .other:hover{border-color:var(--gold);color:var(--ink)}
+  .note{margin-top:26px;border-top:1px solid var(--line);padding-top:16px;color:var(--ink2);font-size:.84rem;max-width:70ch}
+  .spin{width:18px;height:18px;border:2px solid var(--line);border-top-color:var(--gold);border-radius:50%;display:inline-block;vertical-align:-3px;margin-right:8px;animation:sp .8s linear infinite}
+  @keyframes sp{to{transform:rotate(360deg)}}
+  @media (prefers-reduced-motion:reduce){*{animation:none!important}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <span class="eyebrow"><svg class="star" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 0c.7 6.3 5.7 11.3 12 12-6.3.7-11.3 5.7-12 12-.7-6.3-5.7-11.3-12-12C6.3 11.3 11.3 6.3 12 0Z"/></svg> Noria &middot; Reality Layer &nbsp; <a href="/africa.html">54-country board</a> &middot; <a href="/">Chat</a></span>
+    <h1>Look up any place in Africa</h1>
+    <p class="thesis">Type any city, town, district or village. Noria returns its real record &mdash; region, country, population, elevation, coordinates and time zone &mdash; with the current local time and a temperature cross-checked across two independent sources. If a place can&rsquo;t be found, she says so plainly rather than inventing one.</p>
+    <form id="f" autocomplete="off">
+      <input id="q" type="text" placeholder="e.g. Kumasi, Larteh, Soweto, Mbale&hellip;" aria-label="Place name">
+      <button class="go" type="submit">Look up</button>
+    </form>
+    <div class="chips"><span>Try:</span>
+      <button class="ex" type="button">Kumasi</button>
+      <button class="ex" type="button">Larteh</button>
+      <button class="ex" type="button">Abeokuta</button>
+      <button class="ex" type="button">Soweto</button>
+      <button class="ex" type="button">Mbale</button>
+      <button class="ex" type="button">Zanzibar</button>
+    </div>
+  </header>
+  <main id="out"></main>
+  <footer class="note">
+    <b>How this stays honest.</b> Place records come from the GeoNames gazetteer (via Open-Meteo geocoding); the current temperature is Noria&rsquo;s reality layer cross-checking <b>Open-Meteo</b> and <b>MET Norway</b> at the exact coordinates and returning a value only when they agree. Population and elevation are shown only when the record has them. A name with no match returns nothing &mdash; never a guessed place. Local times are computed live from the place&rsquo;s time zone.
+  </footer>
+</div>
+<script>
+  const out = document.getElementById("out"), qEl = document.getElementById("q");
+  const KIND = { PPLC:"National capital", PPLA:"Regional capital", PPLA2:"District capital", PPLA3:"Local capital", PPLA4:"Local capital", PPL:"Town or village", PPLX:"Neighbourhood", PPLL:"Populated locality", PPLS:"Populated place", PPLW:"Former settlement", ADM1:"Region", ADM2:"District", ADM3:"Local area", ISL:"Island", ADMD:"Administrative area" };
+  const CHECK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 13l4 4L19 7"/></svg>';
+  let clockTimer = null, curTz = null;
+  function fmtInt(n){ return n==null?null:Number(n).toLocaleString("en-US"); }
+  function esc(s){ return String(s==null?"":s).replace(/[&<>"]/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
+  function render(d){
+    if(clockTimer){ clearInterval(clockTimer); clockTimer=null; }
+    if(!d.results || !d.results.length){
+      out.innerHTML = '<div class="msg err">No place called &ldquo;'+esc(d.query)+'&rdquo; was found. Check the spelling, or try a nearby larger town &mdash; Noria will not invent a place.</div>';
+      return;
+    }
+    const r = d.results[0], w = d.weather;
+    curTz = r.timezone;
+    const kind = KIND[r.feature_code] || "Populated place";
+    const where = [r.admin2, r.admin1, r.country].filter(Boolean).join(", ");
+    let badge, wxTemp;
+    if(w && w.value!=null && (w.status==="VERIFIED"||w.status==="PARTIALLY_VERIFIED")){
+      wxTemp = w.value.toFixed(1)+"°";
+      badge = w.status==="VERIFIED" ? '<span class="badge">'+CHECK+'VERIFIED</span>' : '<span class="badge part">PROVISIONAL</span>';
+    } else { wxTemp = "—"; badge = '<span class="badge none">'+(w&&w.status?esc(w.status):"no reading")+'</span>'; }
+    const facts = [];
+    facts.push(['Population', r.population!=null?fmtInt(r.population):'Not recorded']);
+    facts.push(['Elevation', r.elevation!=null?(fmtInt(Math.round(r.elevation))+' <small>m</small>'):'—']);
+    facts.push(['Local time', '<span class="clock" id="clk">--:--:--</span>']);
+    facts.push(['Coordinates', r.latitude.toFixed(3)+', '+r.longitude.toFixed(3)]);
+    facts.push(['Time zone', esc(r.timezone||'—')]);
+    const wxSrc = (w && w.sources) ? w.sources.join(" &amp; ") : "Open-Meteo &amp; MET Norway";
+    const wxAsOf = (w && w.as_of) ? new Date(w.as_of).toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"})+" (its own clock UTC)" : "just now";
+    let html = '<div class="card"><div class="chead"><div>'+
+      '<div class="place">'+esc(r.name)+'</div><div class="where">'+esc(where)+'</div><span class="kind">'+esc(kind)+'</span></div>'+
+      '<div class="wx"><div class="wxt">'+wxTemp+'</div>'+badge+'</div></div>'+
+      '<div class="facts">'+facts.map(f=>'<div class="fact"><div class="k">'+f[0]+'</div><div class="v">'+f[1]+'</div></div>').join('')+'</div>'+
+      '<div class="prov">Temperature: '+(w&&w.value!=null?'<b>verified</b> across <b>'+wxSrc+'</b>':'<b>'+esc((w&&w.statement)||"no cross-checked reading available")+'</b>')+'. Record from the GeoNames gazetteer.</div></div>';
+    if(d.results.length>1){
+      html += '<div class="others"><h3>Other matches for &ldquo;'+esc(d.query)+'&rdquo;</h3><div class="row">'+
+        d.results.slice(1,6).map(o=>'<button class="other" data-q="'+esc(o.name)+'">'+esc(o.name)+' <span style="color:var(--muted)">&middot; '+esc([o.admin1,o.country].filter(Boolean).join(", "))+'</span></button>').join('')+'</div></div>';
+    }
+    out.innerHTML = html;
+    // live clock
+    const clk = document.getElementById("clk");
+    function tick(){ try{ clk.textContent = new Intl.DateTimeFormat("en-GB",{timeZone:curTz,hour:"2-digit",minute:"2-digit",second:"2-digit",hour12:false}).format(new Date()); }catch(e){ clk.textContent="—"; } }
+    tick(); clockTimer = setInterval(tick, 1000);
+    out.querySelectorAll(".other").forEach(b=>b.addEventListener("click",()=>{ qEl.value=b.dataset.q; search(b.dataset.q); }));
+  }
+  async function search(q){
+    q = (q||"").trim(); if(!q) return;
+    out.innerHTML = '<div class="msg"><span class="spin"></span>Looking up &ldquo;'+esc(q)+'&rdquo; and cross-checking its weather&hellip;</div>';
+    try{
+      const r = await fetch("/reality/place?q="+encodeURIComponent(q));
+      const d = await r.json();
+      render(d);
+    }catch(e){ out.innerHTML = '<div class="msg err">Couldn’t reach the reality service just now. Please try again in a moment.</div>'; }
+  }
+  document.getElementById("f").addEventListener("submit", e=>{ e.preventDefault(); search(qEl.value); });
+  document.querySelectorAll(".ex").forEach(b=>b.addEventListener("click",()=>{ qEl.value=b.textContent; search(b.textContent); }));
+  // Open with a real example so the page shows what it does at rest.
+  qEl.value = "Kumasi"; search("Kumasi");
+</script>
+</body>
+</html>

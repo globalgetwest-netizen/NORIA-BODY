@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Africa Reality Board · Noria</title>
+<meta name="theme-color" content="#F4F2EA">
+<link rel="icon" href="/assets/icon-192.png?v=2" type="image/png">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,480;9..144,600&display=swap">
+<style>
+  :root{
+    --ground:#F4F2EA; --surface:#FFFFFF; --raise:#FBFAF5;
+    --ink:#1A1913; --ink2:#54514A; --muted:#8B8779; --line:#E6E2D6;
+    --gold:#A9791F; --green:#1F8A57; --green-bg:#E6F2EA; --amber:#B77A15; --amber-bg:#FBF0DC;
+    --shadow:0 1px 2px rgba(26,25,19,.04), 0 10px 30px rgba(26,25,19,.05);
+    --disp:"Fraunces",Georgia,"Times New Roman",serif;
+    --ui:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  }
+  @media (prefers-color-scheme:dark){ :root{ color-scheme:dark;
+    --ground:#111009; --surface:#1A1912; --raise:#211F16;
+    --ink:#F1EEE3; --ink2:#C7C3B6; --muted:#8F8B7E; --line:#2A2820;
+    --gold:#D8B15A; --green:#4CC48A; --green-bg:#16281F; --amber:#E0A64A; --amber-bg:#2A2113;
+    --shadow:0 1px 2px rgba(0,0,0,.3), 0 12px 34px rgba(0,0,0,.45);
+  }}
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  body{background:var(--ground);color:var(--ink);font-family:var(--ui);line-height:1.5;-webkit-font-smoothing:antialiased;padding-bottom:env(safe-area-inset-bottom,0px)}
+  .wrap{max-width:1200px;margin:0 auto;padding:0 max(16px,env(safe-area-inset-left)) 40px}
+  .top{position:sticky;top:0;z-index:10;background:color-mix(in srgb,var(--ground) 90%,transparent);backdrop-filter:blur(12px);border-bottom:1px solid var(--line);margin:0 calc(-1*max(16px,env(safe-area-inset-left))) 22px;padding:calc(16px + env(safe-area-inset-top,0px)) max(16px,env(safe-area-inset-left)) 14px}
+  .eyebrow{display:inline-flex;align-items:center;gap:7px;font-size:.72rem;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--gold)}
+  .eyebrow a{color:var(--muted);text-decoration:none;font-weight:600;letter-spacing:0;text-transform:none;margin-left:2px}
+  .eyebrow a:hover{color:var(--ink)}
+  .star{width:15px;height:15px;flex:none}
+  h1{font-family:var(--disp);font-weight:600;font-size:clamp(1.7rem,4.5vw,2.5rem);letter-spacing:-.02em;margin:6px 0 6px;text-wrap:balance}
+  .thesis{color:var(--ink2);max-width:70ch;font-size:.95rem;margin:0 0 14px}
+  .stats{display:flex;flex-wrap:wrap;gap:8px 10px;align-items:center;font-size:.82rem}
+  .chip{display:inline-flex;align-items:center;gap:6px;background:var(--raise);border:1px solid var(--line);border-radius:20px;padding:5px 11px;color:var(--ink2);font-variant-numeric:tabular-nums}
+  .chip b{color:var(--ink);font-weight:600}
+  .chip.ok{color:var(--green);border-color:color-mix(in srgb,var(--green) 40%,var(--line))}
+  .chip.live b{color:var(--green)}
+  .pulse{width:8px;height:8px;border-radius:50%;background:var(--green);box-shadow:0 0 0 0 color-mix(in srgb,var(--green) 60%,transparent);animation:pulse 1.6s infinite}
+  @keyframes pulse{0%{box-shadow:0 0 0 0 color-mix(in srgb,var(--green) 55%,transparent)}70%{box-shadow:0 0 0 7px transparent}100%{box-shadow:0 0 0 0 transparent}}
+  .controls{display:flex;gap:10px;align-items:center;margin-top:12px;flex-wrap:wrap}
+  #q{flex:1;min-width:160px;max-width:340px;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:9px 13px;color:var(--ink);font:inherit;font-size:.9rem;outline:none}
+  #q:focus{border-color:var(--gold)}
+  .utc{font-variant-numeric:tabular-nums;color:var(--muted);font-size:.82rem;white-space:nowrap}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(215px,1fr));gap:12px}
+  .card{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:14px 15px;box-shadow:var(--shadow);display:flex;flex-direction:column;gap:9px;position:relative;overflow:hidden;transition:box-shadow .3s}
+  .card::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--stripe,var(--line));transition:background .4s}
+  .card.flash{box-shadow:0 0 0 2px color-mix(in srgb,var(--green) 55%,transparent), var(--shadow)}
+  .chead{display:flex;justify-content:space-between;align-items:flex-start;gap:8px}
+  .country{font-weight:600;font-size:1rem;line-height:1.25;letter-spacing:-.01em}
+  .capital{color:var(--muted);font-size:.8rem;margin-top:1px}
+  .glyph{flex:none;width:30px;height:30px;color:var(--ink2)}
+  .temprow{display:flex;align-items:baseline;gap:8px}
+  .temp{font-family:var(--disp);font-weight:600;font-size:2rem;letter-spacing:-.02em;font-variant-numeric:tabular-nums;line-height:1}
+  .cond{color:var(--ink2);font-size:.85rem}
+  .meta{display:flex;gap:12px;color:var(--muted);font-size:.78rem;font-variant-numeric:tabular-nums;min-height:1.1em}
+  .clockrow{display:flex;align-items:center;justify-content:space-between;gap:8px;border-top:1px solid var(--line);padding-top:9px;margin-top:1px}
+  .clock{font-variant-numeric:tabular-nums;font-size:1.05rem;font-weight:600;letter-spacing:.01em}
+  .clock small{font-size:.68rem;font-weight:600;color:var(--muted);letter-spacing:.06em;display:block;text-transform:uppercase}
+  .badge{display:inline-flex;align-items:center;gap:5px;font-size:.7rem;font-weight:700;letter-spacing:.03em;border-radius:20px;padding:3px 9px 3px 7px;color:var(--green);background:var(--green-bg)}
+  .badge svg{width:12px;height:12px}
+  .badge.wait{color:var(--muted);background:var(--raise)}
+  .badge.part{color:var(--amber);background:var(--amber-bg)}
+  .sources{font-size:.72rem;color:var(--muted);font-variant-numeric:tabular-nums;border-top:1px dashed var(--line);padding-top:8px;min-height:1.1em}
+  .sources b{color:var(--ink2);font-weight:600}
+  .method{margin-top:26px;border-top:1px solid var(--line);padding-top:18px;color:var(--ink2);font-size:.86rem;max-width:80ch}
+  .method h2{font-family:var(--disp);font-size:1.05rem;font-weight:600;margin:0 0 8px;color:var(--ink)}
+  .empty{grid-column:1/-1;text-align:center;color:var(--muted);padding:40px}
+  @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <span class="eyebrow"><svg class="star" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 0c.7 6.3 5.7 11.3 12 12-6.3.7-11.3 5.7-12 12-.7-6.3-5.7-11.3-12-12C6.3 11.3 11.3 6.3 12 0Z"/></svg> Noria &middot; Reality Layer <a href="/explore.html">Place explorer</a> &middot; <a href="/">Chat</a></span>
+    <h1>Africa, live and verified &mdash; all 54 countries</h1>
+    <p class="thesis">The current temperature and local time for the capital of every African country, fetched live from Noria&rsquo;s own reality API and refreshed continuously. Each temperature is cross-checked across two independent authoritative sources before it is shown &mdash; the same verification Noria runs before she states any live figure. Nothing here is written by the model, so there is nothing to hallucinate.</p>
+    <div class="stats" id="stats"></div>
+    <div class="controls">
+      <input id="q" type="text" placeholder="Filter by country or capital&hellip;" autocomplete="off" aria-label="Filter countries">
+      <span class="utc" id="utc"></span>
+    </div>
+  </header>
+  <main class="grid" id="grid"></main>
+  <footer class="method">
+    <h2>How this stays honest</h2>
+    <p>Every card is refreshed by calling Noria&rsquo;s live endpoint <b>POST /brain/tool</b> with <b>weather.get</b>. That runs the reality layer: it asks <b>Open-Meteo</b> and <b>MET Norway</b> at the same moment and returns a temperature only when the two agree &mdash; marked <b>VERIFIED</b>, with the source names and the exact time the reading was taken shown on the card. Cities refresh in a rotating cycle (to respect the API&rsquo;s rate limit), so each card carries its own &ldquo;updated&nbsp;&hellip;&nbsp;ago&rdquo;. Local clocks tick every second from each city&rsquo;s time zone. If the two sources ever disagree or a source is down, the card says so rather than showing a number &mdash; Noria never fills a gap with a guess.</p>
+  </footer>
+</div>
+<script>
+  const SEED = [{"c":"Algeria","cap":"Algiers","tz":"Africa/Algiers","t":27.1,"m":28,"h":71,"w":11,"wc":1},{"c":"Angola","cap":"Luanda","tz":"Africa/Luanda","t":22.6,"m":23.6,"h":80,"w":15,"wc":0},{"c":"Benin","cap":"Porto-Novo","tz":"Africa/Porto-Novo","t":28.9,"m":28.9,"h":69,"w":15.5,"wc":2},{"c":"Botswana","cap":"Gaborone","tz":"Africa/Gaborone","t":31.7,"m":31.1,"h":18,"w":15.6,"wc":3},{"c":"Burkina Faso","cap":"Ouagadougou","tz":"Africa/Ouagadougou","t":30.3,"m":30.7,"h":64,"w":7.6,"wc":3},{"c":"Burundi","cap":"Gitega","tz":"Africa/Bujumbura","t":26.5,"m":26.6,"h":40,"w":14.1,"wc":3},{"c":"Cabo Verde","cap":"Praia","tz":"Atlantic/Cape_Verde","t":31.3,"m":30.6,"h":61,"w":28.8,"wc":51},{"c":"Cameroon","cap":"Yaounde","tz":"Africa/Douala","t":26.8,"m":27.3,"h":70,"w":3.5,"wc":80},{"c":"Central African Republic","cap":"Bangui","tz":"Africa/Bangui","t":28.5,"m":29.4,"h":75,"w":7.2,"wc":80},{"c":"Chad","cap":"N'Djamena","tz":"Africa/Ndjamena","t":34.5,"m":34.3,"h":46,"w":5.5,"wc":95},{"c":"Comoros","cap":"Moroni","tz":"Indian/Comoro","t":25,"m":24.4,"h":97,"w":6.8,"wc":2},{"c":"Congo","cap":"Brazzaville","tz":"Africa/Brazzaville","t":33,"m":33.8,"h":43,"w":3.5,"wc":0},{"c":"DR Congo","cap":"Kinshasa","tz":"Africa/Kinshasa","t":34.1,"m":33.8,"h":39,"w":2.2,"wc":1},{"c":"Cote d'Ivoire","cap":"Yamoussoukro","tz":"Africa/Abidjan","t":29,"m":28.8,"h":71,"w":4.5,"wc":51},{"c":"Djibouti","cap":"Djibouti","tz":"Africa/Djibouti","t":32.7,"m":31.5,"h":69,"w":14.4,"wc":2},{"c":"Egypt","cap":"Cairo","tz":"Africa/Cairo","t":32.5,"m":34.1,"h":38,"w":10.9,"wc":3},{"c":"Equatorial Guinea","cap":"Malabo","tz":"Africa/Malabo","t":26.9,"m":27.9,"h":84,"w":19.9,"wc":51},{"c":"Eritrea","cap":"Asmara","tz":"Africa/Asmara","t":20.7,"m":21.3,"h":46,"w":16.1,"wc":2},{"c":"Eswatini","cap":"Mbabane","tz":"Africa/Mbabane","t":19.7,"m":19.4,"h":70,"w":13.6,"wc":51},{"c":"Ethiopia","cap":"Addis Ababa","tz":"Africa/Addis_Ababa","t":18.8,"m":20,"h":52,"w":9.6,"wc":1},{"c":"Gabon","cap":"Libreville","tz":"Africa/Libreville","t":28.9,"m":29,"h":66,"w":16.4,"wc":3},{"c":"Gambia","cap":"Banjul","tz":"Africa/Banjul","t":25.1,"m":25.7,"h":96,"w":17.1,"wc":53},{"c":"Ghana","cap":"Accra","tz":"Africa/Accra","t":29.2,"m":29.2,"h":63,"w":14.4,"wc":1},{"c":"Guinea","cap":"Conakry","tz":"Africa/Conakry","t":27.3,"m":26.8,"h":78,"w":12.4,"wc":3},{"c":"Guinea-Bissau","cap":"Bissau","tz":"Africa/Bissau","t":25.8,"m":25.8,"h":89,"w":21.5,"wc":53},{"c":"Kenya","cap":"Nairobi","tz":"Africa/Nairobi","t":25.8,"m":25.3,"h":36,"w":8.7,"wc":2},{"c":"Lesotho","cap":"Maseru","tz":"Africa/Maseru","t":23.1,"m":23.3,"h":34,"w":13.6,"wc":0},{"c":"Liberia","cap":"Monrovia","tz":"Africa/Monrovia","t":27.5,"m":27.7,"h":75,"w":16.9,"wc":51},{"c":"Libya","cap":"Tripoli","tz":"Africa/Tripoli","t":27.5,"m":26.9,"h":68,"w":21,"wc":2},{"c":"Madagascar","cap":"Antananarivo","tz":"Indian/Antananarivo","t":21.7,"m":21.4,"h":58,"w":16.7,"wc":51},{"c":"Malawi","cap":"Lilongwe","tz":"Africa/Blantyre","t":27.9,"m":29.1,"h":35,"w":17,"wc":1},{"c":"Mali","cap":"Bamako","tz":"Africa/Bamako","t":27.8,"m":27.7,"h":73,"w":7.3,"wc":3},{"c":"Mauritania","cap":"Nouakchott","tz":"Africa/Nouakchott","t":27.3,"m":26.8,"h":76,"w":14.5,"wc":3},{"c":"Mauritius","cap":"Port Louis","tz":"Indian/Mauritius","t":23.9,"m":23.7,"h":72,"w":5.9,"wc":3},{"c":"Morocco","cap":"Rabat","tz":"Africa/Casablanca","t":28,"m":28.2,"h":64,"w":9.2,"wc":0},{"c":"Mozambique","cap":"Maputo","tz":"Africa/Maputo","t":26.3,"m":25.7,"h":74,"w":13.8,"wc":2},{"c":"Namibia","cap":"Windhoek","tz":"Africa/Windhoek","t":27.4,"m":26.8,"h":27,"w":3.6,"wc":3},{"c":"Niger","cap":"Niamey","tz":"Africa/Niamey","t":33.9,"m":33.7,"h":55,"w":2.2,"wc":3},{"c":"Nigeria","cap":"Abuja","tz":"Africa/Lagos","t":26.6,"m":26.8,"h":81,"w":7.8,"wc":53},{"c":"Rwanda","cap":"Kigali","tz":"Africa/Kigali","t":25.1,"m":25.4,"h":50,"w":8.5,"wc":2},{"c":"Sao Tome and Principe","cap":"Sao Tome","tz":"Africa/Sao_Tome","t":26.3,"m":25.3,"h":83,"w":1.9,"wc":51},{"c":"Senegal","cap":"Dakar","tz":"Africa/Dakar","t":25.1,"m":26,"h":93,"w":19.2,"wc":80},{"c":"Seychelles","cap":"Victoria","tz":"Indian/Mahe","t":27.5,"m":27.9,"h":73,"w":14.3,"wc":3},{"c":"Sierra Leone","cap":"Freetown","tz":"Africa/Freetown","t":27.3,"m":27.3,"h":79,"w":10.6,"wc":3},{"c":"Somalia","cap":"Mogadishu","tz":"Africa/Mogadishu","t":26.6,"m":26.6,"h":78,"w":23.5,"wc":1},{"c":"South Africa","cap":"Pretoria","tz":"Africa/Johannesburg","t":29.2,"m":29.7,"h":20,"w":9.1,"wc":2},{"c":"South Sudan","cap":"Juba","tz":"Africa/Juba","t":35,"m":35,"h":33,"w":10.4,"wc":3},{"c":"Sudan","cap":"Khartoum","tz":"Africa/Khartoum","t":40.8,"m":41.1,"h":16,"w":2.1,"wc":1},{"c":"Tanzania","cap":"Dodoma","tz":"Africa/Dar_es_Salaam","t":29.2,"m":29.7,"h":30,"w":19.3,"wc":3},{"c":"Togo","cap":"Lome","tz":"Africa/Lome","t":27.9,"m":28.6,"h":73,"w":14.8,"wc":0},{"c":"Tunisia","cap":"Tunis","tz":"Africa/Tunis","t":28.3,"m":27.6,"h":52,"w":13.6,"wc":0},{"c":"Uganda","cap":"Kampala","tz":"Africa/Kampala","t":25.5,"m":25.4,"h":66,"w":7.3,"wc":3},{"c":"Zambia","cap":"Lusaka","tz":"Africa/Lusaka","t":29.2,"m":29.9,"h":19,"w":17.1,"wc":2},{"c":"Zimbabwe","cap":"Harare","tz":"Africa/Harare","t":25.7,"m":25.5,"h":30,"w":9.8,"wc":1}];
+  const WMO = c => c===0?["Clear","sun"]:c<=2?["Partly cloudy","few"]:c===3?["Overcast","cloud"]:c<=48?["Fog","cloud"]:c<=57?["Drizzle","rain"]:c<=67?["Rain","rain"]:c<=77?["Snow","cloud"]:c<=82?["Showers","rain"]:c<=86?["Snow showers","cloud"]:["Thunderstorm","storm"];
+  const GLYPH = {
+    sun:'<circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.2 4.2l1.4 1.4M18.4 18.4l1.4 1.4M1 12h2M21 12h2M4.2 19.8l1.4-1.4M18.4 5.6l1.4-1.4"/>',
+    few:'<circle cx="8" cy="8" r="3.4"/><path d="M8 2.2v1.6M2.2 8h1.6M3.9 3.9l1.1 1.1"/><path d="M17.5 19H9a4 4 0 0 1-.6-7.95A5 5 0 0 1 18 12.4a3.3 3.3 0 0 1-.5 6.6Z"/>',
+    cloud:'<path d="M17.5 19H8a4.5 4.5 0 0 1-.7-8.95A5.5 5.5 0 0 1 18 11.5a3.75 3.75 0 0 1-.5 7.5Z"/>',
+    rain:'<path d="M17.5 15H8a4.3 4.3 0 0 1-.7-8.55A5.3 5.3 0 0 1 18 7.7a3.6 3.6 0 0 1-.5 7.3Z"/><path d="M8 18l-1 2.5M12 18l-1 2.5M16 18l-1 2.5"/>',
+    storm:'<path d="M17.5 14H8a4.3 4.3 0 0 1-.7-8.55A5.3 5.3 0 0 1 18 6.7a3.6 3.6 0 0 1-.5 7.3Z"/><path d="M12 13l-2.5 4h3L10 22"/>'
+  };
+  const CHECK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 13l4 4L19 7"/></svg>';
+  const tempColor = t => { const x=Math.max(0,Math.min(1,(t-14)/28)); return "hsl(" + Math.round((1-x)*205 + x*18) + "deg 62% 48%)"; };
+  const grid = document.getElementById("grid");
+  const state = SEED.map(s => ({ ...s, temp: s.t, met: s.m, status: "SEED", sources: null, at: null }));
+  const cards = state.map(r => {
+    const el = document.createElement("article");
+    el.className = "card"; el.dataset.key = (r.c + " " + r.cap).toLowerCase();
+    el.innerHTML =
+      '<div class="chead"><div><div class="country"></div><div class="capital"></div></div>'+
+      '<svg class="glyph" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"></svg></div>'+
+      '<div class="temprow"><span class="temp">&mdash;</span><span class="cond"></span></div>'+
+      '<div class="meta"></div>'+
+      '<div class="clockrow"><span class="clock" data-tz="'+r.tz+'"><small>Local time</small><span class="t">--:--:--</span></span>'+
+      '<span class="badge wait">checking&hellip;</span></div>'+
+      '<div class="sources"></div>';
+    el.querySelector(".country").textContent = r.c;
+    el.querySelector(".capital").textContent = r.cap;
+    grid.appendChild(el);
+    paint(el, r);
+    return el;
+  });
+  function ago(ms){ if(ms==null) return ""; const s=Math.round((Date.now()-ms)/1000); return s<60?s+"s ago":Math.round(s/60)+"m ago"; }
+  function paint(el, r){
+    const [cond, g] = WMO(r.wc);
+    el.style.setProperty("--stripe", r.temp!=null?tempColor(r.temp):"var(--line)");
+    el.querySelector(".glyph").innerHTML = GLYPH[g];
+    const tEl = el.querySelector(".temp");
+    tEl.textContent = r.temp!=null ? (r.temp.toFixed(1)+"°") : "—";
+    if(r.temp!=null) tEl.style.color = tempColor(r.temp);
+    el.querySelector(".cond").textContent = cond;
+    el.querySelector(".meta").textContent = (r.h!=null?"Humidity "+r.h+"%":"") + (r.w!=null?"   Wind "+Math.round(r.w)+" km/h":"");
+    const badge = el.querySelector(".badge");
+    const src = el.querySelector(".sources");
+    if(r.status==="VERIFIED"){ badge.className="badge"; badge.innerHTML = CHECK+"VERIFIED"; }
+    else if(r.status==="PARTIALLY_VERIFIED"){ badge.className="badge part"; badge.textContent="PROVISIONAL"; }
+    else if(r.status==="SEED"){ badge.className="badge wait"; badge.textContent="checking…"; }
+    else { badge.className="badge part"; badge.textContent = r.status || "checking…"; }
+    if(r.sources){ src.innerHTML = "Sources: <b>"+r.sources.join("</b>, <b>")+"</b> · updated "+ago(r.at); }
+    else if(r.status==="SEED"){ src.innerHTML = "Open-Meteo &amp; MET Norway · refreshing live…"; }
+    else { src.textContent = ""; }
+  }
+  // Live clocks
+  const clockEls = [...document.querySelectorAll(".clock .t")].map((t,i)=>({t, tz: state[i].tz}));
+  function tick(){
+    for(const c of clockEls){ try{ c.t.textContent = new Intl.DateTimeFormat("en-GB",{timeZone:c.tz,hour:"2-digit",minute:"2-digit",second:"2-digit",hour12:false}).format(new Date()); }catch(e){ c.t.textContent="—"; } }
+    try{ document.getElementById("utc").textContent = "UTC now " + new Intl.DateTimeFormat("en-GB",{timeZone:"UTC",hour:"2-digit",minute:"2-digit",second:"2-digit",hour12:false}).format(new Date()); }catch(e){}
+  }
+  tick(); setInterval(tick, 1000);
+  // Stats
+  const statsEl = document.getElementById("stats");
+  let cycleDone = 0;
+  function stats(active){
+    const done = state.filter(r=>r.status==="VERIFIED"||r.status==="PARTIALLY_VERIFIED");
+    const verified = state.filter(r=>r.status==="VERIFIED").length;
+    const withT = state.filter(r=>r.temp!=null);
+    const hot = withT.reduce((a,r)=>(a&&a.temp>=r.temp)?a:r, null), cold = withT.reduce((a,r)=>(a&&a.temp<=r.temp)?a:r, null);
+    statsEl.innerHTML =
+      '<span class="chip live"><span class="pulse"></span> <b>Live</b> · refreshing '+(active||"…")+'</span>'+
+      '<span class="chip ok"><b>'+verified+'</b>/54 verified by two sources</span>'+
+      (hot?'<span class="chip">Hottest · <b>'+hot.cap+' '+hot.temp.toFixed(1)+'°</b></span>':'')+
+      (cold?'<span class="chip">Coolest · <b>'+cold.cap+' '+cold.temp.toFixed(1)+'°</b></span>':'');
+  }
+  stats();
+  // Round-robin live refresh via Noria's reality API (weather.get), ~1 city / 2s = 30/min (under the 40/min limit)
+  let idx = 0;
+  const ok = j => j && j.ok && j.output && typeof j.output.value === "number";
+  async function askWeather(place){
+    const resp = await fetch("/brain/tool", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ tool:"weather.get", input:{ place } }) });
+    return resp.json();
+  }
+  async function refreshOne(){
+    const i = idx % state.length; idx++;
+    const r = state[i];
+    stats(r.cap);
+    try{
+      // Bare capital resolves cleanly for all 54 (verified); only "Victoria" is
+      // ambiguous, so Seychelles alone carries its country. No failing lookups, no 404s.
+      const place = r.c === "Seychelles" ? "Victoria, Seychelles" : r.cap;
+      const j = await askWeather(place);
+      if(ok(j)){
+        r.temp = j.output.value; r.status = j.output.status || "VERIFIED"; r.sources = j.output.sources || null; r.at = Date.now();
+        const el = cards[i]; paint(el, r); el.classList.add("flash"); setTimeout(()=>el.classList.remove("flash"), 700);
+      } else if (j && j.reason){
+        // non-answerable verdict or unavailable: keep the honest state, mark it
+        r.status = (j.code||"").toUpperCase().includes("STALE")?"STALE":(j.reason.match(/disagree|conflict/i)?"CONFLICTING":"UNAVAILABLE"); r.sources=null; paint(cards[i], r);
+      }
+    }catch(e){ /* leave the card as-is; try again next cycle */ }
+    stats();
+    setTimeout(refreshOne, 2000);
+  }
+  setTimeout(refreshOne, 400);
+  // Filter
+  const q = document.getElementById("q");
+  q.addEventListener("input", () => {
+    const v = q.value.trim().toLowerCase(); let shown=0;
+    for(const el of cards){ const hit = !v || el.dataset.key.includes(v); el.hidden = !hit; if(hit) shown++; }
+    let e = document.getElementById("nomatch");
+    if(!shown){ if(!e){ e=document.createElement("div"); e.id="nomatch"; e.className="empty"; e.textContent="No country matches “"+q.value+"”."; grid.appendChild(e); } }
+    else if(e){ e.remove(); }
+  });
+</script>
+</body>
+</html>

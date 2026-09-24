@@ -43,6 +43,9 @@ export const SOURCES = {
   "kraken": { name: "Kraken", level: 1, family: "kraken", kind: "exchange", system: "live", domains: ["crypto"], refresh: "live", home: "https://www.kraken.com" },
   "binance": { name: "Binance", level: 1, family: "binance", kind: "exchange", system: "live", domains: ["crypto"], refresh: "live", home: "https://www.binance.com" },
   "coingecko": { name: "CoinGecko", level: 2, family: "coingecko", kind: "market data aggregator", system: "live", domains: ["crypto"], refresh: "about every minute", home: "https://www.coingecko.com" },
+  "nasdaq": { name: "Nasdaq (public quote API)", level: 1, family: "nasdaq", kind: "official exchange", system: "live", domains: ["stock"], refresh: "live", home: "https://www.nasdaq.com" },
+  "yahoo": { name: "Yahoo Finance", level: 2, family: "yahoo", kind: "market data aggregator", system: "live", domains: ["stock"], refresh: "live", home: "https://finance.yahoo.com" },
+  "worldbank": { name: "World Bank Open Data", level: 1, family: "worldbank", kind: "international statistical agency", system: "live", domains: ["country_fact"], refresh: "annual (most indicators)", home: "https://data.worldbank.org" },
   "clock": { name: "Noria calculator and calendar (computed, not looked up)", level: 1, family: "computed", kind: "computation", system: "knowledge", domains: ["time", "arithmetic"], refresh: "exact", home: "" },
   "wikipedia": { name: "Wikipedia", level: 3, family: "wikipedia", kind: "encyclopaedia", system: "live", domains: ["general"], refresh: "edited continuously", home: "https://www.wikipedia.org" },
   "news-feeds": { name: "Published news feeds", level: 3, family: "news", kind: "news organisations", system: "live", domains: ["news"], refresh: "minutes to hours", home: "" },
@@ -72,6 +75,16 @@ export const FRESHNESS = {
   government_announcement: { maxAgeMs: 3 * D, label: "hours to days" }, company_registration: { maxAgeMs: 90 * D, label: "days to months" },
   appointment_availability: { maxAgeMs: 10 * M, label: "minutes" }, time: { maxAgeMs: 1 * S, label: "exact" }, arithmetic: { maxAgeMs: Infinity, label: "permanent" },
   historical: { maxAgeMs: Infinity, label: "permanent" }, general: { maxAgeMs: 30 * D, label: "days to months" },
+  // National statistics (population, GDP, life expectancy, literacy) are reported annually and lag by
+  // design — a figure "for 2025" published in mid-2026 is the most current real figure that exists, not
+  // stale data. The window is generous (a few years) so normal reporting lag is never mistaken for staleness,
+  // but still bounded, so a genuinely superseded, years-old figure is not presented as current either.
+  country_fact: { maxAgeMs: 3 * 365 * D, label: "up to a few years (annual national statistics lag by design)" },
+  // Survey-based indicators (adult literacy, and similar figures only collected by periodic household
+  // surveys, not compiled annually) genuinely lag much further — World Bank's own live figure for Chad's
+  // literacy rate, checked 2026-09-24, was still dated 2019. A 3-year window would wrongly withhold the
+  // real, best-available figure for most countries most of the time; ten years reflects the real cadence.
+  country_fact_survey: { maxAgeMs: 10 * 365 * D, label: "up to about a decade (measured by infrequent household surveys, not compiled annually)" },
 };
 export function freshnessOf(passport, domain, now = Date.now()) {
   const pol = FRESHNESS[domain] || FRESHNESS.general, at = passport.source_updated_at || passport.published_at || passport.retrieved_at;
