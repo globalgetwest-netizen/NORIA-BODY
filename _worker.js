@@ -766,6 +766,46 @@ async function realityCountryFactBlock(q) {
   return verdictResult(r, "COUNTRY FACT", { line: (v) => v.attribute + " of " + v.entity + " = " + (v.unit === "USD" ? "$" : "") + fmtNum(v.value, v.unit === "years" || v.unit === "%" ? 1 : 0) + (COUNTRY_ATTR_UNIT_SUFFIX[v.unit] || (v.unit ? " " + v.unit : "")) });
 }
 
+// A CITY/TOWN population question (a country is handled above by the World Bank feed). There is no single
+// authoritative live source for a settlement's population the way there is for weather: the gazetteer holds
+// one fixed figure for the city's own boundary, from an unknown census year, and metro-area totals are larger.
+// So this never asserts a verified number — it hands the model the gazetteer figure explicitly labelled as a
+// static, boundary-dependent reference, and the verifyAnswer layer still rejects any 3+ digit number that is
+// not in this evidence. Mirrors the honest live-vs-static split now shown on the Place Explorer page.
+const PLACE_POP_RE = /\b(population|how many people|inhabitants|residents|how big is|how populous)\b/i;
+function extractPlaceForPopulation(q) {
+  const clean = (s) => String(s || "").replace(/^\s*(?:the|a|an|greater)\s+/i, "").replace(/\s+(?:city|town|district|village|metro(?:politan)?(?:\s+area)?|region|area|today|now|currently)\b.*$/i, "").replace(/['’]s?$/i, "").replace(/[?!.,;:'"]+\s*$/, "").trim();
+  let m;
+  if ((m = q.match(/population\s+(?:of|in|for)\s+([A-Za-z][A-Za-z .'\-]{1,39})/i))) return clean(m[1]);
+  if ((m = q.match(/how many people (?:live|are|reside|stay)?\s*(?:in|at)\s+([A-Za-z][A-Za-z .'\-]{1,39})/i))) return clean(m[1]);
+  if ((m = q.match(/how (?:big|populous) is\s+([A-Za-z][A-Za-z .'\-]{1,39})/i))) return clean(m[1]);
+  if ((m = q.match(/([A-Za-z][A-Za-z .'\-]{1,39})['’]?s?\s+population\b/i))) return clean(m[1]);
+  return null;
+}
+async function realityPlaceFactBlock(q) {
+  const s = String(q || "");
+  if (!PLACE_POP_RE.test(s)) return "";
+  if (extractCountryName(s)) return "";               // a country → World Bank path owns it; never double-ground
+  const place = extractPlaceForPopulation(s);
+  if (!place || place.length < 2) return "";
+  let g; try { g = await jretry("https://geocoding-api.open-meteo.com/v1/search?count=1&language=en&format=json&name=" + encodeURIComponent(place)); } catch (_) { return ""; }
+  const loc = g && g.results && g.results[0];
+  if (!loc) return "";                                 // not a real place → don't fabricate; let the normal flow decide
+  const fc = String(loc.feature_code || "");
+  if (!/^(?:PPL|ADM)/.test(fc)) return "";             // only populated places / admin areas carry a population
+  const where = [loc.admin1, loc.country].filter(Boolean).join(", ");
+  const head = "\n\nPLACE POPULATION — STATIC REFERENCE, NOT A LIVE OR SINGLE-VALUE FACT.\n";
+  if (loc.population != null) {
+    return head +
+      "- GeoNames gazetteer lists " + loc.name + (where ? " (" + where + ")" : "") + " at about " + fmtNum(loc.population, 0) + " people for the CITY'S OWN boundary.\n" +
+      "This is a fixed gazetteer figure — not a live count and not cross-checked. A settlement's population has no single true value: it depends on the boundary (city proper vs greater-metro vs urban agglomeration) and the census year, and metro-area estimates are larger. " +
+      "State this as an approximate city-boundary reference, say plainly that it is a static gazetteer figure (not a verified live number) and that metro-area totals differ, and offer to be told which boundary is meant. Do not present any single number as verified or current, and never invent a more precise figure.";
+  }
+  return head +
+    "- GeoNames has a record for " + loc.name + (where ? " (" + where + ")" : ") ") + " but no population figure.\n" +
+    "Do not invent one. Say the population is not in the reference data, and that a settlement's population depends on the boundary drawn and the census year.";
+}
+
 // Calendar + arithmetic ----------------------------------------------------------------------------
 const MON_RE = "jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sept?(?:ember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?";
 const monIdx = (m) => ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"].indexOf(String(m).toLowerCase().slice(0, 3));
@@ -1714,7 +1754,7 @@ async function groundMessages(messages, body, env) {
   // set of well-known stock tickers, and now real national statistics (population, GDP, life expectancy,
   // literacy) for any World Bank-recognised country — all live feeds, cross-checked where more than one
   // independent source exists.
-  const [wx, fx, cr, st, cf] = await withTimeout(Promise.all([weatherBlock(q, body.tz), realityFxBlock(q), realityCryptoBlock(q), realityStockBlock(q), realityCountryFactBlock(q)]), 9000, ["", null, null, null, null]);
+  const [wx, fx, cr, st, cf, pf] = await withTimeout(Promise.all([weatherBlock(q, body.tz), realityFxBlock(q), realityCryptoBlock(q), realityStockBlock(q), realityCountryFactBlock(q), realityPlaceFactBlock(q)]), 9000, ["", null, null, null, null, ""]);
   // A WITHHELD reality verdict (CONFLICTING / STALE / UNAVAILABLE / UNVERIFIED) is
   // delivered verbatim as its own honest statement, bypassing the model — so the
   // model can never state a value the evidence layer refused to confirm.
@@ -1726,7 +1766,7 @@ async function groundMessages(messages, body, env) {
   // search stand in for real verification. Skipped entirely when the stock or country-fact block above
   // already answered — the router must never override a real answer with a refusal.
   if (!(st && st.text) && !(cf && cf.text)) { const rr = realityRouteBlock(q); if (rr && rr.refuse) return { messages, grounded: true, refuse: rr.refuse }; }
-  const live = [typeof wx === "string" ? wx : "", fx && fx.text, cr && cr.text, pr && pr.text, st && st.text, cf && cf.text];
+  const live = [typeof wx === "string" ? wx : "", fx && fx.text, cr && cr.text, pr && pr.text, st && st.text, cf && cf.text, typeof pf === "string" ? pf : ""];
   const tools = [timeBlock(q, body.tz), calcBlock(q)].concat(live).filter(Boolean);
   if (tools.length) {
     messages = addSystem(messages, tools.join(""));
