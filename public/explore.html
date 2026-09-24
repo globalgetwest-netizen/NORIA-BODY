@@ -66,6 +66,15 @@
   .clock{font-variant-numeric:tabular-nums}
   .prov{padding:13px 22px;font-size:.76rem;color:var(--muted);border-top:1px solid var(--line);background:var(--raise)}
   .prov b{color:var(--ink2);font-weight:600}
+  .wxcap{font-size:.66rem;font-weight:600;letter-spacing:.04em;color:var(--muted);margin-top:5px;text-transform:uppercase}
+  .seclabel{display:flex;align-items:center;gap:8px;padding:12px 22px 4px;font-size:.66rem;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--muted)}
+  .seclabel .dot{width:6px;height:6px;border-radius:50%;flex:none}
+  .seclabel .dot.on{background:var(--green)} .seclabel .dot.ref{background:var(--muted)}
+  .popbox{margin:2px 22px 4px;padding:13px 15px;border:1px dashed var(--line);border-radius:12px;background:var(--raise)}
+  .popbox .k{font-size:.7rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+  .popbox .v{font-size:1.15rem;font-weight:600;margin-top:2px;font-variant-numeric:tabular-nums;display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
+  .tag{font-size:.62rem;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--amber);background:var(--amber-bg);border-radius:20px;padding:2px 8px}
+  .cap{font-size:.78rem;color:var(--ink2);margin-top:7px;line-height:1.45}
   .others{margin-top:16px}
   .others h3{font-size:.72rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin:0 0 8px}
   .others .row{display:flex;flex-wrap:wrap;gap:7px}
@@ -82,7 +91,7 @@
   <header>
     <span class="eyebrow"><svg class="star" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 0c.7 6.3 5.7 11.3 12 12-6.3.7-11.3 5.7-12 12-.7-6.3-5.7-11.3-12-12C6.3 11.3 11.3 6.3 12 0Z"/></svg> Noria &middot; Reality Layer &nbsp; <a href="/africa.html">54-country board</a> &middot; <a href="/">Chat</a></span>
     <h1>Look up any place in Africa</h1>
-    <p class="thesis">Type any city, town, district or village. Noria returns its real record &mdash; region, country, population, elevation, coordinates and time zone &mdash; with the current local time and a temperature cross-checked across two independent sources. If a place can&rsquo;t be found, she says so plainly rather than inventing one.</p>
+    <p class="thesis">Type any city, town, district or village. Two things are checked <b>live</b> the moment you search &mdash; the current local time and a temperature cross-checked across two independent sources. The rest &mdash; region, coordinates, elevation, population &mdash; is fixed reference data from the GeoNames gazetteer, clearly marked as such and never dressed up as a live figure. Population in particular depends on where the boundary is drawn, so it&rsquo;s shown with that caveat. If a place can&rsquo;t be found, Noria says so plainly rather than inventing one.</p>
     <form id="f" autocomplete="off">
       <input id="q" type="text" placeholder="e.g. Kumasi, Larteh, Soweto, Mbale&hellip;" aria-label="Place name">
       <button class="go" type="submit">Look up</button>
@@ -98,7 +107,7 @@
   </header>
   <main id="out"></main>
   <footer class="note">
-    <b>How this stays honest.</b> Place records come from the GeoNames gazetteer (via Open-Meteo geocoding); the current temperature is Noria&rsquo;s reality layer cross-checking <b>Open-Meteo</b> and <b>MET Norway</b> at the exact coordinates and returning a value only when they agree. Population and elevation are shown only when the record has them. A name with no match returns nothing &mdash; never a guessed place. Local times are computed live from the place&rsquo;s time zone.
+    <b>How this stays honest.</b> Only the temperature and the clock are live: the temperature is Noria&rsquo;s reality layer cross-checking <b>Open-Meteo</b> and <b>MET Norway</b> at the exact coordinates and returning a value only when they agree, and the time is computed from the place&rsquo;s time zone. Everything else &mdash; the geographic record and the population &mdash; is <b>static reference data from the GeoNames gazetteer</b>, not a live count, and it is labelled that way so it is never confused with the verified figures. Population is inherently definitional: the gazetteer holds one figure for the city boundary, while metro-area estimates (which count surrounding municipalities) are larger &mdash; both can be &ldquo;right&rdquo; for different questions, so Noria shows the gazetteer value with its limits rather than picking one and calling it verified. A name with no match returns nothing &mdash; never a guessed place.
   </footer>
 </div>
 <script>
@@ -118,24 +127,42 @@
     curTz = r.timezone;
     const kind = KIND[r.feature_code] || "Populated place";
     const where = [r.admin2, r.admin1, r.country].filter(Boolean).join(", ");
-    let badge, wxTemp;
+    let badge, wxTemp, wxLive = false;
     if(w && w.value!=null && (w.status==="VERIFIED"||w.status==="PARTIALLY_VERIFIED")){
-      wxTemp = w.value.toFixed(1)+"°";
+      wxTemp = w.value.toFixed(1)+"°"; wxLive = true;
       badge = w.status==="VERIFIED" ? '<span class="badge">'+CHECK+'VERIFIED</span>' : '<span class="badge part">PROVISIONAL</span>';
     } else { wxTemp = "—"; badge = '<span class="badge none">'+(w&&w.status?esc(w.status):"no reading")+'</span>'; }
-    const facts = [];
-    facts.push(['Population', r.population!=null?fmtInt(r.population):'Not recorded']);
-    facts.push(['Elevation', r.elevation!=null?(fmtInt(Math.round(r.elevation))+' <small>m</small>'):'—']);
-    facts.push(['Local time', '<span class="clock" id="clk">--:--:--</span>']);
-    facts.push(['Coordinates', r.latitude.toFixed(3)+', '+r.longitude.toFixed(3)]);
-    facts.push(['Time zone', esc(r.timezone||'—')]);
     const wxSrc = (w && w.sources) ? w.sources.join(" &amp; ") : "Open-Meteo &amp; MET Norway";
-    const wxAsOf = (w && w.as_of) ? new Date(w.as_of).toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"})+" (its own clock UTC)" : "just now";
+    // LIVE, cross-checked or self-evidently current — the only things carrying the verified mark.
+    const live = [
+      ['Local time', '<span class="clock" id="clk">--:--:--</span>']
+    ];
+    // STATIC gazetteer reference — fixed geography, not a live reading.
+    const ref = [
+      ['Elevation', r.elevation!=null?(fmtInt(Math.round(r.elevation))+' <small>m</small>'):'—'],
+      ['Coordinates', r.latitude.toFixed(3)+', '+r.longitude.toFixed(3)],
+      ['Time zone', esc(r.timezone||'—')],
+      ['Place type', esc(kind)]
+    ];
+    const factCell = f => '<div class="fact"><div class="k">'+f[0]+'</div><div class="v">'+f[1]+'</div></div>';
+    // Population is definitional and periodically censused — never presented as verified live data.
+    const popVal = r.population!=null ? fmtInt(r.population) : null;
+    const popBox = '<div class="popbox"><div class="k">Population</div>'+
+      (popVal
+        ? '<div class="v">'+popVal+' <span class="tag">gazetteer &middot; static</span></div>'+
+          '<div class="cap">A single fixed figure from the GeoNames gazetteer for the city&rsquo;s own boundary &mdash; <b>not a live count and not cross-checked</b>. &ldquo;Population&rdquo; has no one true value: it depends on where you draw the line (city proper vs. greater-metro vs. urban agglomeration) and the census year. Metro-area estimates run higher. Treat this as a rough reference, not a verified current total.</div>'
+        : '<div class="v">Not recorded <span class="tag">no figure</span></div><div class="cap">The gazetteer holds no population for this place. Noria will not invent one.</div>')+
+      '</div>';
     let html = '<div class="card"><div class="chead"><div>'+
       '<div class="place">'+esc(r.name)+'</div><div class="where">'+esc(where)+'</div><span class="kind">'+esc(kind)+'</span></div>'+
-      '<div class="wx"><div class="wxt">'+wxTemp+'</div>'+badge+'</div></div>'+
-      '<div class="facts">'+facts.map(f=>'<div class="fact"><div class="k">'+f[0]+'</div><div class="v">'+f[1]+'</div></div>').join('')+'</div>'+
-      '<div class="prov">Temperature: '+(w&&w.value!=null?'<b>verified</b> across <b>'+wxSrc+'</b>':'<b>'+esc((w&&w.statement)||"no cross-checked reading available")+'</b>')+'. Record from the GeoNames gazetteer.</div></div>';
+      '<div class="wx"><div class="wxt">'+wxTemp+'</div>'+badge+
+        (wxLive?'<div class="wxcap">live &middot; cross-checked now</div>':'')+'</div></div>'+
+      '<div class="seclabel"><span class="dot on"></span>Live &mdash; checked the moment you searched</div>'+
+      '<div class="facts">'+live.map(factCell).join('')+'</div>'+
+      '<div class="seclabel"><span class="dot ref"></span>Static reference &mdash; GeoNames gazetteer, not a live reading</div>'+
+      '<div class="facts">'+ref.map(factCell).join('')+'</div>'+
+      popBox+
+      '<div class="prov">Temperature is '+(w&&w.value!=null?'<b>verified live</b> across <b>'+wxSrc+'</b> at these coordinates':'<b>'+esc((w&&w.statement)||"not available as a cross-checked reading")+'</b>')+'. Everything under &ldquo;static reference&rdquo; is fixed gazetteer data, not a live measurement.</div></div>';
     if(d.results.length>1){
       html += '<div class="others"><h3>Other matches for &ldquo;'+esc(d.query)+'&rdquo;</h3><div class="row">'+
         d.results.slice(1,6).map(o=>'<button class="other" data-q="'+esc(o.name)+'">'+esc(o.name)+' <span style="color:var(--muted)">&middot; '+esc([o.admin1,o.country].filter(Boolean).join(", "))+'</span></button>').join('')+'</div></div>';
