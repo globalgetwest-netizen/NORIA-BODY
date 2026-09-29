@@ -11,7 +11,7 @@
 //   STOP      nothing sensible is left: it says why, and the reason is on the record.
 // The model only PROPOSES a revision. This module validates it against the tool registry, the graph, the failure history and the budgets.
 
-import { extractJson } from "./planner.js";
+import { extractJson, flagsPrematureFact } from "./planner.js";
 import { canUse } from "./tools.js";
 import { stableJson, checkRevision, refTaskKeys, LIMITS } from "./graph.js";
 
@@ -113,6 +113,15 @@ export function validateProposal(raw, ctx) {
     }
     const inputs = cleanInputs(a.inputs, tools, catalog);
     if (tools.length && failedSigs.has(sig(tools, inputs))) problems.push(key + " repeats a step that already failed (" + tools.join("+") + " with the same input)");
+    // Same mechanism as the planner's flagsPrematureFact (planner.js, 2026-09-26): a proposed task's description
+    // must describe an action to take, not assert a specific fact as already established before anything has run.
+    // Found missing here 2026-09-28 while tracing every text exit for the owner's "no third pathway" audit — the
+    // planner and the re-planner build near-identical task shapes from a model's free text, but only the planner
+    // had this check. Here it goes further than the planner's (advisory-only, since /brain/plan has zero live
+    // end-user exposure): a flagged description REFUSES the whole revision (problems.length blocks it), because
+    // /brain/replan proposals are applied to a real task graph, and a refusal here is already a safe, well-tested
+    // outcome the Controller handles gracefully (classifyFailure keeps retrying or eventually stops honestly).
+    if (flagsPrematureFact(a.description)) problems.push(key + " asserts a fact in its description instead of describing an action to verify it: \"" + str(a.description, 80) + "\"");
     add.push({ key, replaces: a.replaces && remove.includes(str(a.replaces, 40)) ? str(a.replaces, 40) : undefined, description: str(a.description, 240), tools, input: inputs, depends_on: (Array.isArray(a.depends_on) ? a.depends_on : []).map((x) => str(x, 40)), verification: (Array.isArray(a.verification) ? a.verification : []).map((x) => str(x, 160)).slice(0, 5), approval_required: approval, remember: a.remember && typeof a.remember === "object" ? Object.fromEntries(Object.entries(a.remember).filter(([k, v]) => /^[a-z0-9_.-]{1,60}$/i.test(k) && typeof v === "string").slice(0, 5)) : undefined });
   }
   const repoint = {};
@@ -122,6 +131,10 @@ export function validateProposal(raw, ctx) {
   if (tasks.filter((t) => !["removed", "superseded"].includes(t.state)).length - remove.length + add.length > LIMITS.tasks) problems.push("that would exceed " + LIMITS.tasks + " tasks");
   const revision = { add, remove, repoint };
   if (!problems.length) { const chk = checkRevision(tasks, revision); if (!chk.ok) problems.push(...chk.problems); }
+  // Same check as above, applied to the revision's own free-text "reason" (the planner's equivalent is expected_result):
+  // this is returned verbatim to the caller as the explanation for the change, so it must describe why the plan is
+  // changing, not assert a new fact about the world as already established.
+  if (!problems.length && flagsPrematureFact(raw.reason)) problems.push("the revision's reason asserts a fact instead of explaining why the plan is changing: \"" + str(raw.reason, 80) + "\"");
   return problems.length ? { ok: false, decision: "refused", problems } : { ok: true, decision: "revise", revision, reason: str(raw.reason, 500), assumptions: (Array.isArray(raw.invalidated_assumptions) ? raw.invalidated_assumptions : []).map((x) => str(x, 200)).slice(0, 5), problems: [] };
 }
 

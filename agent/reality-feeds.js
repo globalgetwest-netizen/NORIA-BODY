@@ -129,6 +129,34 @@ export async function weatherVerdict(place, { jget, now = Date.now() }) {
   return finalise(verdict, "current temperature in " + name, facts, { location: name });
 }
 
+// Added 2026-09-27, directly in response to a real, severe live failure: asked for a Qur'an verse, Noria answered
+// from memory and fabricated the Arabic text, the translation, the surah context and a commentary citation, all
+// wholesale. The Qur'an's text is fixed and universally preserved, so this is a LOOKUP against a single
+// authoritative source, not a "market" needing multi-source cross-checking the way an exchange rate does — Al
+// Quran Cloud (a free, keyless, widely-used public API) serves the standard Uthmani Arabic text and established
+// translations directly, never asking a language model to reconstruct scripture from memory.
+export async function quranVerdict(surah, ayah, { jget, now = Date.now() }) {
+  const ref = String(surah) + ":" + String(ayah);
+  const [ar, en] = await Promise.all([
+    jget("https://api.alquran.cloud/v1/ayah/" + encodeURIComponent(ref), 6000),
+    jget("https://api.alquran.cloud/v1/ayah/" + encodeURIComponent(ref) + "/en.sahih", 6000),
+  ]);
+  const entity = "Qur'an " + ref, attribute = "verse text";
+  if (!en || !en.data || en.data.text == null) {
+    const none = makePassport({ entity, attribute, value: null, source: "alquran-cloud", domain: "scripture" }, now);
+    return finalise(resolveFacts([none], { domain: "scripture", now, entity, attribute }), "text of " + entity, [none], {});
+  }
+  const info = en.data.surah || {};
+  const p = makePassport({ entity, attribute, value: en.data.text, source: "alquran-cloud", domain: "scripture", basis: "Saheeh International translation", retrieved_at: now }, now);
+  const verdict = resolveFacts([p], { domain: "scripture", now, entity, attribute });
+  return finalise(verdict, "text of " + entity, [p], {
+    arabic: ar && ar.data ? ar.data.text : null,
+    surahNumber: info.number || surah, ayahNumber: en.data.numberInSurah || ayah,
+    surahName: info.englishName || null, surahMeaning: info.englishNameTranslation || null,
+    revelationType: info.revelationType || null,
+  });
+}
+
 // Adds the evidence graph and the fields a tool returns; a verdict that may not be stated as fact has no value in it.
 function finalise(v, claim, facts, extra = {}) {
   const graph = evidenceGraph(claim, v);

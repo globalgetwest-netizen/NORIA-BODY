@@ -31,6 +31,7 @@ export function buildPlannerMessages(objective, catalog, todayISO) {
     "- Choose tools only from the catalog. If the objective needs a capability the catalog does not have, do not invent a tool: put it in missing_capabilities.\n" +
     "- Tools with risk \"write\" change something outside Noria (send, book, save, post). Include such a step only if the objective really asks for it.\n" +
     "- Independent tasks should not depend on each other, so they can run in parallel. Verification of important facts is a separate task or part of the task.\n" +
+    "- CRITICAL: description and expected_result must describe an ACTION TO TAKE (\"find Ghana's current population\", \"compute the total from the uploaded figures\"), never a fact you are asserting as already true (\"Ghana's population is 33 million\"). Nothing has been researched, retrieved or computed yet — you are proposing a plan, not answering the objective. Stating a specific number, name, date or other checkable fact as if it were already established, before any task has run, is exactly the fabrication this planner exists to prevent.\n" +
     "- Today is " + todayISO + ".\n\n" +
     "Return exactly this JSON shape:\n" +
     "{\"tasks\":[{\"id\":\"t1\",\"description\":\"\",\"tools\":[],\"requires_info\":[],\"depends_on\":[],\"verification\":[],\"inputs\":{\"tool.name\":{\"field\":\"value\"}}}],\"verification_requirements\":[],\"expected_result\":\"\",\"missing_capabilities\":[{\"need\":\"\",\"reason\":\"\"}]}\n\n" +
@@ -60,6 +61,21 @@ const str = (x, n) => String(x == null ? "" : x).replace(/\s+/g, " ").trim().sli
 const list = (x, n, m) => (Array.isArray(x) ? x : []).map((v) => str(v, m)).filter(Boolean).slice(0, n);
 const hash = (s) => { let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return (h >>> 0).toString(16); };
 
+// TRUTH-ARCHITECTURE (2026-09-26): the planner's own system prompt already forbids it from answering the
+// objective or executing anything — but nothing previously checked that its free-text description/expected_result
+// fields actually honoured that instruction. A description asserting a specific fact as already established
+// ("Ghana's population is 33 million") rather than describing an action to take ("find Ghana's current
+// population") would embed an unverified claim into the plan itself, before any tool has run, and — if a future
+// screen ever displays plan text directly (none does today; see r-lock/decompose in families.js) — that claim
+// would reach a person with no evidence behind it at all. Flagged here as a plan issue, not silently passed
+// through, so this stays visible rather than becoming a second undiscovered gap the way chat's evidence gate was.
+const ACTION_VERB = /\b(research|find|search|look ?up|verify|confirm|check|cross-?check|compute|calculate|gather|retrieve|fetch|review|analy[sz]e|summari[sz]e|write|draft|create|generate|compile|collect|validate|ask|contact|read|extract|compare|identify|determine|obtain|propose|plan|assess|evaluate|list|outline)\b/i;
+const ASSERTS_FACT = /\b\d{2,}\b|\b(?:is|are|was|were)\s+(?:the|a|an)?\s*[A-Z]/;
+export function flagsPrematureFact(text) {
+  const s = String(text || "").trim();
+  return !!s && ASSERTS_FACT.test(s) && !ACTION_VERB.test(s);
+}
+
 // Levels of a dependency graph (Kahn). Returns null when there is a cycle.
 export function executionLevels(ids, deps) {
   const indeg = new Map(ids.map((i) => [i, 0])), out = new Map(ids.map((i) => [i, []]));
@@ -84,6 +100,7 @@ export function validatePlan(raw, objective, catalog, opts = {}) {
   }
   let tasks = raw.tasks.slice(0, 12).map((t, i) => ({ id: str((t && t.id) || "t" + (i + 1), 12).replace(/[^a-zA-Z0-9_-]/g, "") || "t" + (i + 1), description: str(t && t.description, 240), tools: list(t && t.tools, 6, 40), requires_info: list(t && t.requires_info, 6, 160), depends_on: list(t && t.depends_on, 8, 12), verification: list(t && t.verification, 5, 160) }));
   if (raw.tasks.length > 12) issues.push("more than 12 tasks: the extra ones were cut");
+  for (const t of tasks) if (flagsPrematureFact(t.description)) issues.push("task " + t.id + " asserts a fact in its description instead of describing an action to verify it: \"" + t.description.slice(0, 80) + "\"");
   // unique ids
   const used = new Set();
   tasks.forEach((t, i) => { let id = t.id, n = 2; while (used.has(id)) id = t.id + "_" + n++; if (id !== t.id) issues.push("duplicate task id " + t.id + " renamed " + id); t.id = id; used.add(id); });
@@ -133,12 +150,14 @@ export function validatePlan(raw, objective, catalog, opts = {}) {
     if (safe.length) order.push(safe);
     for (const id of other) order.push([id]);
   }
+  const expected_result = str(raw.expected_result, 400);
+  if (flagsPrematureFact(expected_result)) issues.push("expected_result asserts a fact instead of describing what the plan will produce: \"" + expected_result.slice(0, 80) + "\"");
   const plan = {
     objective: str(objective, 1200),
     tasks,
     execution_order: order,
     verification_requirements: list(raw.verification_requirements, 8, 200),
-    expected_result: str(raw.expected_result, 400),
+    expected_result,
     missing_capabilities: missing,
     degraded_tools: degraded,
     audit: { planId: "plan_" + hash(str(objective, 1200) + (opts.now || "")) + "_" + tasks.length, createdAt: opts.now || new Date().toISOString(), registryVersion: REGISTRY_VERSION, objectiveHash: hash(str(objective, 1200)), mode: "plan-only", executed: false },

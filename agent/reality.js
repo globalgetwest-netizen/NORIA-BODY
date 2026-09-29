@@ -46,6 +46,13 @@ export const SOURCES = {
   "nasdaq": { name: "Nasdaq (public quote API)", level: 1, family: "nasdaq", kind: "official exchange", system: "live", domains: ["stock"], refresh: "live", home: "https://www.nasdaq.com" },
   "yahoo": { name: "Yahoo Finance", level: 2, family: "yahoo", kind: "market data aggregator", system: "live", domains: ["stock"], refresh: "live", home: "https://finance.yahoo.com" },
   "worldbank": { name: "World Bank Open Data", level: 1, family: "worldbank", kind: "international statistical agency", system: "live", domains: ["country_fact"], refresh: "annual (most indicators)", home: "https://data.worldbank.org" },
+  // Added 2026-09-27, directly in response to a real, severe live failure: Noria previously answered a Qur'an
+  // verse question from model memory and fabricated the Arabic text, the translation and a citation entirely. The
+  // Qur'an's text is fixed and universally preserved — this is a lookup, not a "market" needing cross-checking the
+  // way an exchange rate does. Al Quran Cloud is a free, keyless, widely-used public API serving the standard
+  // Uthmani Arabic text and established translations (Saheeh International among others) directly from the source
+  // text, not model-generated.
+  "alquran-cloud": { name: "Al Quran Cloud (api.alquran.cloud)", level: 1, family: "alquran-cloud", kind: "scripture text API", system: "knowledge", domains: ["scripture"], refresh: "static (the text does not change)", home: "https://alquran.cloud" },
   "clock": { name: "Noria calculator and calendar (computed, not looked up)", level: 1, family: "computed", kind: "computation", system: "knowledge", domains: ["time", "arithmetic"], refresh: "exact", home: "" },
   "wikipedia": { name: "Wikipedia", level: 3, family: "wikipedia", kind: "encyclopaedia", system: "live", domains: ["general"], refresh: "edited continuously", home: "https://www.wikipedia.org" },
   "news-feeds": { name: "Published news feeds", level: 3, family: "news", kind: "news organisations", system: "live", domains: ["news"], refresh: "minutes to hours", home: "" },
@@ -75,6 +82,7 @@ export const FRESHNESS = {
   government_announcement: { maxAgeMs: 3 * D, label: "hours to days" }, company_registration: { maxAgeMs: 90 * D, label: "days to months" },
   appointment_availability: { maxAgeMs: 10 * M, label: "minutes" }, time: { maxAgeMs: 1 * S, label: "exact" }, arithmetic: { maxAgeMs: Infinity, label: "permanent" },
   historical: { maxAgeMs: Infinity, label: "permanent" }, general: { maxAgeMs: 30 * D, label: "days to months" },
+  scripture: { maxAgeMs: Infinity, label: "permanent (the text itself does not change)" },
   // National statistics (population, GDP, life expectancy, literacy) are reported annually and lag by
   // design — a figure "for 2025" published in mid-2026 is the most current real figure that exists, not
   // stale data. The window is generous (a few years) so normal reporting lag is never mistaken for staleness,
@@ -135,9 +143,22 @@ export const LOCKS = {
 };
 const LOCK_WORDS = {
   immigration: /\b(visa|passport|immigration|embassy|consulate|consular|residence permit|work permit|asylum|border|schengen|appointment (?:slot|system|booking)|type d)\b/i,
-  legal: /\b(law|legal|legislation|statute|court|judgement|judgment|regulation|lawsuit|contract law|tax law|is it legal|illegal)\b/i,
-  medical: /\b(dosage|dose|symptom|diagnos|treatment|medicine|medication|side effects?|vaccine|disease|infection|cancer|pregnan|clinical|drug interaction)\b/i,
-  financial: /\b(exchange rate|interest rate|stock|share price|dividend|inflation rate|central bank|bond yield|mortgage rate)\b/i,
+  // Broadened 2026-09-26 alongside medical, same root cause: "explain the process of filing for bankruptcy"
+  // matched none of the original words (no "law/legal/court/statute/..." in the question itself) and reached bare
+  // model memory unguarded, returning specific, unverified figures (filing fees, debt thresholds, day counts).
+  legal: /\b(law|legal|legislation|statute|court|judgement|judgment|regulation|lawsuit|contract law|tax law|is it legal|illegal|bankrupt(?:cy|ing)?|child custody|divorce|inherit(?:ance)?|last will and testament|estate planning|criminal charge|felony|misdemeanor|liab(?:le|ility)|\bsued\b|plaintiff|defendant|copyright|trademark|patent (?:law|application|infring)|eviction|tenant right|landlord)\b/i,
+  // Broadened 2026-09-26: "dosage/treatment/..." alone missed a severe live gap — "tell me about antiretroviral
+  // therapy" and "chemotherapy induced nausea and how to manage it" matched none of these words at all, so
+  // detectLockDomain never fired and both went completely unguarded to bare model memory (see requiresEvidence's
+  // 2026-09-26 correction, which made ANY match here sufficient — no longer gated by an "actionable" phrasing
+  // check). This list can never be exhaustive (a keyword regex always has a blind spot for wording it doesn't
+  // name), but broadening it is worth the maintenance cost specifically for this domain: it is bounded, enumerable
+  // and among the highest-stakes to get wrong.
+  medical: /\b(dosage|dose|symptom|diagnos|treatment|therapy|therapies|chemotherapy|radiotherapy|immunotherapy|antiretroviral|medicine|medication|prescri(?:be|ption)|side effects?|vaccine|vaccinat|disease|infection|cancer|tumor|tumour|pregnan|clinical|drug interaction|surger(?:y|ies)|surgical|antibiotic|antiviral|antifungal|insulin|hiv|aids\b|nause[a]|allerg(?:y|ies|ic)|injur(?:y|ies)|fracture|diabet(?:es|ic)|asthma|chronic illness|mental health|depression|anxiety disorder|manage(?:ment)? of (?:the )?(?:disease|condition|symptoms))\b/i,
+  // Broadened 2026-09-26, same root cause as medical/legal above: "tell me about mortgage refinancing options"
+  // matched none of these words ("mortgage rate" is not "mortgage refinancing") and reached bare model memory
+  // unguarded.
+  financial: /\b(exchange rate|interest rate|stock|share price|dividend|inflation rate|central bank|bond yield|mortgage (?:rate|refinanc\w*|loan)|refinanc\w*|retirement (?:account|savings|plan)|pension\b|401\(?k\)?|credit score|loan (?:rate|terms|eligib)|bankruptcy filing|tax (?:filing|return|bracket|deduction)|capital gains|investment (?:advice|strategy|portfolio)|annuity|life insurance policy)\b/i,
 };
 export function detectLockDomain(text) { const t = String(text || ""); for (const d of ["immigration", "medical", "legal", "financial"]) if (LOCK_WORDS[d].test(t)) return d; return null; }
 export function admissible(domain, source) { // source: a passport.source or {level, home/host}

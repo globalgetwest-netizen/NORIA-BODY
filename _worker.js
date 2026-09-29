@@ -8,7 +8,7 @@ import { buildPlannerMessages, extractJson, validatePlan } from "./agent/planner
 import { buildReplanMessages, parseProposal } from "./agent/control.js";
 import { describeReality, classifyUrl, detectLockDomain, admissible, ANSWERABLE } from "./agent/reality.js";
 import { makeWebReadTool } from "./agent/web-read.js";
-import { fxVerdict, cryptoVerdict, weatherVerdict, stockVerdict, countryFactVerdict, COUNTRY_ISO3 } from "./agent/reality-feeds.js";
+import { fxVerdict, cryptoVerdict, weatherVerdict, stockVerdict, countryFactVerdict, quranVerdict, COUNTRY_ISO3 } from "./agent/reality-feeds.js";
 import { routeRequest, answerContract, LAYERS } from "./agent/reality-router.js";
 import { buildMap } from "./agent/capability-map.js";
 import { describeCodeRuntimes } from "./agent/code-exec.js";
@@ -30,7 +30,6 @@ import { describeCodeRuntimes } from "./agent/code-exec.js";
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36";
 const JSON_H = { "content-type": "application/json; charset=utf-8", "access-control-allow-origin": "*" };
 const SSE_H = { "content-type": "text/event-stream; charset=utf-8", "cache-control": "no-cache, no-transform", "access-control-allow-origin": "*" };
-const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
 
 // ── Web search ─────────────────────────────────────────────────────────────────
 function stripTags(s) {
@@ -558,6 +557,18 @@ function weatherPlace(q, userTz) {
   if (userTz && userTz.includes("/")) return userTz.split("/").pop().replace(/_/g, " ");
   return "";
 }
+// TRUTH-ARCHITECTURE FIX (2026-09-24): this used to be the ONLY weather path chat ever used — a single Open-Meteo
+// call, no cross-check, no STATUS verdict, no provenance — despite the capability registry (r-weather) claiming
+// chat weather was "cross-checked between an official service and a model". That claim was only ever true for the
+// AGENTIC weather.get TOOL (which already called weatherVerdict, the real MET Norway + Open-Meteo cross-check via
+// resolveFacts) — chat quietly used this older, single-source function instead. Found by direct comparison
+// against ChatGPT and a live repro: 4 of 5 identical live weather questions in a row answered from this single
+// Open-Meteo reading, but 1 fell through to general web search after a timeout (both were labeled `verified: true`
+// with no way to tell them apart). realityWeatherBlock() below replaces this: the safety-critical number
+// (temperature) now goes through the SAME cross-checked resolveFacts/verdictResult pipeline already used for fx,
+// crypto, stock and country facts, carrying real provenance (see verdictResult's `evidence`). Conditions, humidity,
+// wind and the 3-day outlook remain single-source Open-Meteo detail (there is no second free source for those) and
+// are labeled as such in the text, rather than silently borrowing the cross-checked temperature's authority.
 async function weatherBlock(q, userTz) {
   if (!/\b(weather|temperature|forecast|raining|rain|humidity|how (?:hot|cold|warm)|windy|sunny|snowing)\b/i.test(q)) return "";
   // "Convert 30 degrees Celsius to Fahrenheit" is a unit question, not weather.
@@ -569,14 +580,37 @@ async function weatherBlock(q, userTz) {
   const g = await jretry("https://geocoding-api.open-meteo.com/v1/search?count=1&language=en&format=json&name=" + encodeURIComponent(place));
   const loc = g && g.results && g.results[0];
   if (!loc) return g === null ? unavailable("weather") : "";
-  const f = await jretry("https://api.open-meteo.com/v1/forecast?latitude=" + loc.latitude + "&longitude=" + loc.longitude +
-    "&current=temperature_2m,apparent_temperature,relative_humidity_2m,precipitation,weather_code,wind_speed_10m&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max&forecast_days=3&timezone=auto");
-  if (!f || !f.current) return unavailable("weather");
-  const c = f.current, d = f.daily || {}, name = loc.name + (loc.country ? ", " + loc.country : "");
-  const day = (i) => d.time && d.time[i] ? d.time[i] + ": " + (WMO[d.weather_code[i]] || "") + ", high " + d.temperature_2m_max[i] + "°C, low " + d.temperature_2m_min[i] + "°C, rain chance " + (d.precipitation_probability_max ? d.precipitation_probability_max[i] : "?") + "%" : "";
-  return "\n\nLIVE WEATHER for " + name + " (Open-Meteo, measured " + c.time + " local time) — authoritative; use these exact numbers and never substitute remembered or web figures.\n" +
-    "- Now: " + c.temperature_2m + "°C (feels like " + c.apparent_temperature + "°C), " + (WMO[c.weather_code] || "conditions unknown") + ", humidity " + c.relative_humidity_2m + "%, wind " + c.wind_speed_10m + " km/h, precipitation " + c.precipitation + " mm\n" +
-    "- Today — " + day(0) + "\n- Tomorrow — " + day(1) + "\n- Day after — " + day(2) + "\nAnswer briefly with the place, the temperature and the conditions.";
+  return { loc };
+}
+async function realityWeatherBlock(q, userTz) {
+  const none = { text: "", refuse: null, evidence: null };
+  const geo = await weatherBlock(q, userTz);
+  if (!geo) return none; // not a weather question, or place not found (honest silence — no place named)
+  // A soft "tell the user you couldn't fetch it" instruction relies on the model actually following it — the
+  // rest of this file does not extend that trust when a structural, deterministic refusal is possible instead;
+  // matching the total-provider-failure case below, this bypasses the model entirely.
+  if (typeof geo === "string") return { text: "", refuse: "I couldn't fetch live weather data just now — the location lookup failed. Please try again shortly.", evidence: { kind: "WEATHER", provenance: "LIVE_TOOL", status: "UNAVAILABLE" } };
+  const loc = geo.loc, name = loc.name + (loc.country ? ", " + loc.country : "");
+  const [verdictRes, f] = await Promise.all([
+    weatherVerdict({ name: loc.name, latitude: loc.latitude, longitude: loc.longitude, country: loc.country }, { jget: jretry }).catch(() => null),
+    jretry("https://api.open-meteo.com/v1/forecast?latitude=" + loc.latitude + "&longitude=" + loc.longitude +
+      "&current=temperature_2m,apparent_temperature,relative_humidity_2m,precipitation,weather_code,wind_speed_10m&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max&forecast_days=3&timezone=auto"),
+  ]);
+  const vr = verdictRes && verdictRes.verdict ? verdictResult(verdictRes, "WEATHER", { line: (v) => v.entity + ": " + fmtNum(v.value, 1) + "°C" }) : null;
+  const detail = (() => {
+    if (!f || !f.current) return "";
+    const c = f.current, d = f.daily || {};
+    const day = (i) => d.time && d.time[i] ? d.time[i] + ": " + (WMO[d.weather_code[i]] || "") + ", high " + d.temperature_2m_max[i] + "°C, low " + d.temperature_2m_min[i] + "°C, rain chance " + (d.precipitation_probability_max ? d.precipitation_probability_max[i] : "?") + "%" : "";
+    return "\n(Additional detail from Open-Meteo alone, not cross-checked — conditions, humidity and wind, measured " + c.time + " local time)\n" +
+      "- Conditions: " + (WMO[c.weather_code] || "unknown") + ", feels like " + c.apparent_temperature + "°C, humidity " + c.relative_humidity_2m + "%, wind " + c.wind_speed_10m + " km/h, precipitation " + c.precipitation + " mm\n" +
+      "- Today — " + day(0) + "\n- Tomorrow — " + day(1) + "\n- Day after — " + day(2);
+  })();
+  if (vr && vr.refuse) return { text: "", refuse: vr.refuse, evidence: vr.evidence }; // withheld (CONFLICTING/STALE/UNAVAILABLE) -> the verdict's own honest statement, bypassing the model
+  if (vr && vr.text) return { text: vr.text + detail + "\nAnswer briefly with the place, the temperature and the conditions.", refuse: null, evidence: vr.evidence };
+  // the cross-check itself failed (network/exception) but the plain Open-Meteo detail call succeeded: fall back to
+  // the single-source reading rather than lose the answer entirely, but label it honestly as single-source, not LIVE_TOOL-cross-checked
+  if (detail) return { text: "\n\nLIVE WEATHER for " + name + " (Open-Meteo only — the independent cross-check did not answer, so this is a single source, not verified against a second one)." + detail + "\nAnswer briefly with the place, the temperature and the conditions, and do not claim this was cross-checked.", refuse: null, evidence: { kind: "WEATHER", provenance: "AGGREGATED_SOURCE", status: "PARTIALLY_VERIFIED", cross_checked: false } };
+  return { text: unavailable("weather"), refuse: null, evidence: { kind: "WEATHER", provenance: "LIVE_TOOL", status: "UNAVAILABLE" } };
 }
 
 // Currency -----------------------------------------------------------------------------------------
@@ -633,10 +667,38 @@ async function currencyBlock(q) {
 const COINS = [["bitcoin|btc", "BTCUSDT", "bitcoin", "Bitcoin"], ["ethereum|ether|eth", "ETHUSDT", "ethereum", "Ethereum"], ["solana|sol", "SOLUSDT", "solana", "Solana"], ["bnb|binance coin", "BNBUSDT", "binancecoin", "BNB"],
   ["xrp|ripple", "XRPUSDT", "ripple", "XRP"], ["cardano|ada", "ADAUSDT", "cardano", "Cardano"], ["dogecoin|doge", "DOGEUSDT", "dogecoin", "Dogecoin"], ["litecoin|ltc", "LTCUSDT", "litecoin", "Litecoin"],
   ["tron|trx", "TRXUSDT", "tron", "TRON"], ["polkadot|dot", "DOTUSDT", "polkadot", "Polkadot"], ["avalanche|avax", "AVAXUSDT", "avalanche-2", "Avalanche"], ["chainlink|link", "LINKUSDT", "chainlink", "Chainlink"], ["toncoin|ton", "TONUSDT", "the-open-network", "Toncoin"]];
+// ENTITY-COLLISION FIX (found live 2026-09-29, the same shape as STOCKS and country aliases fixed earlier the
+// same day, testing this NEIGHBORING exact-data tool per the owner's own "test neighboring bypasses" standard):
+// several COINS aliases are ordinary English words with an unrelated everyday meaning, and the trigger words here
+// are even looser than STOCKS' (today/now/up/down, not just price/cost). All six reproduced live, confidently,
+// before this fix — "how much does a ton of rice cost today" -> Toncoin's price; "...a sponsored link today" ->
+// Chainlink's; "a dot matrix printer cost today" -> Polkadot's; "what causes an avalanche" -> Avalanche's; "a
+// ripple in the water" -> XRP's (via its "ripple" alias); "a one night stay at a bnb" -> BNB's — none caught by
+// the model. Same general mechanism as AMBIGUOUS_ALIAS for STOCKS: a coin whose alias is an ordinary word or
+// common abbreviation requires real crypto-specific context to appear anywhere in the question.
+const AMBIGUOUS_COIN_CTX = "crypto(?:currency)?|coin|token|blockchain|wallet|exchange rate|market cap";
+const AMBIGUOUS_COIN = {
+  Toncoin: new RegExp("\\b(?:" + AMBIGUOUS_COIN_CTX + "|toncoin|the open network)\\b", "i"),
+  Chainlink: new RegExp("\\b(?:" + AMBIGUOUS_COIN_CTX + "|chainlink|oracle network)\\b", "i"),
+  Polkadot: new RegExp("\\b(?:" + AMBIGUOUS_COIN_CTX + "|polkadot)\\b", "i"),
+  Avalanche: new RegExp("\\b(?:" + AMBIGUOUS_COIN_CTX + "|avax)\\b", "i"),
+  XRP: new RegExp("\\b(?:" + AMBIGUOUS_COIN_CTX + "|xrp|ripple labs|ripplenet)\\b", "i"),
+  // NOT "bnb" itself here — bare "bnb" is exactly the ambiguous alias being guarded (also means "bed and
+  // breakfast"), so including it would make this check always trivially pass, the same self-reference mistake
+  // already avoided for every other entry above. "Binance" (the exchange/company name) is the real disambiguator.
+  BNB: new RegExp("\\b(?:" + AMBIGUOUS_COIN_CTX + "|binance)\\b", "i"),
+  Solana: new RegExp("\\b(?:" + AMBIGUOUS_COIN_CTX + "|solana)\\b", "i"),
+  Ethereum: new RegExp("\\b(?:" + AMBIGUOUS_COIN_CTX + "|ethereum|\\beth\\b)\\b", "i"),
+};
+// Shared by cryptoBlock (the ad-hoc fallback path) and realityCryptoBlock (the primary, cross-checked path) — one
+// mechanism, not two hand-written copies that could drift out of sync.
+function coinHits(s) {
+  return COINS.filter(([names, , , label]) => new RegExp("(?<![a-z])(?:" + names + ")(?![a-z])", "i").test(s) && (!AMBIGUOUS_COIN[label] || AMBIGUOUS_COIN[label].test(s))).slice(0, 3);
+}
 async function cryptoBlock(q) {
   const s = String(q || "").toLowerCase();
   if (!/\b(price|cost|worth|trading|value|rate|how much|market|today|now|up|down)\b/.test(s)) return "";
-  const hits = COINS.filter(([names]) => new RegExp("(?<![a-z])(?:" + names + ")(?![a-z])", "i").test(s)).slice(0, 3);
+  const hits = coinHits(s);
   if (!hits.length) return "";
   const rows = [];
   // Several exchanges are asked AT THE SAME TIME and the first good answer wins — some data-center regions
@@ -675,15 +737,24 @@ function verdictLine(v) {
 // value + provenance (text). WITHHELD (CONFLICTING/STALE/UNAVAILABLE/UNVERIFIED) ->
 // refuse = the verdict's OWN deterministic statement, which groundMessages delivers
 // verbatim, bypassing the model entirely so it can never state a withheld number.
+// TRUTH-ARCHITECTURE FIX (2026-09-24): `evidence` preserves what used to be discarded the moment a verdict became a
+// prose string. resolveFacts()/finish() already compute all of this (status, confidence, agreeing sources, freshness,
+// per-source evidence with authority level and timestamps — see agent/reality.js `finish()`); the agentic weather.get
+// TOOL already returns it in full (see realityOut()), but chat only ever got the flattened text. `provenance` is new:
+// LIVE_TOOL means this specific value came from the cross-checked resolveFacts pipeline (this function); a caller
+// that falls back to something else (single-source, or general web search) must tag its own evidence differently —
+// never reuse LIVE_TOOL for a fallback, so `verified: true` in the final response can no longer mean two different
+// things (see groundMessages, where this now survives into the response instead of being dropped).
 function verdictResult(r, kind, opts = {}) {
-  if (!r || !r.verdict) return { text: "", refuse: null };
+  if (!r || !r.verdict) return { text: "", refuse: null, evidence: null };
   const v = r.verdict;
+  const evidence = { kind, provenance: "LIVE_TOOL", status: v.status, entity: v.entity, attribute: v.attribute, domain: v.domain, value: v.value, unit: v.unit, confidence: v.confidence, independent_sources: v.independent_sources || 0, agreeing_sources: v.agreeing_sources || [], as_of: (v.freshness && v.freshness.as_of) || null, checked_at: v.checked_at, sources: v.evidence || [] };
   if (ANSWERABLE.has(v.status)) {
     const val = opts.line ? opts.line(v) : (v.attribute + " of " + v.entity + " = " + fmtNum(v.value, v.value < 1 ? 6 : 4) + (v.unit ? " " + v.unit : ""));
     return { text: "\n\nLIVE " + kind + " [" + verdictLine(v) + "] Use exactly this verified figure; never substitute a remembered or web number.\n- " + val + (r.note ? "\n(" + r.note + ")" : "") +
-      "\nState it plainly" + (v.status === "PARTIALLY_VERIFIED" ? " and note it is provisional" : "") + "; you may say it was checked against current sources. Do not add, round differently, or change the number.", refuse: null };
+      "\nState it plainly" + (v.status === "PARTIALLY_VERIFIED" ? " and note it is provisional" : "") + "; you may say it was checked against current sources. Do not add, round differently, or change the number.", refuse: null, evidence };
   }
-  return { text: "", refuse: v.statement }; // the verification layer withheld a value → deliver its honest statement directly
+  return { text: "", refuse: v.statement, evidence }; // the verification layer withheld a value → deliver its honest statement directly
 }
 async function realityFxBlock(q) {
   const none = { text: "", refuse: null };
@@ -708,7 +779,7 @@ async function realityCryptoBlock(q) {
   const none = { text: "", refuse: null };
   const s = String(q || "").toLowerCase();
   if (!/\b(price|cost|worth|trading|value|rate|how much|market|today|now|up|down)\b/.test(s)) return none;
-  const hits = COINS.filter(([names]) => new RegExp("(?<![a-z])(?:" + names + ")(?![a-z])", "i").test(s)).slice(0, 3);
+  const hits = coinHits(s);
   if (!hits.length) return none;
   let rs; try { rs = await Promise.all(hits.map(([, , , label]) => cryptoVerdict(label, { jget: jretry }).catch(() => null))); } catch (_) { return { text: cryptoBlock(q), refuse: null }; }
   const results = rs.filter(Boolean).map((r) => verdictResult(r, "CRYPTO PRICE", { line: (v) => v.entity + " = $" + fmtNum(v.value, v.value < 1 ? 6 : 2) + " USD" }));
@@ -724,11 +795,43 @@ async function realityCryptoBlock(q) {
 // dead — a real 404 — so it is not used). A company not in this list is not silently guessed at: it falls through
 // to realityRouteBlock's honest "no source connected" refusal, same as before this list existed.
 const STOCKS = [["apple", "AAPL"], ["microsoft", "MSFT"], ["google|alphabet", "GOOGL"], ["amazon", "AMZN"], ["tesla", "TSLA"], ["meta platforms|\\bmeta\\b|facebook", "META"], ["nvidia", "NVDA"], ["netflix", "NFLX"], ["ibm|international business machines", "IBM"], ["coca-cola|coca cola", "KO"], ["disney", "DIS"], ["walmart", "WMT"], ["jpmorgan|jp morgan", "JPM"], ["visa", "V"], ["exxon\\s?mobil|exxon", "XOM"]];
+// Tickers whose bare alias is an ordinary English word or well-known non-company proper noun. An extra, EXPLICIT
+// company-context requirement (checked in AMBIGUOUS_ALIAS below) is the general fix for any alias like this,
+// present or future — not a one-off exception per word. Found by testing NEIGHBORING aliases after the "visa"/V
+// collision shipped (2026-09-29), per the owner's own "test neighboring bypasses" standard: every one of these
+// reproduced live, confidently, before this fix —
+//   "how much does an apple cost" -> AAPL's stock price stated as a fruit's cost
+//   "how much does it cost to visit the Amazon rainforest" -> AMZN's stock price (model caught the mismatch itself
+//     on both of those two, unprompted — but that is the model's own judgment saving it, not a structural
+//     guarantee, exactly as with the original unfixed "visa" case)
+//   "what is the cost of going meta with this design approach" -> META's stock price stated as fact, NOT caught
+//   "how much would it cost to recreate Nikola Tesla coil experiments" -> TSLA's stock price stated as fact, NOT
+//     caught — the same overconfident "I want to be exact here" framing as the original visa bug
+const AMBIGUOUS_ALIAS = {
+  V: /\b(?:inc\.?|corp\.?|stock|shares?|ticker|nyse|nasdaq|share\s*price|payment(?:s)? (?:company|network|giant|firm))\b/i,
+  AAPL: /\b(?:inc\.?|corp\.?|stock|shares?|ticker|nyse|nasdaq|iphone|ipad|macbook|\bmac\b|ios|tim cook|tech(?:nology)? (?:company|giant|firm))\b/i,
+  AMZN: /\b(?:inc\.?|corp\.?|stock|shares?|ticker|nyse|nasdaq|\.com\b|e-?commerce|online retailer|jeff bezos|\baws\b|web services|prime\b)\b/i,
+  TSLA: /\b(?:inc\.?|corp\.?|stock|shares?|ticker|nyse|nasdaq|electric (?:car|vehicle)s?|\bev\b|elon musk|automaker|car (?:company|maker))\b/i,
+  META: /\b(?:platforms?|inc\.?|corp\.?|stock|shares?|ticker|nyse|nasdaq|facebook|instagram|whatsapp|zuckerberg|social media (?:company|giant|firm))\b/i,
+  GOOGL: /\b(?:inc\.?|corp\.?|stock|shares?|ticker|nyse|nasdaq|search engine|android|youtube|search giant|tech(?:nology)? (?:company|giant|firm))\b/i,
+};
 async function realityStockBlock(q) {
   const none = { text: "", refuse: null };
   const s = String(q || "").toLowerCase();
   if (!/\b(price|cost|worth|trading|value|share|shares|stock)\b/.test(s)) return none;
-  const hits = STOCKS.filter(([names]) => new RegExp("(?<![a-z])(?:" + names + ")(?![a-z])", "i").test(s)).slice(0, 3);
+  // ENTITY-COLLISION FIX (found live 2026-09-29 running the owner's adversarial matrix): "how much does a UK
+  // student visa application cost right now" matched the bare "visa" alias below and returned a real, fully
+  // "verified" stock price for ticker V (Visa Inc.) — a confidently-framed, completely irrelevant answer to an
+  // immigration question, because nothing disambiguated "visa" the travel document from "Visa" the payment
+  // company. A first fix tried deferring to detectLockDomain (immigration) but that regressed EVERY stock
+  // question, since detectLockDomain's own financial keyword list also contains the bare word "stock" — caught by
+  // the regression suite before shipping. The correct, narrower fix: a ticker whose alias is an ordinary word (see
+  // AMBIGUOUS_ALIAS) additionally requires real company-identifying context (stock/shares/Inc/ticker/NYSE/"payment
+  // company") to appear anywhere in the question — not just the alias word alone. A genuine "Visa Inc stock price"
+  // or "Visa shares" question still resolves through this exact-data tool exactly as before; a bare "visa" with no
+  // such context (an immigration question, almost always) no longer does, and falls through to the immigration
+  // source-lock exactly as it should have all along.
+  const hits = STOCKS.filter(([names, ticker]) => new RegExp("(?<![a-z])(?:" + names + ")(?![a-z])", "i").test(s) && (!AMBIGUOUS_ALIAS[ticker] || AMBIGUOUS_ALIAS[ticker].test(s))).slice(0, 3);
   if (!hits.length) return none;
   let rs; try { rs = await Promise.all(hits.map(([, ticker]) => stockVerdict(ticker, { jget: jretry }).catch(() => null))); } catch (_) { return none; }
   const results = rs.filter(Boolean).map((r) => verdictResult(r, "STOCK PRICE", { line: (v) => v.entity + " = $" + fmtNum(v.value, 2) + " USD" }));
@@ -743,9 +846,22 @@ async function realityStockBlock(q) {
 // names/aliases World Bank recognises — not a hardcoded per-country list, and not the model's memory. Checked
 // longest-name-first so "north korea" is never mistaken for the shorter "korea" alias it contains.
 const COUNTRY_NAMES_SORTED = Object.keys(COUNTRY_ISO3).sort((a, b) => b.length - a.length);
+// ENTITY-COLLISION FIX (found live 2026-09-29, the same bug shape as the STOCKS ticker aliases, testing the
+// neighboring exact-data tools after that fix shipped): "what is the life expectancy of A TURKEY" returned
+// Türkiye's national life expectancy stated as fact; "...of A GUINEA PIG" returned Guinea's, matched via the bare
+// "guinea" substring inside "guinea pig" — neither caught by the model. A country name is a proper noun and is
+// never referred to with an indefinite article ("a Chad", "a Turkey" meaning the nation is not English); a common
+// noun that happens to share a country's name or alias (a turkey the bird, a guinea pig the rodent) IS normally
+// preceded by one. This is a general grammatical signal, not a list of specific animal names to exclude — it
+// protects any current or future country alias that also happens to be an ordinary noun, the same way
+// AMBIGUOUS_ALIAS protects STOCKS tickers, without enumerating them.
 function extractCountryName(q) {
   const s = " " + String(q || "").toLowerCase().replace(/[?!.,;:]/g, " ") + " ";
-  for (const name of COUNTRY_NAMES_SORTED) if (s.includes(" " + name + " ") || s.includes(" " + name + "'")) return name;
+  for (const name of COUNTRY_NAMES_SORTED) {
+    const idx = s.indexOf(" " + name + " ");
+    if (idx >= 0) { if (!/\b(?:an?)\s+$/i.test(s.slice(0, idx + 1))) return name; continue; }
+    if (s.includes(" " + name + "'")) return name; // a possessive ("Chad's population") is never a bare common noun
+  }
   return null;
 }
 const COUNTRY_ATTR_WORDS = [
@@ -757,13 +873,54 @@ const COUNTRY_ATTR_WORDS = [
 ];
 function extractCountryAttribute(q) { for (const [rx, attr] of COUNTRY_ATTR_WORDS) if (rx.test(q)) return attr; return null; }
 const COUNTRY_ATTR_UNIT_SUFFIX = { people: " people", USD: "", "%": "%", years: " years" };
+// Added 2026-09-27, in direct response to a reported, reproduced, severe live failure: asked about a Qur'an verse
+// by reference ("Quran 26:80"), Noria answered from memory and fabricated the Arabic text, the translation, the
+// surah context and a commentary citation, all wholesale — for a verse that in reality reads completely
+// differently. The Qur'an's text is fixed and universally preserved: this is a lookup against a real, free,
+// keyless, authoritative source (Al Quran Cloud), never a case where the model reconstructs scripture from memory.
+// Handles both a colon reference ("26:80") and the "surah N ayah M" / "ayah M surah N" forms (no colon).
+function extractQuranRef(q) {
+  const s = String(q || "");
+  if (!STRUCTURED_REF_DOMAIN.test(s) && !/\bquran\b|\bqur'an\b|\bkoran\b/i.test(s)) return null;
+  let m = s.match(/\b(\d{1,3})\s*[:.]\s*(\d{1,3})\b/);
+  if (m) return { surah: Number(m[1]), ayah: Number(m[2]) };
+  m = s.match(/\b(?:surah|sura|chapter)\s+(\d{1,3})\b.{0,20}\b(?:ayah|ayat|verse)s?\s+(\d{1,3})\b/i);
+  if (m) return { surah: Number(m[1]), ayah: Number(m[2]) };
+  m = s.match(/\b(?:ayah|ayat|verse)s?\s+(\d{1,3})\b.{0,20}\b(?:surah|sura|chapter)\s+(\d{1,3})\b/i);
+  if (m) return { surah: Number(m[2]), ayah: Number(m[1]) };
+  return null;
+}
+async function realityQuranBlock(q) {
+  const none = { text: "", refuse: null, evidence: null };
+  const ref = extractQuranRef(q);
+  if (!ref || !(ref.surah >= 1 && ref.surah <= 114) || !(ref.ayah >= 1 && ref.ayah <= 300)) return none;
+  let r; try { r = await quranVerdict(ref.surah, ref.ayah, { jget: jretry }); } catch (_) { return none; }
+  const vr = verdictResult(r, "QUR'AN VERSE", { line: (v) => "\"" + v.value + "\"" });
+  if (vr.refuse) return { text: "", refuse: vr.refuse, evidence: vr.evidence };
+  if (!vr.text) return none;
+  const detail = (r.surahName ? "\n- Surah " + r.surahNumber + " (" + r.surahName + (r.surahMeaning ? ", \"" + r.surahMeaning + "\"" : "") + "), verse " + r.ayahNumber + (r.revelationType ? ", " + r.revelationType : "") : "") +
+    (r.arabic ? "\n- Arabic (Uthmani text): " + r.arabic : "");
+  return { text: vr.text + detail + "\nQuote the translation exactly as given; never alter, paraphrase, or substitute a different verse.", refuse: null, evidence: vr.evidence };
+}
+// Genuine, unresolvable-by-grammar entity ambiguity (unlike the indefinite-article cases above, there is no
+// grammatical tell here — "the population of Georgia" is completely ordinary phrasing for EITHER the country or
+// the U.S. state, and Noria's World Bank feed only ever has the country's figure). Found live 2026-09-29: it
+// silently returned the country's population (3.9M) for a question a U.S. reader very plausibly meant about the
+// state (pop. ~11M), with nothing marking that a different, much more commonly-meant "Georgia" exists. Rather
+// than guess which one was meant, or silently pick one as this did before, the honest fix is to disclose the
+// ambiguity plainly whenever it applies — checked by name, since (unlike the indefinite-article check) there is
+// no general rule to detect "this country name is also a well-known non-country place"; currently the only such
+// collision in COUNTRY_ISO3.
+const AMBIGUOUS_COUNTRY_NOTE = { georgia: "Note: \"Georgia\" also names a U.S. state; the figure above is for the country. This data has no U.S. state statistics." };
 async function realityCountryFactBlock(q) {
   const none = { text: "", refuse: null };
   const attr = extractCountryAttribute(q); if (!attr) return none;
   const country = extractCountryName(q); if (!country) return none;
   let r; try { r = await countryFactVerdict(country, attr, { jget: jretry }); } catch (_) { return none; }
   if (!r) return none;
-  return verdictResult(r, "COUNTRY FACT", { line: (v) => v.attribute + " of " + v.entity + " = " + (v.unit === "USD" ? "$" : "") + fmtNum(v.value, v.unit === "years" || v.unit === "%" ? 1 : 0) + (COUNTRY_ATTR_UNIT_SUFFIX[v.unit] || (v.unit ? " " + v.unit : "")) });
+  const vr = verdictResult(r, "COUNTRY FACT", { line: (v) => v.attribute + " of " + v.entity + " = " + (v.unit === "USD" ? "$" : "") + fmtNum(v.value, v.unit === "years" || v.unit === "%" ? 1 : 0) + (COUNTRY_ATTR_UNIT_SUFFIX[v.unit] || (v.unit ? " " + v.unit : "")) });
+  if (vr.text && AMBIGUOUS_COUNTRY_NOTE[country]) vr.text += "\n" + AMBIGUOUS_COUNTRY_NOTE[country];
+  return vr;
 }
 
 // A CITY/TOWN population question (a country is handled above by the World Bank feed). There is no single
@@ -982,14 +1139,80 @@ async function logicChecked(messages, env, text, opts) {
     return "No, the conclusion does not follow from the premises. Here is why:\n\n" + why;
   } catch (e) { _logicDbg = "ERR " + String((e && e.message) || e).slice(0, 200); return text; }
 }
+// Shared with requiresEvidence() below — moved to module scope 2026-09-27 so the OUTPUT-side safety net just below
+// can use the identical patterns, not a second hand-written copy that could drift out of sync.
+const BIBLE_BOOK = /\b(?:genesis|exodus|leviticus|numbers|deuteronomy|joshua|judges|ruth|samuel|kings|chronicles|ezra|nehemiah|esther|job|psalms?|proverbs|ecclesiastes|(?:song of )?solomon|isaiah|jeremiah|lamentations|ezekiel|daniel|hosea|joel|amos|obadiah|jonah|micah|nahum|habakkuk|zephaniah|haggai|zechariah|malachi|matthew|mark|luke|john|acts|romans|corinthians|galatians|ephesians|philippians|colossians|thessalonians|timothy|titus|philemon|hebrews|james|peter|jude|revelation)\b/i;
+const STRUCTURED_REF_DOMAIN = /\b(?:quran|qur'an|koran|bible|gospel|torah|talmud|hadith|surah|sura|ayah|ayat|psalm|epistle|the act|the code|the statute)\b/i;
+const REF_NUMBER_PATTERN = /\b\d{1,3}\s*[:.]\s*\d{1,3}\b|\bsection\s+\d+\b|\barticle\s+\d+\b|\b(?:surah|sura|chapter)\s+\d{1,3}\b.{0,20}\b(?:ayah|ayat|verse)s?\s+\d{1,3}\b|\b(?:ayah|ayat|verse)s?\s+\d{1,3}\b.{0,20}\b(?:surah|sura|chapter)\s+\d{1,3}\b/i;
+// FINAL OUTPUT-SIDE SAFETY NET (2026-09-27) — the answer to "how do we fix ALL of it": every check up to this
+// point (requiresEvidence and everything it calls) tries to classify the INPUT question correctly, and that list
+// can never be complete — a phrasing nobody has tried yet will always exist; three genuinely new ones were found
+// live in a single night. This is the complementary check, on the OTHER side of the pipe: regardless of how the
+// question was phrased, or whether the input classifier recognised it, if the MODEL'S OWN OUTPUT states a
+// specific, structured scripture/legal reference (a chapter:verse or section number) that was never checked
+// against real evidence, that is exactly the shape proven tonight to fabricate confidently and specifically —
+// invented Arabic text, an invented case citation, an invented Act. This does not require knowing in advance what
+// the next unanticipated INPUT phrasing will look like; it only has to recognise a specific claim in the OUTPUT,
+// which is a much smaller, more stable target.
+function outputMakesUncheckedReference(text) {
+  const s = String(text || "");
+  return (STRUCTURED_REF_DOMAIN.test(s) || BIBLE_BOOK.test(s)) && REF_NUMBER_PATTERN.test(s);
+}
+// SECOND output-side net, added 2026-09-27 the same night as the first, found by continuing to test different
+// claim shapes rather than assuming the reference check covered everything: "cite the research paper that proved
+// meditation reduces blood pressure" reached this exact unguarded path and produced FIVE fully-formatted APA
+// citations — named authors, journal names, volume/issue/page numbers, and working-looking DOI links — for a
+// claim area (medical/scientific research) where several of those citations could not be verified as real. This is
+// the same fabrication mechanism as the scripture case (a specific, structured, checkable reference invented
+// wholesale) in a domain neither STRUCTURED_REF_DOMAIN nor detectLockDomain's keyword list was watching for
+// ("meditation" and "blood pressure" are in neither list). A DOI is an extremely reliable signal on its own — real
+// or fake, nothing else looks like it; the author/year/journal shape is the secondary, slightly broader signal.
+const CITATION_SHAPE = /doi\.org\/10\.\d{3,}|\b[A-Z][a-zA-Z'-]+,\s*[A-Z]\..{0,80}?\(\d{4}\).{0,60}\b(?:journal|study|studies|trial|meta-analysis|systematic review|research)\b/i;
+function outputMakesUncheckedCitation(text) {
+  return CITATION_SHAPE.test(String(text || ""));
+}
 async function plainVerified(messages, env, opts) {
   let text = await brainComplete(messages, env, opts);
   if (LOGIC_Q.test(String((messages.filter((m) => m.role === "user").pop() || {}).content || ""))) text = await logicChecked(messages, env, text, opts);
+  // The safety net above: if the model's OWN draft states a specific chapter:verse/section reference, or a
+  // specific academic citation (author/year/journal or a DOI), that this reply path never checked against real
+  // evidence (plainVerified has no live sources at all), it is safer to say so plainly than to let a possibly-
+  // fabricated reference or citation through just because the input didn't trip a classifier.
+  if (outputMakesUncheckedReference(text)) {
+    return "I'm not able to state the exact wording of that reference from memory alone — reference text can be easy to misremember or mix up with a similar one. Please share the source yourself, or ask me to look it up, and I will check it against a real source before answering.";
+  }
+  if (outputMakesUncheckedCitation(text)) {
+    return "I'm not able to confirm specific research citations from memory alone — details like authors, journal names, page numbers and DOIs are easy to get wrong or invent without meaning to, and I don't want to hand you a citation that turns out not to be real. Ask me to search for real, current sources on this and I will check them before citing anything.";
+  }
+  // CLIENT-INJECTED EVIDENCE HONESTY CHECK (found and reproduced live 2026-09-29, tracing every client-side path
+  // per the owner's audit): the workspace client (public/workspace.js) fetches its OWN real web results for a
+  // guided document — a business plan, career roadmap, visa guide, itinerary — and injects them into the system
+  // message under a "[LIVE WEB RESULTS" marker (or "[ATTACHED BY THE USER" for an attached file), then calls
+  // /brain/ask with ground:false so the server does not repeat the search. Because these prompts are phrased as a
+  // creative task ("write a business plan for..."), requiresEvidence's CREATIVE_TASK guard correctly keeps them
+  // OUT of the hard evidence gate (a business plan must stay free to invent a company name, founders, milestones)
+  // — but that also means plainVerified() ran with zero check against the real evidence the client itself
+  // supplied. Reproduced live: given a system block stating "the average monthly rent... is $800" and a mocked
+  // model draft stating "$3,000" for the identical figure, the wrong number passed straight through unguarded.
+  // Fixed narrowly, not by gating the whole document: reuse the SAME number-vs-evidence mechanism verifyAnswer
+  // already uses for live-grounded chat (see numbersNotIn, extracted above so this is one mechanism, not two),
+  // scoped only to when the client's own structural marker is present, and only as an appended, honest caveat —
+  // never a refusal or a rewrite — so a genuinely creative document (company name, projected milestones, a
+  // travel-day narrative) is completely unaffected; only a specific figure absent from the client's own supplied
+  // evidence is flagged. Any future guided document gets this for free just by using the same injection marker;
+  // no per-topic keyword list involved.
+  const sysText = messages.filter((m) => m.role === "system").map((m) => m.content).join(" ");
+  const clientEvidence = /\[LIVE WEB RESULTS|\[ATTACHED BY THE USER/i.test(sysText) ? sysText : "";
+  const finish = (t) => {
+    if (!clientEvidence) return t;
+    const mismatches = numbersNotIn(t, clientEvidence);
+    return mismatches.length ? t + "\n\n*A few specific figures above could not be confirmed against the information you provided (" + mismatches.slice(0, 5).join(", ") + "); please verify them before relying on them.*" : t;
+  };
   let errs = arithmeticErrors(text);
-  if (!errs.length) return text;
+  if (!errs.length) return finish(text);
   const fix = addSystem(messages, "\n\nARITHMETIC CORRECTION — your draft contained calculations that are wrong: " + errs.join("; ") + ". Redo every calculation carefully, one step at a time, and give the corrected answer. Never mention this correction.");
-  try { const t2 = await brainComplete(fix, env, opts); if (!arithmeticErrors(t2).length) return t2; text = t2; } catch (_) {}
-  return text + "\n\n*(Please double-check the arithmetic above: I could not fully confirm it.)*";
+  try { const t2 = await brainComplete(fix, env, opts); if (!arithmeticErrors(t2).length) return finish(t2); text = t2; } catch (_) {}
+  return finish(text + "\n\n*(Please double-check the arithmetic above: I could not fully confirm it.)*");
 }
 // A question that is ONLY arithmetic ("what is 17% of 2,340") is answered by the calculator itself. Even with the exact
 // result placed in front of a model, one reply in a few came out wrong (39.78 for 397.8), so a plain sum never goes
@@ -1166,7 +1389,11 @@ const CLOCK_NOT = /\b(news|weather|price|score|president|prime minister|who|won|
 // the sources do not answer, Noria says so plainly. She never falls back on memory, which stops before today.
 const OFFICE_ROLE = "president|vice[- ]president|prime minister|deputy prime minister|minister|foreign minister|finance minister|governor|deputy governor|mayor|ceo|chief executive|chairman|chairperson|speaker|chief justice|head of state|king|queen|leader|secretary[- ]general|secretary of state|ambassador|inspector[- ]general|director[- ]general|attorney[- ]general|commissioner|senator|premier|chancellor|emir|monarch";
 const OFFICE_Q = new RegExp("\\b(who\\s+(is|are|was|'s)|who's)\\b[^?.!]{0,60}\\b(" + OFFICE_ROLE + ")\\b|\\b(current|present|new|incumbent|sitting)\\s+(" + OFFICE_ROLE + ")\\b|\\b(" + OFFICE_ROLE + ")\\s+of\\s+[a-z]", "i");
-const OFFICE_NOT = /\b(write|essay|poem|story|history of|first|founder|founded|how to become|salary|requirements|qualifications|powers of|role of|duties)\b/i;
+// "speaker" is a real office role (Speaker of Parliament/Congress) but also just means "who said this" —
+// found live while testing the exact-reference fix: "who is the speaker in that verse" (a quotation-attribution
+// question, not an office-holder question) was wrongly classified as officeAsk, triggering an unrelated
+// "I couldn't check who currently holds that office" refusal instead of the real quote-attribution search path.
+const OFFICE_NOT = /\b(write|essay|poem|story|history of|first|founder|founded|how to become|salary|requirements|qualifications|powers of|role of|duties|speaker (?:in|of) (?:that|this|the) (?:verse|quote|quotation|passage|line|statement|hadith|surah|chapter))\b/i;
 const officeAsk = (q) => OFFICE_Q.test(q) && !OFFICE_NOT.test(q);
 const NO_OFFICE_ANSWER = "I couldn't check who currently holds that office just now, because my live sources didn't answer. I would rather not give you a name from memory that might be out of date. Please try again in a moment.";
 // ══ GROUNDING ENGINE ═══════════════════════════════════════════════════════════════════════════════════════════════
@@ -1181,6 +1408,7 @@ const NO_OFFICE_ANSWER = "I couldn't check who currently holds that office just 
 //                 introduces names the sources never mention is rewritten once under a strict instruction; if it still
 //                 does, she shows what the sources actually say instead. A guess never reaches the reader.
 const STABLE_TASK = /\b(write|compose|draft|poem|story|essay|lyrics|code|function|refactor|debug|translate|rephrase|reword|summari[sz]e|brainstorm|pretend|role-?play|plan|build|create|make|prepare|produce|generate|design|explain (how|why)|teach me|help me)\b/i;
+const CREATIVE_TASK = /\b(write|compose|draft|poem|story|essay|lyrics|code|function|refactor|debug|translate|rephrase|reword|summari[sz]e|brainstorm|pretend|role-?play)\b/i;
 const LIVE_CUE = /\b(current|currently|latest|newest|recent|recently|today|tonight|yesterday|last (?:night|week|weekend|month)|this (?:week|month|year|season|morning|afternoon|evening|weekend)|earlier today|right now|as of|still|upcoming|nowadays|these days|at the moment|at present|present-day|so far this)\b|\bnow\b(?!\s+that)/i;
 const EVENT_VERB = /\b(announce[ds]?|announcement|unveil(?:ed|s)?|launch(?:ed|es)?|acquir(?:e|ed|es)|acquisition|merge[ds]?|resign(?:ed|s)?|appointed|sacked|arrested|indicted)\b/i;
 const MOVING_VALUE = /\b(price|cost of|rate|worth|net worth|population|score|scores|standings?|results?|forecast|schedule|fixtures?|ranking|rankings|salary|version|release date|stock|share price|exchange rate|inflation|unemployment|market cap|record|odds|winner|winners|champions?|how many (people|residents|inhabitants|users|customers|members))\b/i;
@@ -1229,9 +1457,80 @@ const ENTITY_PROBE = { test: (s) => ENTITY_PROBE_VERB.test(s) && (hasEntity(s) |
 // other ~190. This is a TOPIC check, like MOVING_VALUE, not a verb check like STABLE_TASK: it must
 // override "tell me about" / "describe" / "write about" the same way a stock price already does.
 const ADMIN_DIVISION = /\b(regions?|states?|provinces?|counties|districts?|departments?|prefectures?|governorates?|cantons?|territories|wards?|municipalit(?:y|ies)|subdivisions?|administrative divisions?|parishes|oblasts?|voivodeships?|emirates?)\b/i;
+// TRUTH-ARCHITECTURE FIX (2026-09-25): attributing a QUOTED OR PARAPHRASED PASSAGE to its exact source (a verse,
+// surah, chapter, sermon, hadith, speaker...) is exactly where a model confabulates most confidently and
+// dangerously: it can name a real speaker, a real work and a real date, and blend them with an unrelated real
+// passage into a fluent, wrong, self-consistent-sounding citation. Proven live and unguarded (no search, no
+// evidence, `verified: undefined`): asked "which surah and verse contains the phrase 'prostrate and draw near'",
+// Noria named SIX different, mutually contradictory verses as "the most direct match" in one answer, several
+// quoted with text that does not match their real content. Asked "who said 'and when I am ill, it is He who cures
+// me'" (Qur'an 26:80, part of Ibrahim's address in 26:69-89), Noria confidently attributed it to a fabricated "St.
+// Augustine, Sermon 73, De sanitate, c. 395 AD" complete with an invented Latin original. STABLE_FACT already
+// treats "who wrote X" as a stable, low-risk lookup (correct for a short title: "who wrote Romeo and Juliet") — but
+// that is the WRONG bucket for a full quoted or paraphrased passage, which is a citation-verification task, not
+// trivia. This is deliberately independent of liveStrength's STABLE_FACT short-circuit (wired directly into
+// requiresEvidence below, the same way LOCK_ACTIONABLE already is) so it cannot be pre-empted by that earlier
+// return the way adding it to liveStrength's own "must" chain would be.
+const QUOTE_ATTRIBUTION_VERB = /\b(?:who\s+(?:said|wrote|spoke|authored)|which\s+(?:verse|surah|sura|ayah|ayat|chapter|book|passage|hadith|sermon)|what\s+(?:verse|surah|sura|ayah|ayat|chapter|book|passage|hadith|sermon)|is\s+.{0,120}?\b(?:found|from)\b|does\b.{0,50}\bappear\s+in\b|\bcomes\s+(?:immediately\s+)?(?:before|after)\b|\battributed\s+to\b)/i;
+const LONG_QUOTE = /"[^"]{8,300}"|“[^”]{8,300}”|'[^']{8,300}'/;
+function quotesSource(s) {
+  s = String(s || "");
+  if (!QUOTE_ATTRIBUTION_VERB.test(s)) return false;
+  if (LONG_QUOTE.test(s)) return true; // an actual quoted passage: always a citation-verification task
+  return s.trim().split(/\s+/).length >= 8; // no quote marks: a short title ("who wrote Romeo and Juliet") stays
+} // stable trivia; a longer clause is treated as a paraphrased quote that needs the same verification
+// Opinion, self-referential and small-talk sentences ("how are you doing today", "what should I cook for dinner
+// tonight", "what do you think about starting a business this year") are not claims about an external fact at
+// all, but LIVE_CUE's temporal-cue words ("today", "tonight", "this year", "now"...) are common in completely
+// ordinary conversation and would otherwise force these into the "must" branch below purely because of an
+// incidental word, forcing an unnecessary search or an unhelpful refusal on harmless small talk. Checked before
+// LIVE_CUE/MOVING_VALUE/etc. so a genuine opinion/small-talk shape is never reclassified by an incidental cue word;
+// a question that is BOTH opinion-shaped AND names something checkable (officeAsk/MOVING_VALUE) still overrides it.
+// SELF-IDENTITY/CAPABILITY addition (found live 2026-09-29, reported directly by the owner: asked "what can you
+// do", "what model are you built on" and "what is your name" through the real chat UI with Noria's own real
+// system prompt in place, and got the honest-refusal NO_LIVE_ANSWER text — the same treatment as an unverifiable
+// external fact. Root cause: FACTUAL_QUESTION_DEFAULT's catch-all requires evidence for any WH-question by
+// default, and OPINION_OR_SELF (its exclusion list) had no general pattern for a question about the ASSISTANT'S
+// OWN nature or capabilities — only a narrower "about yourself/about you/about Noria" phrase used elsewhere. What
+// Noria can do, what she is called and what she runs on are defined by her OWN configuration and system prompt,
+// never an externally-verifiable fact the web could confirm or refute — searching the web for "what can you do"
+// is nonsensical by construction, and doing so instead of answering from the system prompt made Noria unable to
+// describe her own basic nature the way any other assistant trivially can. Tested neighboring phrasings live: "how
+// do you work", "what languages do you speak", "who made you", "what version are you" and others already passed
+// (caught by other existing checks); only the three above were actually broken, but the added patterns cover the
+// general shape, not just those three exact strings.
+const OPINION_OR_SELF = /\b(you think|your opinion|your view|your take|your favorite|your favourite|do you (?:like|feel|prefer|believe|think|enjoy)|how are you|how(?:'s| is) it going|how do you feel|what should i (?:do|say|write|call|name|wear|eat|cook|make|choose)|what do you (?:recommend|suggest|advise|think)|help me (?:decide|choose|feel|understand|figure out|plan|write|brainstorm)|what if i|how (?:can|do) i (?:improve|get better|learn|become|feel|start|cope)|advice on|opinion on|thoughts on|my (?:opinion|view|feeling|guess|plan)|i (?:feel|think|believe|guess|wonder|wish)|can you (?:help|assist)|would you (?:like|say|recommend)|could you (?:help|explain|clarify|elaborate)|sounds? (?:good|great|fine|ok|okay)|thank(?:s| you)|^\s*(?:hi|hello|hey|good (?:morning|afternoon|evening))\b|how'?s it going|what (?:can|do) you do|what can you help (?:me )?with|what(?:'s| is| are) you\b|who are you\b|what(?:'s| is) your name|what model (?:are you|is this|do you use|are you (?:built|based) on)|which model (?:are you|is this)|are you (?:chatgpt|gemini|gpt|claude|an? (?:ai|bot|robot)|a (?:human|real person)|real\b)|what (?:company|organi[sz]ation) (?:made|built|created|trained) you)\b/i;
+// NORIA'S OWN NAME COLLIDES WITH A REAL ENGLISH WORD (found live 2026-09-29, reported directly by the owner
+// immediately after the self-identity fix above shipped): "who is Noria AI" reached the SAME evidence gate as an
+// unverifiable external fact. Worse than the earlier self-identity gap — a "noria" is also a real, Wikipedia-
+// documented water-lifting wheel used for irrigation, so a web search triggered for the word "Noria" can return
+// water-wheel results instead of anything about the assistant. Confirmed live: "what is a noria" correctly and
+// appropriately returns the water-wheel Wikipedia article (that IS the right answer for that phrasing) — the risk
+// is specifically when "Noria" names the assistant and gets the same treatment. This is the single most damaging
+// possible instance of the entity-collision bug class fixed repeatedly this session (STOCKS/COUNTRY/COINS),
+// because it is Noria's own identity. Fixed with the SAME grammatical signal already proven for country-name
+// collisions (extractCountryName): the common noun is always introduced with an indefinite article ("a noria",
+// "the norias of Hama"); a name never is ("Noria", "who is Noria"). This product exists only as a conversation
+// WITH Noria — there is no legitimate reading where a bare, article-less "Noria" named as the subject of a
+// question means the irrigation device rather than the assistant answering it. Checked first, ahead of every
+// other classifier (ENTITY_PROBE, lock domains, MOVING_VALUE), so nothing can override it.
+function asksAboutNoriaItself(q) {
+  const s = String(q || "");
+  // SINGULAR only: "norias" (plural) is never the assistant — there is exactly one Noria — so a plural mention
+  // ("the norias of Hama", a real set of historical water wheels) is always the device, same principle as the
+  // indefinite-article check below. Found and fixed before shipping: an early version of this function matched
+  // \bnorias?\b (allowing the plural through) and wrongly treated "tell me about the norias of Hama" as a
+  // self-identity question — caught by this file's own regression test actually reading the returned text
+  // instead of only checking that SOME answer came back.
+  if (!/\bnoria\b/i.test(s)) return false;
+  if (/\b(?:an?)\s+noria\b/i.test(s)) return false; // "a noria" / "an noria" -> the generic device, not the assistant
+  return /\b(?:who|what)(?:'s|\s+is|\s+are)\b|\btell me about\b|\bexplain\b|\bdescribe\b|\bis\s+noria\b|\bnoria\s+ai\b/i.test(s);
+}
 function liveStrength(q) {
   const s = String(q || "");
+  if (asksAboutNoriaItself(s)) return "no";
   if (ACTION_ASK.test(s)) return "no";
+  if (OPINION_OR_SELF.test(s) && !officeAsk(s) && !MOVING_VALUE.test(s)) return "no";
   if (s.length < 400 && ENTITY_PROBE.test(s)) return "must";
   const adminGeo = ADMIN_DIVISION.test(s) && hasEntity(s);
   // a puzzle with its own numbers ("a bat and a ball cost 1.10 in total…") is worked out, not looked up; a market or rate word keeps it a lookup
@@ -1240,15 +1539,127 @@ function liveStrength(q) {
   // does not need factual verification the way an enumeration ("what are the regions of France") does — the failure
   // this fix targets never matched a write/poem/STABLE_TASK verb in the first place ("tell me about..." is neither),
   // so it is caught by adminGeo being added to the "must" check below instead, without touching this bypass at all.
-  if (/\b(write|compose|draft|poem|story|essay|lyrics|code|function|refactor|debug|translate|rephrase|reword|summari[sz]e|brainstorm|pretend|role-?play)\b/i.test(s) && !MOVING_VALUE.test(s) && !officeAsk(s)) return "no"; // a creative or language task is never a lookup
+  if (CREATIVE_TASK.test(s) && !MOVING_VALUE.test(s) && !officeAsk(s)) return "no"; // a creative or language task is never a lookup
   if (STABLE_TASK.test(s) && !LIVE_CUE.test(s) && !officeAsk(s)) return "no";
   if (STABLE_FACT.test(s) && !LIVE_CUE.test(s)) return "no";
   if (officeAsk(s) || LIVE_CUE.test(s) || MOVING_VALUE.test(s) || STATUS_Q.test(s) || adminGeo || (EVENT_VERB.test(s) && hasEntity(s))) return "must";
   if (STATE_Q.test(s) && hasEntity(s)) return "maybe";
   if (serverNeedsWeb(s)) return "must";
+  // TRUTH-ARCHITECTURE FIX (2026-09-26): ROOT-CAUSE fix, not another per-topic patch. Every fix in this file up to
+  // and including quotesSource() was an OPT-IN list — evidence was required only for a factual-question SHAPE
+  // already discovered to need it, so a genuinely new shape (medical dosage, then a visa question, then a Qur'an
+  // quotation) fell through to bare model memory until it produced a live, confidently wrong answer and was found.
+  // This inverts the default for the one case that matters most: everything above this line has already had its
+  // chance to mark the question safe (creative writing, code, translation, a math puzzle, a stable low-risk fact,
+  // an action request, pure logic) or to require evidence for a KNOWN reason. A sentence that survives all of that
+  // AND is still recognisably asking about an external, checkable fact — not an opinion, not a request for help,
+  // not small talk — is now evidence-required BY DEFAULT, not "safe for memory" merely because no earlier line
+  // happened to name its shape. FACTUAL_QUESTION_DEFAULT is deliberately conservative (excludes opinions,
+  // self-referential requests, greetings, short interjections) — see quote_attribution_t.mjs and
+  // factual_default_t.mjs for what it does and does not catch.
+  if (FACTUAL_QUESTION_DEFAULT(s)) return "maybe";
   return "no";
 }
+// "What will/would happen if X" asks for a REASONED, general-mechanism prediction (yeast in dough, mixing two
+// chemicals, dropping a ball), not a lookup of a specific real-world current fact — found live while testing this
+// same fix ("what will happen if I add more yeast to bread dough" was wrongly forced into a refusal).
+const HYPOTHETICAL_REASONING = /\bwhat (?:will|would|might|could) happen if\b|\bwhat (?:will|would) .{0,40}\bif i\b/i;
+function FACTUAL_QUESTION_DEFAULT(s) {
+  if (OPINION_OR_SELF.test(s) || HYPOTHETICAL_REASONING.test(s)) return false;
+  const words = s.trim().split(/\s+/).filter(Boolean);
+  if (words.length < 4) return false; // "really?", "you sure?" — too short to carry a checkable claim
+  // a WH-question word opening the sentence, or a yes/no auxiliary-inversion question, or an explicit "?"
+  return /^\s*(?:and\s+|so\s+|well\s+|please\s+|okay?,?\s+)?(?:what|who|whom|whose|which|when|where|why|how)\b/i.test(s) ||
+    /^\s*(?:is|are|was|were|does|did|do|has|have|had|can|could|will|would)\b/i.test(s) ||
+    /\?\s*$/.test(s);
+}
 const NO_LIVE_ANSWER = "I couldn't find reliable, current information about that: either nothing matches, or my live sources did not answer just now. It is the kind of question where a guess could mislead you, so I would rather not make one. If it is a real company, person or event, tell me a little more (the country or the field) and I will look again.";
+
+// ── GLOBAL FACTUAL EVIDENCE GATE ─────────────────────────────────────────────────────────────────────────────────────
+// The one rule that must hold for EVERY domain: an externally-verifiable factual claim is never answered from model
+// memory. requiresEvidence(q) decides whether a question is such a claim. When it is true, groundMessages may only
+// return live evidence or a refusal — the memory path (plainVerified) is closed to it, so a search/provider failure,
+// a stale source, a conflict or an unknown entity FAILS CLOSED (honest "couldn't verify") instead of falling back to
+// remembered model knowledge. When it is false (creative writing, code, translation, arithmetic, a stable explanation
+// or definition, opinion, conversation) the model may answer, because there is no external fact to verify.
+//
+// Two triggers:
+//   1. ANY locked domain (medical / immigration / legal / financial) question, full stop — see the 2026-09-26
+//      correction below.
+//   2. liveStrength already judged the question to need live sources ("must") or probably need them ("maybe"):
+//      current/latest cues, moving values, status, office-holders, named-entity factual probes, admin divisions,
+//      and (since the previous pass) a general factual-question default.
+//
+// CORRECTION (2026-09-26): trigger 1 used to additionally require LOCK_ACTIONABLE — a locked domain asked in an
+// "actionable" way (a dose, a visa requirement, "is it legal", a current rate) — reasoning that a general
+// EXPLANATORY medical/legal question ("what is paracetamol") was safe, stable trivia. Live testing proved that
+// reasoning wrong: "tell me about antiretroviral therapy", "describe the treatment options for type 2 diabetes"
+// and "chemotherapy induced nausea and how to manage it" all matched LOCK_WORDS.medical (via "treatment") but
+// none matched LOCK_ACTIONABLE (no "dose", "how much", "current", etc.), so all three reached bare model memory
+// completely unguarded (`verified: undefined`) and returned extensive, specific, confidently-stated medical
+// content — named drugs, dosing regimens, guideline dates — with zero grounding. An "explanatory" framing does not
+// make a drug-name-and-dosing answer safer than an "actionable" one; the content itself is exactly as checkable
+// and exactly as harmful if wrong. LOCK_ACTIONABLE is retained below only as documentation of what used to gate
+// this (it is no longer referenced) — detectLockDomain(s) alone is now sufficient.
+function requiresEvidence(q) {
+  const s = String(q || "");
+  if (!s.trim()) return false;
+  if (asksAboutNoriaItself(s)) return false; // see asksAboutNoriaItself above liveStrength — checked first, ahead of lock domains too
+  // Found while broadening the lock-domain keyword lists just above: detectLockDomain runs unconditionally here,
+  // ahead of liveStrength's own creative-task bypass, so "write a short story about a family filing for
+  // bankruptcy" or "write a poem about the exchange rate" were wrongly forced into evidence-gating and refused —
+  // a poem or story does not need to state a real, current filing fee or exchange rate. The same CREATIVE_TASK
+  // guard liveStrength already uses (never overriding a genuine current-value or office-holder question) applies
+  // here too.
+  if (CREATIVE_TASK.test(s) && !MOVING_VALUE.test(s) && !officeAsk(s)) return false;
+  if (detectLockDomain(s)) return true; // any medical/immigration/legal/financial question: official source or refuse, never memory
+  if (quotesSource(s)) return true; // attributing a quoted/paraphrased passage to its exact source: a citation-verification task, never memory
+  // FOUND LIVE 2026-09-27, same night as the output-side citation net below: "cite the research paper that proved
+  // meditation reduces blood pressure" matched none of the checks above — "meditation"/"blood pressure" are in no
+  // lock-domain keyword list, and "cite" is not in quotesSource's or ENTITY_PROBE_VERB's verb lists — and reached
+  // bare model memory unguarded, producing five fully-formatted, unverifiable APA citations with DOI links. A
+  // request for an academic citation/study/reference is exactly as much a citation-verification task as
+  // quotesSource's quotation-attribution case above, just for research literature instead of scripture.
+  const CITATION_REQUEST = /\b(?:cite|citation|reference)s?\b.{0,30}\b(?:paper|study|studies|research|source|journal)\b|\b(?:give|provide|find)\s+(?:me\s+)?(?:a\s+)?(?:citation|reference|source)s?\s+for\b|\bwhat\s+(?:studies|research|papers?)\s+(?:show|prove|found|support)\b/i;
+  if (CITATION_REQUEST.test(s)) return true;
+  // FOUND LIVE 2026-09-27: every check in this function so far assumes some SENTENCE STRUCTURE — a verb (quotesSource
+  // needs "who said"/"which verse"), a WH-word or "?" (FACTUAL_QUESTION_DEFAULT below). A BARE structured reference
+  // with no verb at all — literally typing "Quran 26:80" into chat, exactly how a person actually would — matches
+  // none of them and reached bare model memory completely unguarded (no search, no `verified` field in the
+  // response at all). The result: real, detailed-looking fabrication — invented Arabic text, an invented
+  // translation, an invented "Tafsir Ibn Kathir" commentary reference, for a verse that in reality reads
+  // completely differently. Closed generally, not with a Quran-specific keyword: any text naming a scripture/
+  // legal/reference domain (Quran, Bible, Torah, Hadith, a legal Act, a court case...) alongside a chapter:verse or
+  // section-number pattern requires evidence, with or without a question shape around it.
+  // Two gaps found and closed the same night this shipped, both via direct live testing: (1) most REAL Bible
+  // references never say the word "Bible" at all — "John 3:16", "Genesis 1:1", "Psalm 23:1" are just a book name
+  // plus numbers — so a keyword-only domain check missed them entirely; a Bible book name list is added below. (2)
+  // a Quran-style reference is often written "surah 96 ayah 19" (two separate numbers, no colon) rather than
+  // "96:19" — added as its own pattern rather than assuming every reference uses a colon.
+  if ((STRUCTURED_REF_DOMAIN.test(s) || BIBLE_BOOK.test(s)) && REF_NUMBER_PATTERN.test(s)) return true;
+  // FOUND LIVE 2026-09-27, same root cause as quotesSource above, in a topic OUTSIDE any locked domain: "tell me
+  // about the causes of the 2008 financial crisis" returned a huge, completely unguarded answer (no search, no
+  // `verified` field at all) — dozens of specific unverified dollar figures, dates and statistics. liveStrength's
+  // own ENTITY_PROBE already matches "tell me about"/"describe"/"summarize"/"what do you know about"-style
+  // requests, but only when hasEntity(s) finds a CAPITALISED proper noun in the topic — "the causes of the 2008
+  // financial crisis" has none. Three superficially similar test questions asked in the same batch were refused
+  // correctly, but each for an unrelated, coincidental reason (a capitalised place name, the word "record" hitting
+  // MOVING_VALUE, "infection" hitting the medical lock) — none were protected by a real, general mechanism.
+  // A first version of this fix required evidence for EVERY ENTITY_PROBE_VERB match — too broad: it caught "tell
+  // me about photosynthesis" (a stable mechanism, exactly as safe as "explain how photosynthesis works"), "tell me
+  // about yourself" (Noria describing her own nature, not an external fact at all), "describe a typical day for a
+  // software engineer" (a generic hypothetical, not a claim about anything real and specific), and reasoning over
+  // numbers the user supplied directly. NARRATIVE_TOPIC narrows the trigger to what actually caused the failure: a
+  // request about a specific historical/statistical NARRATIVE (an explicit "causes of/history of/impact of/..."
+  // framing, or a 4-digit year) — not every "tell me about" phrasing. "Tell me about the history of the internet"
+  // still correctly requires evidence under this narrower rule — it is exactly as full of specific, checkable,
+  // gettable-wrong details as the financial-crisis case that exposed this gap.
+  const NARRATIVE_TOPIC = /\b(?:causes?|history|impact|effects?|results?|consequences?|aftermath|origins?|background)\s+of\b|\b(?:19|20)\d{2}\b/i;
+  const SELF_REF = /\b(?:about\s+yourself|about\s+you\b|about\s+noria\b)/i;
+  if (ENTITY_PROBE_VERB.test(s) && NARRATIVE_TOPIC.test(s) && !SELF_REF.test(s) && !/\bexplain\s+(?:how|why)\b/i.test(s) && !(STABLE_FACT.test(s) && !LIVE_CUE.test(s))) return true;
+  const strength = liveStrength(s);
+  return strength === "must" || strength === "maybe";
+}
 
 // ── verification ───────────────────────────────────────────────────────────────────────────────────────────────────
 const SC_SKIP = new Set("background,recognition,activities,activity,leadership,focus,security,notes,note,statements,statement,engagement,diplomatic,visits,visit,public,appearances,appearance,additional,verified,overview,career,education,life,early,personal,politics,political,policy,policies,achievements,achievement,highlights,highlight,details,detail,context,timeline,facts,fact,key,current,role,office,profile,biography,about,contact,address,recent,official,sources,ghana\u2019s,headlines,headline,news,latest,breaking,update,updates,top,stories,story,key,more,also,overall,meanwhile,finally,first,second,third,next,ghanaian,i,i'm,i've,noria,the,a,an,as,in,on,at,it,it's,he,she,they,we,you,this,that,these,those,here,there,note,source,sources,yes,no,however,also,today,according,based,currently,current,latest,recent,live,web,context,summary,sunday,monday,tuesday,wednesday,thursday,friday,saturday,january,february,march,april,may,june,july,august,september,october,november,december,utc,gmt,and,but,or,so,if,for,from,with,while,since,after,before,during,since,then,when,where,who,what,which,why,how,is,are,was,were,his,her,their,its,one,two,three,mr,mrs,ms,dr,hon,president,minister,prime,foreign,vice,chief,secretary,governor,mayor,ceo".split(","));
@@ -1277,9 +1688,31 @@ function claimPhrases(text) {
   for (const m of clean.matchAll(/\b(?:19|20)\d{2}\b/g)) years.add(m[0]);
   return { phrases: [...phrases], years: [...years] };
 }
-function verifyAnswer(text, live, q) {
+// Extracted from verifyAnswer (2026-09-29) so the SAME number-vs-evidence mechanism can be reused outside the
+// live-grounded chat path — see plainVerified's client-injected-evidence check below, which needed this exact
+// logic, not a second hand-written copy. A figure the evidence never states (a net worth, a rent, a price) is
+// the model's memory, which stops before today. Three or more digits (not a year) must appear in the evidence —
+// OR be a close rounding of one (within 0.5% or one cent, whichever is larger): a model naturally saying "$336.3"
+// for an injected "$336.29" is correct, not a fabrication. The tolerance is deliberately tight — a genuinely
+// wrong figure like "$999.99" for "$336.29" is nowhere close and is still caught.
+function numbersNotIn(text, hay) {
+  const hayNum = String(hay || "").replace(/(\d),(?=\d{3})/g, "$1");
+  const hayNumbers = (hayNum.match(/\d+(?:\.\d+)?/g) || []).map(Number).filter((n) => isFinite(n));
+  const closeRounding = (nStr) => { const n = Number(nStr); return isFinite(n) && hayNumbers.some((h) => Math.abs(n - h) <= Math.max(0.01, h * 0.005)); };
+  return [...new Set((String(text).replace(/(\d),(?=\d{3})/g, "$1").replace(/\[\d+\]/g, " ").match(/\d+(?:\.\d+)?/g) || [])
+    .filter((n) => n.replace(".", "").length >= 3 && !(/^(?:19|20)\d{2}$/.test(n)) && !hayNum.includes(n) && !closeRounding(n)))];
+}
+function verifyAnswer(text, live, q, historyText) {
   if (!live || !live.ctx) return { ok: true, unsupported: [] };
-  const hay = fold(live.ctx + " " + q + " " + nowBlock("UTC") + " " + (live.extra || ""));
+  // FX ANOMALY ROOT CAUSE (2026-09-24): this hay used to cover only the CURRENT turn (live.ctx + q), never the
+  // conversation so far. In a real multi-turn chat the model naturally carries context forward — e.g. turn 1
+  // establishes "Accra", turn 2 asks an FX question and the model's (numerically correct, fully verified) answer
+  // says "In Accra, 100 USD is worth...". "Accra" is real conversational continuity, not a fabricated claim, but it
+  // is absent from live.ctx/q, so it was flagged as unsupported, the correct answer was rejected on all 3 attempts,
+  // and the reply silently fell back to the raw fromSources() evidence dump. Reproduced deterministically (see
+  // fx_anomaly_t.mjs) before this fix, and confirmed fixed after it. historyText (the prior turns' own content) is
+  // folded in so genuine continuity is never mistaken for a new, unverified fact.
+  const hay = fold(live.ctx + " " + q + " " + nowBlock("UTC") + " " + (live.extra || "") + " " + (historyText || ""));
   const { phrases, years } = claimPhrases(text);
   const bad = [];
   for (const ph of phrases) {
@@ -1293,12 +1726,19 @@ function verifyAnswer(text, live, q) {
   // injected "$336.29" is correct, not a fabrication, and treating it as unsupported would wrongly discard a right
   // answer. The tolerance is deliberately tight — a genuinely wrong figure like "$999.99" for "$336.29" is nowhere
   // close and is still caught.
-  const hayNum = hay.replace(/(\d),(?=\d{3})/g, "$1");
-  const hayNumbers = (hayNum.match(/\d+(?:\.\d+)?/g) || []).map(Number).filter((n) => isFinite(n));
-  const closeRounding = (nStr) => { const n = Number(nStr); return isFinite(n) && hayNumbers.some((h) => Math.abs(n - h) <= Math.max(0.01, h * 0.005)); };
-  const badNums = [...new Set((String(text).replace(/(\d),(?=\d{3})/g, "$1").replace(/\[\d+\]/g, " ").match(/\d+(?:\.\d+)?/g) || [])
-    .filter((n) => n.replace(".", "").length >= 3 && !(/^(?:19|20)\d{2}$/.test(n)) && !hayNum.includes(n) && !closeRounding(n)))];
+  const badNums = numbersNotIn(text, hay);
   for (const n of badNums) bad.push(n);
+  // EXACT-REFERENCE PROTECTION (2026-09-26): a chapter:verse-shaped reference ("26:80") was invisible to the check
+  // above — each half is only 1-2 digits, individually under the 3-digit floor that number-checking requires, so a
+  // model could state an entirely WRONG reference (blend "26:80" into "96:19") and neither half would ever be
+  // flagged. This is the precise mechanism behind the reported Qur'an misattribution: the number-matching machinery
+  // already existed, it just never looked at a colon-pair as one unit. Checked here as an exact pair, with the same
+  // zero tolerance a wrong number gets — a reference is not "close enough" the way a rounded price is. Proven
+  // against the reported failure shape (Qur'an surah:ayah); inferred, not proven, to help Bible/legal/API-version
+  // references, which share the same X:Y shape but were not separately tested.
+  const hayRefs = hay.replace(/(\d)\s*:\s*(\d)/g, "$1:$2");
+  const badRefs = [...new Set([...String(text).matchAll(/\b(\d{1,3})\s*:\s*(\d{1,3})\b/g)].map((m) => m[1] + ":" + m[2]).filter((ref) => !hayRefs.includes(ref)))];
+  for (const r of badRefs) bad.push(r);
   // a short factual answer may not introduce two unsupported names; a long summary of many items is judged by proportion
   const recentYear = new Date().getUTCFullYear() - 1; // "in office since 2022" is history the model may know; a claim about this or last year must be in the sources
   const badNames = bad.filter((x) => !/^(?:19|20)\d{2}$/.test(x) && !/^\d+(?:\.\d+)?$/.test(x)), yearBad = years.some((y) => Number(y) >= recentYear && !hay.includes(y));
@@ -1310,7 +1750,7 @@ function verifyAnswer(text, live, q) {
   // the whole claim or is close to it, so zero tolerance applies. The existing tolerance remains for a longer
   // answer (a multi-paragraph brief), where one incidental name variance should not force an unnecessary rewrite.
   const nameOk = phrases.length <= 3 ? badNames.length === 0 : (badNames.length < 2 || badNames.length / Math.max(1, phrases.length) < 0.25);
-  return { ok: !stale && !yearBad && !badNums.length && nameOk, unsupported: bad };
+  return { ok: !stale && !yearBad && !badNums.length && !badRefs.length && nameOk, unsupported: bad };
 }
 // ── TEMPORAL EVIDENCE RESOLVER ─────────────────────────────────────────────────────────────────────────────────────
 // One mechanism for every question whose answer depends on WHEN: it works out which moment the question means (the newest one, this
@@ -1363,7 +1803,16 @@ function fromSources(live, news) {
   }
   const rows = (live.sources || []).slice(0, news ? 6 : 4).map((r) => "• **" + String(r.title || "").replace(/\s+/g, " ").slice(0, 110) + "**" + (r.date ? " (" + String(r.date).slice(0, 16) + ")" : "") + (r.snippet ? " — " + String(r.snippet).replace(/\s+/g, " ").replace(/https?:\/\/\S+/g, "").slice(0, 200) : "") + (host(r.url) ? " *(" + host(r.url) + ")*" : ""));
   if (news) return "Here is what my live sources are reporting right now:\n\n" + rows.join("\n") + "\n\nTell me which story you want more on and I will look closer.";
-  return "I couldn't confirm a precise answer to that from my live sources, and I don't want to guess. This is what they say:\n\n" + rows.join("\n") + "\n\nIf you tell me which part matters most, I can look again.";
+  // REWORDED (2026-09-29, at the owner's explicit request): the old wording ("I couldn't confirm a precise answer
+  // ... I don't want to guess") was accurate about WHY this path exists (three drafts in a row failed
+  // verification against the sources — see liveAnswer) but read as evasive, as if nothing real had been found.
+  // What follows IS real: genuine, dated, sourced snippets — a model just could not compress them into one
+  // synthesized sentence without adding something those sources do not actually say. The fix is framing, not the
+  // underlying guarantee: present the real evidence directly and confidently, the way "here's what I found"
+  // reads, rather than opening with an apology for the one thing this system will never do — state an unverified
+  // synthesis as settled fact. Removing this fallback outright, so a failed-verification draft would be shown
+  // instead, was considered and rejected: that is precisely the class of bug fixed everywhere else this session.
+  return "Here's what I found from real, current sources:\n\n" + rows.join("\n") + "\n\nTell me which part matters most and I will look closer.";
 }
 // The answer for a question that was grounded on live sources: draft, verify, correct once, and if it still cannot be
 // supported show the sources themselves.
@@ -1398,8 +1847,8 @@ function officeEvidenceIssue(q, text, live) {
   const ok = (live.sources || []).some((r) => { const body = fold((r.title || "") + " " + (r.snippet || "")); return !PAST.test(body) && names.some((n) => fold(n).split(/\s+/).every((w) => body.includes(w))) && (recentYear(body) || recentDate(r.date)); });
   return ok ? "" : "the person named as current is not backed by any recent source (" + names.slice(0, 2).join(", ") + ")";
 }
-async function checkLive(text, g, q, env) {
-  const v = verifyAnswer(text, g.live, q);
+async function checkLive(text, g, q, env, historyText) {
+  const v = verifyAnswer(text, g.live, q, historyText);
   if (!v.ok) return v;
   const oe = officeEvidenceIssue(q, text, g.live); if (oe) return { ok: false, unsupported: [oe] };
   const fic = (g.live.sources || []).slice(0, 9).filter((r) => FICTION_HOST.test(String(r.url || ""))).length;
@@ -1408,15 +1857,20 @@ async function checkLive(text, g, q, env) {
   return why ? { ok: false, unsupported: ["a claim the sources do not state (" + why + ")"] } : v;
 }
 async function liveAnswer(messages, env, g, q, opts) {
+  // Prior turns in the SAME conversation (both what the person said and what Noria already said) are legitimate
+  // context, not a new claim to verify — see the note on verifyAnswer's hay. The system prompt is excluded: it is
+  // Noria's own instructions, not conversation content, and folding it in would let its boilerplate wording mask a
+  // genuinely unsupported claim.
+  const historyText = messages.filter((m) => m.role !== "system").map((m) => String(m.content || "")).join(" ");
   let text = await brainComplete(messages, env, opts);
-  let v = await checkLive(text, g, q, env);
+  let v = await checkLive(text, g, q, env, historyText);
   if (v.ok) return { text, verified: true };
   const strict = addSystem(messages, "\n\nCORRECTION — your draft mentioned things that do not appear in the LIVE WEB CONTEXT above: " + v.unsupported.slice(0, 6).join(", ") +
     ". Rewrite the answer using ONLY names, dates and figures that appear in that context. If the context does not state the answer, say plainly that you could not confirm it. Never mention this correction.");
-  try { text = await brainComplete(strict, env, opts); v = await checkLive(text, g, q, env); if (v.ok) return { text, verified: true }; } catch (_) {}
+  try { text = await brainComplete(strict, env, opts); v = await checkLive(text, g, q, env, historyText); if (v.ok) return { text, verified: true }; } catch (_) {}
   // third attempt: a short, plain answer (no headings, no lists) — the shape least likely to bring in anything the sources do not say
   const plain = addSystem(messages, "\n\nANSWER SHAPE — reply in at most three plain sentences with no headings, no lists and no extra background. State only what the LIVE WEB CONTEXT above says, using the names exactly as written there. Never mention this instruction.");
-  try { const t3 = await brainComplete(plain, env, Object.assign({}, opts, { maxTokens: 400 })); const v3 = await checkLive(t3, g, q, env); if (v3.ok) return { text: t3, verified: true }; } catch (_) {}
+  try { const t3 = await brainComplete(plain, env, Object.assign({}, opts, { maxTokens: 400 })); const v3 = await checkLive(t3, g, q, env, historyText); if (v3.ok) return { text: t3, verified: true }; } catch (_) {}
   const judgedFiction = /fiction|invented|imaginary|marvel|comic|movie|film|character|story/i.test((v.unsupported || []).join(" "));
   // If the question names something (a company, a person, a title) that appears in none of the sources, the honest answer is that nothing was found.
   const subj = [...new Set((String(q || "").match(/"[^"]{4,90}"|\b[A-Z][a-zA-Z'-]{3,}(?:[ -][A-Z][a-zA-Z'-]{2,})*/g) || []).map((x) => x.replace(/^"|"$/g, "")))].filter((x) => !/^(?:What|Who|When|Where|Why|How|Tell|Give|Summari[sz]e|Describe|Explain|Please|Which|Africa|Ghana|Nigeria|Kenya)$/i.test(x));
@@ -1763,11 +2217,11 @@ async function groundMessages(messages, body, env) {
   // set of well-known stock tickers, and now real national statistics (population, GDP, life expectancy,
   // literacy) for any World Bank-recognised country — all live feeds, cross-checked where more than one
   // independent source exists.
-  const [wx, fx, cr, st, cf, pf] = await withTimeout(Promise.all([weatherBlock(q, body.tz), realityFxBlock(q), realityCryptoBlock(q), realityStockBlock(q), realityCountryFactBlock(q), realityPlaceFactBlock(q)]), 9000, ["", null, null, null, null, ""]);
+  const [wx, fx, cr, st, cf, pf, qr] = await withTimeout(Promise.all([realityWeatherBlock(q, body.tz), realityFxBlock(q), realityCryptoBlock(q), realityStockBlock(q), realityCountryFactBlock(q), realityPlaceFactBlock(q), realityQuranBlock(q)]), 9000, [null, null, null, null, null, "", null]);
   // A WITHHELD reality verdict (CONFLICTING / STALE / UNAVAILABLE / UNVERIFIED) is
   // delivered verbatim as its own honest statement, bypassing the model — so the
   // model can never state a value the evidence layer refused to confirm.
-  const withheld = (fx && fx.refuse) || (cr && cr.refuse) || (st && st.refuse) || (cf && cf.refuse) || null;
+  const withheld = (wx && wx.refuse) || (fx && fx.refuse) || (cr && cr.refuse) || (st && st.refuse) || (cf && cf.refuse) || (qr && qr.refuse) || null;
   if (withheld) return { messages, grounded: true, refuse: withheld };
   // A domain the reality router covers but nothing else does yet (flight status, traffic, company
   // registration, and stock prices OUTSIDE the small known-ticker list above): say plainly that no
@@ -1775,7 +2229,13 @@ async function groundMessages(messages, body, env) {
   // search stand in for real verification. Skipped entirely when the stock or country-fact block above
   // already answered — the router must never override a real answer with a refusal.
   if (!(st && st.text) && !(cf && cf.text)) { const rr = realityRouteBlock(q); if (rr && rr.refuse) return { messages, grounded: true, refuse: rr.refuse }; }
-  const live = [typeof wx === "string" ? wx : "", fx && fx.text, cr && cr.text, pr && pr.text, st && st.text, cf && cf.text, typeof pf === "string" ? pf : ""];
+  const live = [wx && wx.text, fx && fx.text, cr && cr.text, pr && pr.text, st && st.text, cf && cf.text, typeof pf === "string" ? pf : "", qr && qr.text];
+  // TRUTH-ARCHITECTURE FIX (2026-09-24): evidence provenance used to vanish the moment these blocks' text was
+  // joined into one string — the same exact-data-tool label (`verified: true`) covered a real cross-checked
+  // reading and a timeout-degraded guess alike. Each block that carries a structured `evidence` object (see
+  // verdictResult) has it collected here and threaded into the response (see the `live:{...}` returns below), so
+  // the final answer's provenance is inspectable rather than discarded.
+  const evidence = [wx, fx, cr, st, cf, qr].map((x) => x && x.evidence).filter(Boolean);
   const tools = [timeBlock(q, body.tz), calcBlock(q)].concat(live).filter(Boolean);
   if (tools.length) {
     messages = addSystem(messages, tools.join(""));
@@ -1790,12 +2250,16 @@ async function groundMessages(messages, body, env) {
     // liveAnswer/checkLive/verifyAnswer pipeline already proven for search-grounded answers — verifyAnswer rejects
     // any number of 3+ digits that does not appear in the evidence, forcing a correction, and self-corrects rather
     // than silently letting the wrong figure through (see answer_evidence_drift_t.mjs).
-    if ((st && st.text) || (cf && cf.text) || !/\b(news|headline|happen|happened|stock|score|scores|president|prime minister|who is|who won)\b/i.test(q)) return { messages, grounded: true, live: { ctx: tools.join(""), sources: [] } };
+    if ((st && st.text) || (cf && cf.text) || !/\b(news|headline|happen|happened|stock|score|scores|president|prime minister|who is|who won)\b/i.test(q)) return { messages, grounded: true, live: { ctx: tools.join(""), sources: [], evidence } };
   }
   if (CLOCK_Q.test(q) && !CLOCK_NOT.test(q)) return { messages, grounded: true }; // the clock line above is the whole answer
   const office = officeAsk(q);
   const strength = liveStrength(q);
-  const want = office || body.ground === true || (body.ground !== false && strength !== "no");
+  // GLOBAL EVIDENCE GATE: requiresEvidence(q) cannot be overridden by body.ground === false — that flag exists so a
+  // caller can skip an unnecessary search, not to license an unguarded medical/legal/immigration/financial answer,
+  // or any other externally-verifiable claim, straight from bare model memory. See requiresEvidence() above.
+  const evidenceRequired = requiresEvidence(q);
+  const want = office || body.ground === true || evidenceRequired || (body.ground !== false && strength !== "no");
   if (!want || !q) return { messages, grounded: false };
   const queries = office ? [q.replace(/[?!.]+$/, "") + " " + new Date().getUTCFullYear()] : await withTimeout(planSearchQueries(q, env), 4000, [q]);
   const lists = await Promise.all(queries.map((x) => withTimeout(webSearch(x, env, strength === "must" || office), 9000, [])));
@@ -1824,14 +2288,23 @@ async function groundMessages(messages, body, env) {
     if (!admissibleResults.length) return { messages, grounded: true, refuse: "No official or approved source was found for this question, so I won't state anything here as fact" + (lockWhy ? " (" + lockWhy + ")" : "") + ". You're welcome to share an official source yourself and I will read it." };
     results.length = 0; for (const r of admissibleResults) results.push(r);
   }
-  if (!results.length && strength === "must" && !office) return { messages, grounded: true, refuse: NO_LIVE_ANSWER };
+  // Closes the memory-bypass gap: previously only strength==="must" refused here, so a "maybe"-strength question
+  // (a STATE_Q with zero search results) or an actionable locked-domain question with zero results fell through
+  // to `live: null` below, which routes to plainVerified() — bare model memory, with no lock-check ever run.
+  // evidenceRequired (true for "must", "maybe", and actionable locked-domain phrasing) closes all of those paths.
+  if (!results.length && evidenceRequired && !office) return { messages, grounded: true, refuse: lockDomain ? "No official or approved source was found for this question, so I won't state anything here as fact. You're welcome to share an official source yourself and I will read it." : NO_LIVE_ANSWER };
   const top = results.slice(0, 8);
   const block = groundingBlock(top) || noLiveBlock();
   const out = messages.slice();
   const sysIdx = out.findIndex((m) => m.role === "system");
   if (sysIdx >= 0) out[sysIdx] = { role: "system", content: out[sysIdx].content + block };
   else out.unshift({ role: "system", content: block.trim() });
-  return { messages: out, grounded: true, live: top.length ? { ctx: block, extra: tools.join(""), sources: top.map((r) => ({ title: r.title, url: r.url || "", snippet: r.snippet || "", date: r.date || r.pub || "" })) } : null };
+  // This is the general web-search path — NEVER the same evidence quality as a cross-checked exact-data-tool
+  // reading, even when it answers the same kind of question (e.g. weather, after realityWeatherBlock's own
+  // cross-check failed or raced against the shared timeout above). Tagging it SEARCH_RESULT keeps that visible
+  // in the response instead of collapsing into the same unlabeled `verified: true` as LIVE_TOOL evidence.
+  const searchEvidence = top.length ? evidence.concat([{ kind: "SEARCH", provenance: "SEARCH_RESULT", status: "UNVERIFIED", sources: top.map((r) => r.url || r.title) }]) : evidence;
+  return { messages: out, grounded: true, live: top.length ? { ctx: block, extra: tools.join(""), sources: top.map((r) => ({ title: r.title, url: r.url || "", snippet: r.snippet || "", date: r.date || r.pub || "" })), evidence: searchEvidence } : null };
 }
 // KEY ROTATION + PROVIDER FALLBACK — so free quota effectively never hits zero.
 // Add capacity at $0 by supplying comma-separated keys and/or more providers:
@@ -2039,7 +2512,11 @@ export default {
           let r;
           try { r = await liveAnswer(messages, env, g, q, { deep, maxTokens: deep ? 8000 : 2600, temperature: Math.min(temperature, 0.2) }); }
           catch (_) { r = { text: fromSources(g.live, NEWS_INTENT.test(q)), verified: false }; } // the brain is down: the sources themselves still answer
-          return new Response(JSON.stringify(Object.assign({ answer: stripCiteArtifacts(r.text), sources: g.live.sources, verified: r.verified }, body.debug ? { judge: _judgeDbg, unsupported: r.unsupported || [], context: g.live.ctx.slice(0, 1500) } : {})), { headers: JSON_H });
+          // TRUTH-ARCHITECTURE FIX (2026-09-24): `evidence` is the structured provenance behind `verified` — which
+          // provider(s), what authority level, cross-checked or single-source, as-of time. `verified: true` alone
+          // no longer has to mean two different things (a cross-checked LIVE_TOOL reading vs. a SEARCH_RESULT
+          // fallback); a caller that cares can tell them apart instead of trusting one flat boolean.
+          return new Response(JSON.stringify(Object.assign({ answer: stripCiteArtifacts(r.text), sources: g.live.sources, verified: r.verified, evidence: g.live.evidence || [] }, body.debug ? { judge: _judgeDbg, unsupported: r.unsupported || [], context: g.live.ctx.slice(0, 1500) } : {})), { headers: JSON_H });
         }
         const text = stripCiteArtifacts(noLeak(await plainVerified(messages, env, { deep, maxTokens: deep ? 8000 : 2600, temperature })));
         return new Response(JSON.stringify(body.debug ? { answer: text, usage: _lastUsage, logic: _logicDbg } : { answer: text }), { headers: JSON_H });
@@ -2093,103 +2570,28 @@ data: ${JSON.stringify({ done: true })}
         let r;
         try { r = await liveAnswer(messages, env, gr, String(body.query || ""), { deep: false, maxTokens: body.voice ? 600 : 3000, temperature: 0.2 }); }
         catch (_) { r = { text: fromSources(gr.live), verified: false }; }
-        return new Response(`data: ${JSON.stringify({ token: stripCiteArtifacts(r.text) })}\n\ndata: ${JSON.stringify({ done: true, sources: gr.live.sources, verified: r.verified })}\n\n`, { headers: SSE_H });
+        return new Response(`data: ${JSON.stringify({ token: stripCiteArtifacts(r.text) })}\n\ndata: ${JSON.stringify({ done: true, sources: gr.live.sources, verified: r.verified, evidence: gr.live.evidence || [] })}\n\n`, { headers: SSE_H });
       }
-      const gkeys = rotate(groqKeys(env));
-      if (!gkeys.length) return new Response(`data: ${JSON.stringify({ error: "no brain key" })}\n\n`, { status: 502, headers: SSE_H });
-      // Rotate across Groq keys until one accepts the stream (skips a rate-limited key).
-      let up = null, lastErr = "";
-      // A SPOKEN turn (body.voice) is a short back-and-forth, so the same strong model is asked to think
-      // briefly (reasoning_effort "low") and answer briefly — the first words arrive much sooner. If Groq
-      // rejects that setting the request is simply repeated the normal way, so it can never fail because of it.
-      const cfgs = body.voice ? [{ effort: "low", max: 600 }, { effort: null, max: 600 }] : [{ effort: null, max: 8000 }];
-      outer:
-      for (const key of gkeys) {
-        for (const model of groqModels(env).slice(0, 1)) {
-          for (const cfg of cfgs) {
-            try {
-              const payload = { model, messages, max_tokens: cfg.max, temperature: 0.4, stream: true };
-              if (cfg.effort && /gpt-oss/.test(model)) payload.reasoning_effort = cfg.effort;
-              const r = await fetch(GROQ_URL, {
-                method: "POST",
-                headers: { "Content-Type": "application/json", Authorization: "Bearer " + key },
-                body: JSON.stringify(payload),
-              });
-              if (r.ok) { up = r; break outer; }
-              lastErr = "groq " + model + " " + r.status; try { await r.body.cancel(); } catch (_) {}
-              if (r.status === 429 || r.status === 413 || r.status === 404 || r.status >= 500) break; // this model is limited/unwell — try the next model
-            } catch (e) { lastErr = e.message; break; }
-          }
-        }
+      // ORDINARY CHAT (not live-grounded, not math/logic): this used to stream raw provider output
+      // token-by-token with NO output-side check at all — a live, confirmed bypass of the exact class
+      // fixed for /brain/ask on 2026-09-27. outputMakesUncheckedReference/outputMakesUncheckedCitation/
+      // arithmeticErrors only ever ran inside plainVerified(), which this branch never called: a model
+      // that volunteers an unchecked scripture reference or academic citation in an otherwise ordinary
+      // reply — exactly the shape output_safety_net_t.mjs proves fabricates — reached the user completely
+      // unfiltered here, even though the identical question through /brain/ask was already caught. Fixed
+      // by routing through the SAME plainVerified() the non-streaming endpoint uses, then delivering the
+      // verified text through the stream protocol's existing token/done event shape — the same tradeoff
+      // already accepted above for live-grounded and math/logic answers (one verified, buffered
+      // generation, not raw per-token forwarding). brainComplete()'s own provider cascade (Groq main+fast,
+      // Mistral, Cerebras, Gemini, OpenRouter, Cloudflare AI) is a strict superset of the three-provider
+      // raw-streaming fallback this replaces, so no provider coverage is lost either.
+      if (!brainConfigured(env)) return new Response(`data: ${JSON.stringify({ error: "no brain key" })}\n\n`, { status: 502, headers: SSE_H });
+      try {
+        const text = stripCiteArtifacts(noLeak(await plainVerified(messages, env, { deep: false, maxTokens: body.voice ? 600 : 3000, temperature: 0.4 })));
+        return new Response(`data: ${JSON.stringify({ token: text })}\n\ndata: ${JSON.stringify({ done: true })}\n\n`, { headers: SSE_H });
+      } catch (e) {
+        return new Response(`data: ${JSON.stringify({ error: "Cannot reach Noria's brain: " + e.message })}\n\n`, { status: 502, headers: SSE_H });
       }
-      if (!up) {
-        // Groq is busy: Mistral's strongest model answers next, STREAMED, so the first words still appear within a moment.
-        for (const key of rotate(mistralKeys(env)).slice(0, 2)) {
-          for (const model of mistralModels(env).slice(0, 2)) {
-            try {
-              const r = await fetch("https://api.mistral.ai/v1/chat/completions", {
-                method: "POST", headers: { "Content-Type": "application/json", Authorization: "Bearer " + key },
-                body: JSON.stringify({ model, messages, max_tokens: body.voice ? 600 : 3000, temperature: 0.4, stream: true }),
-                signal: AbortSignal.timeout(12000),
-              });
-              if (r.ok) { up = r; break; }
-              try { await r.body.cancel(); } catch (_) {}
-              if (r.status !== 429 && r.status !== 404 && r.status < 500) break;
-            } catch (_) { break; }
-          }
-          if (up) break;
-        }
-      }
-      if (!up) { // last streamed choice: Groq's small fast model
-        outerFast:
-        for (const key of gkeys) {
-          for (const model of groqModels(env).slice(1)) {
-            try {
-              const r = await fetch(GROQ_URL, { method: "POST", headers: { "Content-Type": "application/json", Authorization: "Bearer " + key }, body: JSON.stringify({ model, messages, max_tokens: body.voice ? 600 : 3000, temperature: 0.4, stream: true }), signal: AbortSignal.timeout(12000) });
-              if (r.ok) { up = r; break outerFast; }
-              try { await r.body.cancel(); } catch (_) {}
-            } catch (_) { break; }
-          }
-        }
-      }
-      if (!up) {
-        // Groq is busy or limited: answer through the other providers right here, so the person gets a clean reply now
-        // (one request) instead of an error followed by a second, slower attempt.
-        try {
-          const text = await brainComplete(messages, env, { deep: false, maxTokens: body.voice ? 600 : 2600, temperature: 0.4 });
-          return new Response(`data: ${JSON.stringify({ token: text })}
-
-data: ${JSON.stringify({ done: true })}
-
-`, { headers: SSE_H });
-        } catch (_) {}
-      }
-      if (!up) return new Response(`data: ${JSON.stringify({ error: "Cannot reach Noria's brain: " + lastErr })}\n\n`, { status: 502, headers: SSE_H });
-      const stream = new ReadableStream({
-        async start(controller) {
-          const reader = up.body.getReader();
-          const dec = new TextDecoder(); const enc = new TextEncoder();
-          let buf = "";
-          const send = (obj) => controller.enqueue(enc.encode("data: " + JSON.stringify(obj) + "\n\n"));
-          try {
-            while (true) {
-              const { done, value } = await reader.read();
-              if (done) break;
-              buf += dec.decode(value, { stream: true });
-              let nl;
-              while ((nl = buf.indexOf("\n")) >= 0) {
-                const line = buf.slice(0, nl).trim(); buf = buf.slice(nl + 1);
-                if (!line.startsWith("data:")) continue;
-                const data = line.slice(5).trim();
-                if (data === "[DONE]") { send({ done: true }); controller.close(); return; }
-                try { const j = JSON.parse(data); const delta = j.choices && j.choices[0] && j.choices[0].delta && j.choices[0].delta.content; if (delta) send({ token: delta }); } catch (_) {}
-              }
-            }
-            send({ done: true }); controller.close();
-          } catch (e) { send({ error: e.message }); controller.close(); }
-        },
-      });
-      return new Response(stream, { headers: SSE_H });
     }
 
     // ── Feedback (no engine to record it now) — accept gracefully ──
