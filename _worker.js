@@ -1684,8 +1684,19 @@ function requiresEvidence(q, taskAssistanceOverride) {
   // understanding answer instead of this function re-deriving the regex-only one; any other/future caller that
   // does not pass it gets the original regex-based isTaskAssistance(s), unchanged.
   const taskAssist = taskAssistanceOverride !== undefined ? taskAssistanceOverride : isTaskAssistance(s);
-  if (detectLockDomain(s) && taskAssist) return false;
-  if (detectLockDomain(s)) return true; // any medical/immigration/legal/financial question: official source or refuse, never memory
+  // ARCHITECTURE STEP (2026-10-01), per the owner's explicit direction to stop duplicating domain-detection logic
+  // across the codebase: lock-domain detection now flows through the shared router (routeRequest, agent/
+  // reality-router.js — general-purpose, 14 domains, already used elsewhere in this file for flight/traffic/stock/
+  // company routing) instead of calling detectLockDomain(s) directly. route.lock_domain IS
+  // `detectLockDomain(s) || (a RULES-matched domain that carries the same lock tag)` inside routeRequest itself —
+  // this can only ADD lock-domain coverage, never remove it, so every case this line used to catch it still
+  // catches, proven by the full regression suite (task_assistance_lock_t.mjs, lock_domain_explanatory_t.mjs,
+  // evidence_gate_t.mjs, source_lock_chat_t.mjs and friends) passing unchanged after this swap. routeRequest is
+  // pure (no network, no model call — its own header comment) so calling it here costs nothing.
+  let route; try { route = routeRequest(s); } catch (_) { route = null; }
+  const lockDomain = route ? route.lock_domain : detectLockDomain(s);
+  if (lockDomain && taskAssist) return false;
+  if (lockDomain) return true; // any medical/immigration/legal/financial question: official source or refuse, never memory
   if (quotesSource(s)) return true; // attributing a quoted/paraphrased passage to its exact source: a citation-verification task, never memory
   // FOUND LIVE 2026-09-27, same night as the output-side citation net below: "cite the research paper that proved
   // meditation reduces blood pressure" matched none of the checks above — "meditation"/"blood pressure" are in no
@@ -2091,11 +2102,34 @@ async function pageReadBlock(q) {
 // existing coverage of any kind are handled here: flight status, traffic, stock/market prices and
 // company registration. Everything else is left entirely to the existing, already-tested handlers.
 const ROUTER_NEW_DOMAINS = new Set(["flight_status", "traffic", "stock_price", "company_registration"]);
+// Hoisted to module scope (2026-10-01, previously declared locally inside the /brain/reality/route diagnostic
+// handler below): fx/crypto/weather/time have their own dedicated, already-verified handlers in chat, and
+// immigration/medical/legal go through chat's own source-lock filtering (disambiguation-aware — AMBIGUOUS_ALIAS,
+// the full ~230-country table — unlike this router's own small, hardcoded country list and lack of any
+// Visa-Inc.-vs-visa-document distinction). An early attempt to also let THIS function's ask_clarification/
+// cannot_verify branches fire for those domains, reasoning it would generalise clarification-asking beyond the 4
+// ROUTER_NEW_DOMAINS, regressed immediately: "Visa Inc. stock" and "how much does a work permit application cost"
+// were wrongly asked "which country or authority" (caught by entity_collision_stock_t.mjs and
+// task_assistance_lock_t.mjs before shipping). Reverted: realityRouteBlock stays scoped to ROUTER_NEW_DOMAINS only,
+// as it already was, and these two sets remain used solely by the diagnostic endpoint — kept at module scope
+// because there is no reason two different exclusion lists describing the same fact should exist in this file.
+const CHAT_HANDLED_ELSEWHERE = new Set(["fx", "crypto", "weather", "time"]);
+const CHAT_HANDLED_VIA_SOURCE_LOCK = new Set(["appointment_availability", "government_announcement", "medical_guidance"]);
+// ARCHITECTURE STEP (2026-10-01): found while consolidating requiresEvidence()'s lock-domain check to read from
+// routeRequest() instead of calling detectLockDomain(s) directly (see the comment there) — this function's own
+// ask_clarification/cannot_verify branches had NO creative/self/hypothetical exclusion of their own, unlike every
+// other decision point in this file. This function runs unconditionally, ahead of where liveStrength/
+// requiresEvidence get a chance to apply CREATIVE_TASK, so "write a poem about my flight being delayed" would have
+// been wrongly asked for a flight number and a date, and "write a poem about the traffic on the N1 highway" would
+// have been wrongly hard-refused as unverifiable — the same latent bug in two different decision branches, fixed
+// once here for both. Proof this consolidation surfaces real gaps, not just moves code (router_consolidation_t.mjs).
 function realityRouteBlock(q) {
   let route; try { route = routeRequest(q); } catch (_) { return null; }
   if (!route.domains.some((d) => ROUTER_NEW_DOMAINS.has(d.domain))) return null; // nothing here is one of the newly-covered domains
   if (route.domains.some((d) => !ROUTER_NEW_DOMAINS.has(d.domain) && d.tool)) return null; // a mixed question also touching an already-handled domain: defer entirely to the proven handlers rather than risk conflicting instructions
-  if (route.decision === "ask_clarification") return { refuse: "I would need to know " + route.clarify.join(" and ") + " before I can check that." };
+  const s = String(q || "");
+  if (asksAboutNoriaItself(s) || (CREATIVE_TASK.test(s) && !MOVING_VALUE.test(s) && !officeAsk(s)) || HYPOTHETICAL_REASONING.test(s)) return null;
+  if (route.decision === "ask_clarification" && route.clarify.length) return { refuse: "I would need to know " + route.clarify.join(" and ") + " before I can check that." };
   if (route.decision === "cannot_verify") return { refuse: route.statement };
   return null; // any other outcome (extremely unlikely for a state:"none" domain in isolation): let the existing pipeline decide, never assume
 }
@@ -2913,8 +2947,8 @@ data: ${JSON.stringify({ done: true })}
       // answer correctly when an official source is found (this router alone would refuse them outright, since their
       // DOMAINS state is "none" — using it for those would be a regression, not a connection); flight status, traffic,
       // stock prices and company registration are the domains this router actually decides for chat, as of 2026-09-24.
-      const CHAT_HANDLED_ELSEWHERE = new Set(["fx", "crypto", "weather", "time"]);
-      const CHAT_HANDLED_VIA_SOURCE_LOCK = new Set(["appointment_availability", "government_announcement", "medical_guidance"]);
+      // (CHAT_HANDLED_ELSEWHERE / CHAT_HANDLED_VIA_SOURCE_LOCK are now module-scope constants — see the comment
+      // above realityRouteBlock, near ROUTER_NEW_DOMAINS — instead of being re-declared here each request.)
       const chatRouterDomains = [...ROUTER_NEW_DOMAINS];
       const connection = route.domains.some((d) => CHAT_HANDLED_ELSEWHERE.has(d.domain)) ? "handled_by_a_dedicated_chat_pipeline_not_this_router"
         : route.domains.some((d) => CHAT_HANDLED_VIA_SOURCE_LOCK.has(d.domain)) ? "handled_by_chat_source_lock_filtering_not_this_router"
