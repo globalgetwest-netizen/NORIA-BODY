@@ -400,6 +400,46 @@ async function planSearchQueries(q, env) {
   }
   return [s];
 }
+// ARCHITECTURE STEP (2026-09-30), explicitly requested by the owner after the isTaskAssistance() fix above: that
+// fix, and every entity-collision fix before it this session, is a keyword/regex pattern — narrower coverage than
+// real understanding, and by construction always has a next unmatched phrasing. The owner's explicit direction:
+// Noria should listen to what a request actually means, not just match its wording, and this must generalize
+// across the system rather than staying a pile of isolated keyword protections. This is the first concrete step
+// toward that: a small, cheap model call classifies what KIND of request this is (task-assistance help vs. a
+// request to state one specific checkable fact) instead of a regex guessing from surface wording. Scoped
+// deliberately to where it currently matters (locked-domain questions in groundMessages, replacing/refining
+// isTaskAssistance()'s regex-only answer) rather than every message in the system: an extra model call on every
+// single request would meaningfully raise load against Noria's already-strained free-tier quotas (see
+// noria-brain-providers memory — Cerebras is out of billing, Gemini/OpenRouter exhausted at times) for no benefit
+// on the vast majority of requests that were never ambiguous to begin with. On ANY failure (timeout, malformed
+// output, all keys exhausted) this returns null and the caller falls back to the exact regex behavior already
+// proven in task_assistance_lock_t.mjs — this can only ever REFINE the decision, never remove the existing floor.
+let _intentDbg = ""; // read only by the body.debug flag on /brain/ask, same pattern as _judgeDbg/_logicDbg above
+async function classifyIntent(q, env) {
+  const s = String(q || "").trim();
+  if (!s) return null;
+  for (const key of rotate(groqKeys(env))) {
+    try {
+      const t = await openaiCompatible("https://api.groq.com/openai/v1/chat/completions", key, [env.GROQ_FAST_MODEL || "openai/gpt-oss-20b"], [
+        { role: "system", content: "Classify the user's message about a medical, immigration, legal or financial topic. Reply with ONLY a JSON object, nothing else, in this exact shape: {\"shape\":\"task_assistance\",\"needs_live_source\":false} or {\"shape\":\"fact_claim\",\"needs_live_source\":true} or {\"shape\":\"other\",\"needs_live_source\":true}. \"task_assistance\" means the user wants help DOING, ORGANISING, WRITING or UNDERSTANDING a task or their options (filling a form, preparing paperwork, planning, drafting, weighing choices) WITHOUT asking you to state one specific current number or status as certain. \"fact_claim\" means the user wants you to state one specific, checkable, time-sensitive fact as true right now (an exact fee, rate, deadline, or a yes/no legal status). needs_live_source must be true for \"fact_claim\" and for anything else genuinely uncertain; only \"task_assistance\" may have needs_live_source:false, and only when the help itself never requires asserting a specific current figure." },
+        { role: "user", content: s.slice(0, 500) },
+      // maxTokens found live 2026-09-30 to matter a lot: this Groq model (openai/gpt-oss-20b) spends tokens on an
+      // internal reasoning pass BEFORE its visible answer (confirmed via a live response's own
+      // usage.completion_tokens_details.reasoning_tokens: 70) — a small budget here returned completely EMPTY
+      // content every single time in production, silently discarding this whole classifier and falling back to
+      // the regex on every call, unnoticed until a debug flag exposed the raw "empty" provider error.
+      ], { maxTokens: 500, temperature: 0, timeoutMs: 6000 });
+      const m = String(t || "").match(/\{[\s\S]*?\}/);
+      if (!m) { _intentDbg = "NO_JSON: " + String(t || "").slice(0, 150); continue; }
+      const obj = JSON.parse(m[0]);
+      if (!obj || (obj.shape !== "task_assistance" && obj.shape !== "fact_claim" && obj.shape !== "other")) { _intentDbg = "BAD_SHAPE: " + m[0].slice(0, 150); continue; }
+      _intentDbg = "OK: " + m[0].slice(0, 150);
+      return { shape: obj.shape, needsLiveSource: obj.shape !== "task_assistance" || obj.needs_live_source !== false };
+    } catch (e) { _intentDbg = "ERR: " + String((e && e.message) || e).slice(0, 150); /* try the next key, then the caller falls back to the regex */ }
+  }
+  if (!_intentDbg) _intentDbg = "NO_KEYS_OR_EMPTY";
+  return null;
+}
 // Heuristic: does this query need up-to-the-minute or verifiable external facts?
 function serverNeedsWeb(q) {
   const s = String(q || "");
@@ -1616,7 +1656,7 @@ const NO_LIVE_ANSWER = "I couldn't find reliable, current information about that
 // make a drug-name-and-dosing answer safer than an "actionable" one; the content itself is exactly as checkable
 // and exactly as harmful if wrong. LOCK_ACTIONABLE is retained below only as documentation of what used to gate
 // this (it is no longer referenced) — detectLockDomain(s) alone is now sufficient.
-function requiresEvidence(q) {
+function requiresEvidence(q, taskAssistanceOverride) {
   const s = String(q || "");
   if (!s.trim()) return false;
   if (asksAboutNoriaItself(s)) return false; // see asksAboutNoriaItself above liveStrength — checked first, ahead of lock domains too
@@ -1640,7 +1680,11 @@ function requiresEvidence(q) {
   // still demand a real source for the latter. DIRECT_FACT_ASK excludes those from this exemption so it cannot
   // become a backdoor: "help me fill out my visa application" is exempted, but "help me find out the current visa
   // fee" still is not, because DIRECT_FACT_ASK's "current fee" matches.
-  if (detectLockDomain(s) && isTaskAssistance(s)) return false;
+  // ARCHITECTURE STEP (2026-09-30): taskAssistanceOverride lets groundMessages() pass in classifyIntent()'s real-
+  // understanding answer instead of this function re-deriving the regex-only one; any other/future caller that
+  // does not pass it gets the original regex-based isTaskAssistance(s), unchanged.
+  const taskAssist = taskAssistanceOverride !== undefined ? taskAssistanceOverride : isTaskAssistance(s);
+  if (detectLockDomain(s) && taskAssist) return false;
   if (detectLockDomain(s)) return true; // any medical/immigration/legal/financial question: official source or refuse, never memory
   if (quotesSource(s)) return true; // attributing a quoted/paraphrased passage to its exact source: a citation-verification task, never memory
   // FOUND LIVE 2026-09-27, same night as the output-side citation net below: "cite the research paper that proved
@@ -2241,7 +2285,24 @@ async function groundMessages(messages, body, env) {
   // from volunteering unverifiable SPECIFIC figures inside that help, which is exactly the fabrication risk this
   // exemption must not reintroduce. Added unconditionally, this early, so it rides along on every downstream path
   // this query can take (bare plainVerified, or a grounded/no-live-results path) rather than only one branch.
-  if (detectLockDomain(q) && isTaskAssistance(q)) messages = addSystem(messages, "\n\nThis is a task-assistance request in a locked domain (medical, immigration, legal or financial). Give real, useful, general structural help (what to gather, typical steps, how to organise it) — but do not state specific numbers as fact from memory: no exact fees, dosages, interest rates, deadlines or processing times. For any such figure, say plainly that the current number must be checked on the relevant official source (the government, court, medical or financial institution's own site) instead of stating one. Never guarantee approval or a specific outcome.");
+  // ARCHITECTURE STEP (2026-09-30): computed ONCE here (not re-derived from the regex at each of the three spots
+  // that used to call isTaskAssistance(q) directly) so the same real-understanding answer — from classifyIntent(),
+  // with the regex as its only-on-failure fallback, see the long comment on classifyIntent() above — is used
+  // consistently for the hedge instruction below, requiresEvidence()'s lock bypass, and groundMessages()'s own
+  // lockDomain-with-results filter further down. The classifier call only runs when detectLockDomain(q) is true:
+  // this decision does not matter for the vast majority of ordinary messages, so there is no reason to spend a
+  // model call and added latency on them.
+  const lockDomain0 = detectLockDomain(q);
+  let taskAssistance = isTaskAssistance(q);
+  if (lockDomain0) {
+    // 6500ms, not the original 2500ms: found live alongside the maxTokens fix above that a real call (reasoning +
+    // JSON) legitimately takes longer than 2500ms on this model, so the original timeout was ALSO silently
+    // discarding a real, in-flight, eventually-successful classification on every call, same failure mode as the
+    // token-budget bug, just at the caller's edge instead of the model's.
+    const intent = await withTimeout(classifyIntent(q, env), 6500, null);
+    if (intent) taskAssistance = intent.shape === "task_assistance" && !intent.needsLiveSource;
+  }
+  if (lockDomain0 && taskAssistance) messages = addSystem(messages, "\n\nThis is a task-assistance request in a locked domain (medical, immigration, legal or financial). Give real, useful, general structural help (what to gather, typical steps, how to organise it) — but do not state specific numbers as fact from memory: no exact fees, dosages, interest rates, deadlines or processing times. For any such figure, say plainly that the current number must be checked on the relevant official source (the government, court, medical or financial institution's own site) instead of stating one. Never guarantee approval or a specific outcome.");
   const rb = refBlock(q);
   if (rb) return { messages: addSystem(messages, rb), grounded: true }; // a fixed list is read off the library, not the web
   const fb = futureBlock(q);
@@ -2296,7 +2357,7 @@ async function groundMessages(messages, body, env) {
   // GLOBAL EVIDENCE GATE: requiresEvidence(q) cannot be overridden by body.ground === false — that flag exists so a
   // caller can skip an unnecessary search, not to license an unguarded medical/legal/immigration/financial answer,
   // or any other externally-verifiable claim, straight from bare model memory. See requiresEvidence() above.
-  const evidenceRequired = requiresEvidence(q);
+  const evidenceRequired = requiresEvidence(q, taskAssistance);
   const want = office || body.ground === true || evidenceRequired || (body.ground !== false && strength !== "no");
   if (!want || !q) return { messages, grounded: false };
   const queries = office ? [q.replace(/[?!.]+$/, "") + " " + new Date().getUTCFullYear()] : await withTimeout(planSearchQueries(q, env), 4000, [q]);
@@ -2315,11 +2376,11 @@ async function groundMessages(messages, body, env) {
   // Source lock: immigration, law, medicine and finance may only be answered from official/approved sources — the same
   // rule the agentic web.search tool already enforces (TOOL_HANDLERS above). Plain chat had no such check until now,
   // so a locked-domain question could be grounded in whatever an ordinary web search returned, official or not.
-  // isTaskAssistance(q) exemption (2026-09-30): this check runs on `lockDomain` alone, independent of evidenceRequired
-  // above, so a task-assistance question ("help me fill out my visa application") that happens to trigger a search
-  // via some other classifier (e.g. an entity probe on "Canada") would otherwise still be hard-refused here even
-  // after the evidenceRequired-side fix — see the matching comment on requiresEvidence().
-  const lockDomain = isTaskAssistance(q) ? null : detectLockDomain(q);
+  // taskAssistance exemption (2026-09-30, now classifyIntent-refined — see the top of this function): this check
+  // runs on `lockDomain` alone, independent of evidenceRequired above, so a task-assistance question ("help me
+  // fill out my visa application") that happens to trigger a search via some other classifier (e.g. an entity
+  // probe on "Canada") would otherwise still be hard-refused here even after the evidenceRequired-side fix.
+  const lockDomain = taskAssistance ? null : lockDomain0;
   if (lockDomain && results.length) {
     let lockWhy = null;
     const admissibleResults = results.filter((r) => {
@@ -2543,7 +2604,7 @@ export default {
       const refAns = refDirect(body.query) || mathDirect(body.query) || clockDirect(body.query, body.tz);
       if (refAns) return new Response(JSON.stringify({ answer: refAns }), { headers: JSON_H });
       const g = await groundMessages(messages, body, env);
-      if (g.refuse) return new Response(JSON.stringify({ answer: g.refuse }), { headers: JSON_H });
+      if (g.refuse) return new Response(JSON.stringify(Object.assign({ answer: g.refuse }, body.debug ? { intent: _intentDbg } : {})), { headers: JSON_H });
       messages = g.messages;
       const q = String(body.query || "");
       const deep = /\b(analy[sz]e|analysis|calculat|comput|code|coding|program|debug|architect|design|solve|prove|deriv|optimi[sz]|algorithm|reason|strateg|framework|evaluat|equation|integral|theorem|compare|business plan|roadmap|proposal|cv|résumé|resume|cover letter|itinerary|report)\b/i.test(q) || q.length > 420;
@@ -2558,10 +2619,10 @@ export default {
           // provider(s), what authority level, cross-checked or single-source, as-of time. `verified: true` alone
           // no longer has to mean two different things (a cross-checked LIVE_TOOL reading vs. a SEARCH_RESULT
           // fallback); a caller that cares can tell them apart instead of trusting one flat boolean.
-          return new Response(JSON.stringify(Object.assign({ answer: stripCiteArtifacts(r.text), sources: g.live.sources, verified: r.verified, evidence: g.live.evidence || [] }, body.debug ? { judge: _judgeDbg, unsupported: r.unsupported || [], context: g.live.ctx.slice(0, 1500) } : {})), { headers: JSON_H });
+          return new Response(JSON.stringify(Object.assign({ answer: stripCiteArtifacts(r.text), sources: g.live.sources, verified: r.verified, evidence: g.live.evidence || [] }, body.debug ? { judge: _judgeDbg, unsupported: r.unsupported || [], context: g.live.ctx.slice(0, 1500), intent: _intentDbg } : {})), { headers: JSON_H });
         }
         const text = stripCiteArtifacts(noLeak(await plainVerified(messages, env, { deep, maxTokens: deep ? 8000 : 2600, temperature })));
-        return new Response(JSON.stringify(body.debug ? { answer: text, usage: _lastUsage, logic: _logicDbg } : { answer: text }), { headers: JSON_H });
+        return new Response(JSON.stringify(body.debug ? { answer: text, usage: _lastUsage, logic: _logicDbg, intent: _intentDbg } : { answer: text }), { headers: JSON_H });
       } catch (e) {
         return new Response(JSON.stringify({ error: e.message }), { status: 503, headers: JSON_H });
       }
