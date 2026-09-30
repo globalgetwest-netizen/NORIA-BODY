@@ -112,10 +112,27 @@ async function wikiFetchHits(query) {
   const sj = await s.json();
   return ((sj.query && sj.query.search) || []).slice(0, 3);
 }
-async function wikiSearch(q) {
+export async function wikiSearch(q) {
   try {
     const cleaned = toSearchQuery(q);
-    let hits = await wikiFetchHits(cleaned);
+    // FOUND LIVE 2026-10-01, reported by the owner as "why can't Noria answer like ChatGPT/Gemini": an office-ask
+    // question ("who is the current president of the United States") gets the current year appended to its query
+    // by groundMessages (" " + new Date().getUTCFullYear()) so Tavily/general web search favours recent coverage —
+    // but that same year suffix actively POISONS Wikipedia's own search relevance for exactly this question shape.
+    // An evergreen article like "President of the United States" does not repeat "2026" densely; a year-TITLED
+    // event page ("2026 in the United States", "2026 Iran war") does, so MediaWiki's plain-text relevance ranking
+    // wrongly ranks the event page above the actual answer. Reproduced live: the cleaned query WITH the trailing
+    // year returns "2026 in the United States"/"List of current United States senators"/"2026 Iran war" — none of
+    // which name the president; the SAME query with the year stripped returns "President of the United States" as
+    // the #1 result. Tried first without a trailing bare current/previous year (most office-ask queries hit this),
+    // falling back to the year-suffixed form only if that finds nothing — the same "try the better form first,
+    // fall back if empty" pattern this function already uses one line below for raw vs. cleaned phrasing, so a
+    // genuinely year-specific query (the year is part of the topic, not appended for freshness) still works via
+    // the fallback.
+    const yr = new Date().getUTCFullYear();
+    const deYeared = cleaned.replace(new RegExp("\\s+(?:" + yr + "|" + (yr - 1) + ")$"), "");
+    let hits = await wikiFetchHits(deYeared);
+    if (!hits.length && deYeared !== cleaned) hits = await wikiFetchHits(cleaned);
     // Fall back to the raw phrasing only if the keyword form found nothing.
     if (!hits.length && cleaned !== q) hits = await wikiFetchHits(q);
     if (!hits.length) return [];
