@@ -1409,6 +1409,21 @@ const NO_OFFICE_ANSWER = "I couldn't check who currently holds that office just 
 //                 does, she shows what the sources actually say instead. A guess never reaches the reader.
 const STABLE_TASK = /\b(write|compose|draft|poem|story|essay|lyrics|code|function|refactor|debug|translate|rephrase|reword|summari[sz]e|brainstorm|pretend|role-?play|plan|build|create|make|prepare|produce|generate|design|explain (how|why)|teach me|help me)\b/i;
 const CREATIVE_TASK = /\b(write|compose|draft|poem|story|essay|lyrics|code|function|refactor|debug|translate|rephrase|reword|summari[sz]e|brainstorm|pretend|role-?play)\b/i;
+// See the 2026-09-30 comment on requiresEvidence()'s use of these: a request for general help/structure/writing on
+// a locked-domain TASK (filling out a visa form, preparing a will, planning a budget) is not the same shape as a
+// request to state one specific, checkable, time-sensitive FACT (a fee, a legal status, a deadline) — the lock
+// must still demand a real source for the latter. Declared at module scope because BOTH requiresEvidence() and
+// groundMessages()'s independent lock-domain-with-results check (which fires on `lockDomain` alone, regardless of
+// evidenceRequired) need the same exemption, or a task-assistance question that happens to trigger a search via
+// some other classifier could still be hard-refused at that second checkpoint.
+// The gap between "help" and the task verb is deliberately generic (up to 4 words, non-greedy) rather than a fixed
+// "me|us" list: found live that the reported phrasing itself ("help A USER to fill HIS canada visa application")
+// is third-person/possessive, not first-person — a real pattern for someone asking on another person's behalf,
+// which a narrow "help me/us" list would have missed. "fill" alone (without "out"/"in") is also accepted, since
+// that is how this verb is often used colloquially ("fill his form").
+const TASK_ASSISTANCE = /\bhelp\b(?:\s+\w+){0,4}?\s+(?:to\s+)?(?:fill(?:\s+(?:out|in))?|prepare|write|draft|complete|put together|apply for|plan|organi[sz]e|understand)\b|\bguide\b.{0,20}\bthrough\b|\bwalk\b.{0,20}\bthrough\b|\bwhat should I (?:include|write|put|say)\b|\bhow do I (?:fill (?:out|in)|complete|apply)\b/i;
+const DIRECT_FACT_ASK = /\bhow much\b|\bcurrent (?:fee|cost|price|deadline|requirement|processing time|rate)\b|\bis it legal\b|\bis .{1,30} legal\b|\bwhat(?:'s| is) the (?:fee|cost|price|deadline)\b|\bwhen is the deadline\b/i;
+function isTaskAssistance(s) { return TASK_ASSISTANCE.test(s) && !DIRECT_FACT_ASK.test(s); }
 const LIVE_CUE = /\b(current|currently|latest|newest|recent|recently|today|tonight|yesterday|last (?:night|week|weekend|month)|this (?:week|month|year|season|morning|afternoon|evening|weekend)|earlier today|right now|as of|still|upcoming|nowadays|these days|at the moment|at present|present-day|so far this)\b|\bnow\b(?!\s+that)/i;
 const EVENT_VERB = /\b(announce[ds]?|announcement|unveil(?:ed|s)?|launch(?:ed|es)?|acquir(?:e|ed|es)|acquisition|merge[ds]?|resign(?:ed|s)?|appointed|sacked|arrested|indicted)\b/i;
 const MOVING_VALUE = /\b(price|cost of|rate|worth|net worth|population|score|scores|standings?|results?|forecast|schedule|fixtures?|ranking|rankings|salary|version|release date|stock|share price|exchange rate|inflation|unemployment|market cap|record|odds|winner|winners|champions?|how many (people|residents|inhabitants|users|customers|members))\b/i;
@@ -1612,6 +1627,20 @@ function requiresEvidence(q) {
   // guard liveStrength already uses (never overriding a genuine current-value or office-holder question) applies
   // here too.
   if (CREATIVE_TASK.test(s) && !MOVING_VALUE.test(s) && !officeAsk(s)) return false;
+  // FOUND LIVE 2026-09-30, reported directly by the owner: "help me fill out my Canada visa application" hit
+  // detectLockDomain (via "visa") and was forced into evidence-gating like a direct factual claim. With Tavily's
+  // search quota exhausted (a real, separate infrastructure issue), the search found zero admissible official
+  // sources, and groundMessages's hard refuse fired: the ENTIRE response became "No official or approved source
+  // was found for this question, so I won't state anything here as fact." — no help at all, even though the
+  // guided-document system prompt for exactly this task ("Immigration & Relocation Strategy") already instructs
+  // the model to name the official embassy/immigration site as the source of truth for exact current fees and
+  // forms and never guarantee approval. That hedge never got a chance to run because the model was never invoked.
+  // TASK_ASSISTANCE asking for general help/structure/writing on a task is a different shape from a request to
+  // state one specific, checkable, time-sensitive fact (a fee, a legality, a deadline) — the lock is correct to
+  // still demand a real source for the latter. DIRECT_FACT_ASK excludes those from this exemption so it cannot
+  // become a backdoor: "help me fill out my visa application" is exempted, but "help me find out the current visa
+  // fee" still is not, because DIRECT_FACT_ASK's "current fee" matches.
+  if (detectLockDomain(s) && isTaskAssistance(s)) return false;
   if (detectLockDomain(s)) return true; // any medical/immigration/legal/financial question: official source or refuse, never memory
   if (quotesSource(s)) return true; // attributing a quoted/paraphrased passage to its exact source: a citation-verification task, never memory
   // FOUND LIVE 2026-09-27, same night as the output-side citation net below: "cite the research paper that proved
@@ -2204,6 +2233,15 @@ async function groundMessages(messages, body, env) {
   const q = String(body.query || "");
   messages = addSystem(messages, nowBlock(body.tz));
   if (LOGIC_Q.test(q)) messages = addSystem(messages, LOGIC_NOTE);
+  // LIVE FINDING (2026-09-30), same night as the isTaskAssistance(q) fix below: once the hard refuse was lifted for
+  // a locked-domain task-assistance request, "help me fill out my Canada visa application" reached bare model
+  // memory (no search ran) and stated specific numbers as fact anyway — "Visitor Visa processing fee | 100 CAD",
+  // "Biometrics fee | 85 CAD" — with no live source behind them. The isTaskAssistance() exemption correctly opens
+  // the door to general structural help without an official source, but does nothing on its own to stop the model
+  // from volunteering unverifiable SPECIFIC figures inside that help, which is exactly the fabrication risk this
+  // exemption must not reintroduce. Added unconditionally, this early, so it rides along on every downstream path
+  // this query can take (bare plainVerified, or a grounded/no-live-results path) rather than only one branch.
+  if (detectLockDomain(q) && isTaskAssistance(q)) messages = addSystem(messages, "\n\nThis is a task-assistance request in a locked domain (medical, immigration, legal or financial). Give real, useful, general structural help (what to gather, typical steps, how to organise it) — but do not state specific numbers as fact from memory: no exact fees, dosages, interest rates, deadlines or processing times. For any such figure, say plainly that the current number must be checked on the relevant official source (the government, court, medical or financial institution's own site) instead of stating one. Never guarantee approval or a specific outcome.");
   const rb = refBlock(q);
   if (rb) return { messages: addSystem(messages, rb), grounded: true }; // a fixed list is read off the library, not the web
   const fb = futureBlock(q);
@@ -2277,7 +2315,11 @@ async function groundMessages(messages, body, env) {
   // Source lock: immigration, law, medicine and finance may only be answered from official/approved sources — the same
   // rule the agentic web.search tool already enforces (TOOL_HANDLERS above). Plain chat had no such check until now,
   // so a locked-domain question could be grounded in whatever an ordinary web search returned, official or not.
-  const lockDomain = detectLockDomain(q);
+  // isTaskAssistance(q) exemption (2026-09-30): this check runs on `lockDomain` alone, independent of evidenceRequired
+  // above, so a task-assistance question ("help me fill out my visa application") that happens to trigger a search
+  // via some other classifier (e.g. an entity probe on "Canada") would otherwise still be hard-refused here even
+  // after the evidenceRequired-side fix — see the matching comment on requiresEvidence().
+  const lockDomain = isTaskAssistance(q) ? null : detectLockDomain(q);
   if (lockDomain && results.length) {
     let lockWhy = null;
     const admissibleResults = results.filter((r) => {
