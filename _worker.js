@@ -1156,12 +1156,89 @@ const noLeak = (t) => (PROMPT_LEAK.test(String(t || "")) ? LEAK_REPLY : t);
 // Some models cite with their own bracket tokens (e.g. 【3†L1-L3】) instead of the plain [n] the context asks for.
 // Those are internal retrieval artifacts, not readable sources, and they must never reach the reader as raw glyphs.
 // Only bracket blocks that contain a dagger (the citation separator) are removed, so ordinary text is untouched.
-const stripCiteArtifacts = (s) => String(s || "")
-  .replace(/[【〖〚][^】〗〛]*†[^】〗〛]*[】〗〛]/g, "") // 【N†L1-L3】 and kin
-  .replace(/\[[^\]\n]*†[^\]\n]*\]/g, "")                                                                // ascii [N†L1-L3] variant
-  .replace(/[ \t]+([.,;:!?])/g, "$1")                                                                        // tidy any space left before punctuation
-  .replace(/[ \t]{2,}/g, " ")
-  .trim();
+//
+// FOUND LIVE 2026-10-01, while building output_quality_t.mjs for an unrelated fix: the whitespace-tidy step below
+// (`[ \t]{2,}` -> a single space) applies to the WHOLE text with no awareness of fenced code blocks, so any code
+// example using multi-space indentation — every Python example, most YAML — had its indentation silently
+// collapsed to one space on every single non-debug chat response this function has ever run on. A real "broken
+// markup" bug (exactly the class Stage 2 exists to catch), just one this function had been quietly causing rather
+// than fixing. Fixed by isolating fenced code blocks first (the same "hide code, clean the rest, restore
+// untouched" technique public/workspace.js's renderMd() already uses client-side for a related reason) so the
+// citation/whitespace cleanup only ever touches prose.
+const FENCE = /```[\s\S]*?```/g;
+const stripCiteArtifacts = (s) => {
+  const blocks = [];
+  const hidden = String(s || "").replace(FENCE, (m) => { blocks.push(m); return "" + (blocks.length - 1) + ""; });
+  const cleaned = hidden
+    .replace(/[【〖〚][^】〗〛]*†[^】〗〛]*[】〗〛]/g, "") // 【N†L1-L3】 and kin
+    .replace(/\[[^\]\n]*†[^\]\n]*\]/g, "")                                                                // ascii [N†L1-L3] variant
+    .replace(/[ \t]+([.,;:!?])/g, "$1")                                                                        // tidy any space left before punctuation
+    .replace(/[ \t]{2,}/g, " ")
+    .trim();
+  return cleaned.replace(/(\d+)/g, (_, i) => blocks[+i]);
+};
+// ── OUTPUT QUALITY (STAGE 2, 2026-10-01) — "the final response should be treated as a controlled output, not
+// raw model text" — check for accidental JSON, broken markup, duplicated tag artifacts, and internal debugging
+// information before anyone sees it. Deliberately scoped to what a deterministic, zero-extra-model-call pass
+// can catch SAFELY (no false positives on real prose): it does NOT attempt "unsupported factual claims",
+// "contradictions" or "fabricated citations" — that is a separate, already-built, larger subsystem (verifyAnswer,
+// judgeGrounded, numbersNotIn, the output safety net) and duplicating it here would be exactly the "another
+// parallel implementation" the owner explicitly warned against. It also does NOT attempt "unfinished sentence"
+// detection: no reliable, low-false-positive heuristic exists for that without either a second model call (which
+// reintroduces the exact token-budget/timeout fragility just found and fixed in classifyIntent) or a rule that
+// would misfire on ordinary lists, headers and code blocks. Documented as an honest limitation, not solved badly.
+//
+// Generalizes noLeak's existing, narrower pattern (Noria's own persona-prompt section headers leaking verbatim)
+// to EVERY internal system marker this file injects into messages, per the "same root cause, one fix" rule: a
+// model echoing LOGIC_NOTE, the task-assistance hedge, or a grounding-block marker verbatim is the identical
+// failure class noLeak was built to catch, not a new one needing its own separate detector.
+const INTERNAL_MARKERS = [
+  /\[LIVE WEB (?:CONTEXT|RESULTS)\b[^\]]*\]?/i,
+  /\[ATTACHED BY THE USER[^\]]*\]?/i,
+  /LIVE DATA UNAVAILABLE — [^\n]*/,
+  /\[REASONING CARE —[^\]]*\]?/,
+  /This is a task-assistance request in a locked domain[^.]*\./i,
+  /\[removed: instruction-like text found inside a tool result\]/i,
+];
+function stripInternalMarkers(s) {
+  let out = String(s || "");
+  for (const re of INTERNAL_MARKERS) out = out.replace(re, "");
+  return out;
+}
+// A code fence opened with ``` must close with a matching ```; an odd count means a truncated or malformed
+// generation left a dangling fence, which would otherwise swallow every following line into "code" when
+// rendered. Auto-closing (not deleting anything) is the safer failure: the reader still gets the full text.
+function closeUnbalancedFences(s) {
+  const t = String(s || "");
+  return (t.match(/```/g) || []).length % 2 === 1 ? t + "\n```" : t;
+}
+// Occasionally a model emits a raw JSON object matching one of THIS FILE'S OWN internal response shapes
+// (classifyIntent's {"shape":...}, the planner/replanner's {"give_up"/"ask_user"...}) instead of the prose it
+// was asked for — a known failure mode when a model has recently been steered toward JSON elsewhere and the
+// pattern leaks into an unrelated turn. Only unwrapped when the WHOLE answer parses as JSON and carries one of
+// those specific known keys; anything else (a user genuinely asking about JSON, a JSON example in a code
+// explanation) is left completely untouched.
+const INTERNAL_JSON_KEYS = ["answer", "text", "shape", "give_up", "ask_user"];
+function unwrapAccidentalJson(s) {
+  const t = String(s || "").trim();
+  if (!/^[{[][\s\S]*[}\]]$/.test(t)) return t;
+  let obj; try { obj = JSON.parse(t); } catch (_) { return t; }
+  if (!obj || typeof obj !== "object" || Array.isArray(obj)) return t;
+  for (const k of INTERNAL_JSON_KEYS) if (typeof obj[k] === "string" && obj[k].trim()) return obj[k];
+  return t; // valid JSON, but not a shape this file recognises as its own leak: never guess, leave it alone
+}
+// A generation artifact where a tag's name is immediately duplicated right after it opens (e.g. "svgsvg",
+// reported live 2026-10-01 — unreproduced, but this is the general shape such a glitch would take), in either an
+// opening (<svgsvg) or closing (</svgsvg>) tag. Scoped strictly to right after an angle bracket (and an optional
+// closing-tag slash), not a blanket repeated-word regex, which would false-positive on ordinary reduplicated
+// English words that share the exact same shape in plain prose (couscous, bonbon, cancan, tutu, murmur) — those
+// must never be touched, and are proven untouched in output_quality_t.mjs.
+function fixDuplicatedTagNames(s) {
+  return String(s || "").replace(/<(\/?)([a-zA-Z][a-zA-Z0-9]*)\2\b/g, "<$1$2");
+}
+function sanitizeOutputArtifacts(s) {
+  return fixDuplicatedTagNames(closeUnbalancedFences(stripInternalMarkers(unwrapAccidentalJson(s)))).trim();
+}
 let _logicDbg = "";
 async function logicChecked(messages, env, text, opts) {
   try {
@@ -2661,9 +2738,9 @@ export default {
           // provider(s), what authority level, cross-checked or single-source, as-of time. `verified: true` alone
           // no longer has to mean two different things (a cross-checked LIVE_TOOL reading vs. a SEARCH_RESULT
           // fallback); a caller that cares can tell them apart instead of trusting one flat boolean.
-          return new Response(JSON.stringify(Object.assign({ answer: stripCiteArtifacts(r.text), sources: g.live.sources, verified: r.verified, evidence: g.live.evidence || [] }, body.debug ? { judge: _judgeDbg, unsupported: r.unsupported || [], context: g.live.ctx.slice(0, 1500), intent: _intentDbg } : {})), { headers: JSON_H });
+          return new Response(JSON.stringify(Object.assign({ answer: stripCiteArtifacts(sanitizeOutputArtifacts(r.text)), sources: g.live.sources, verified: r.verified, evidence: g.live.evidence || [] }, body.debug ? { judge: _judgeDbg, unsupported: r.unsupported || [], context: g.live.ctx.slice(0, 1500), intent: _intentDbg } : {})), { headers: JSON_H });
         }
-        const text = stripCiteArtifacts(noLeak(await plainVerified(messages, env, { deep, maxTokens: deep ? 8000 : 2600, temperature })));
+        const text = stripCiteArtifacts(sanitizeOutputArtifacts(noLeak(await plainVerified(messages, env, { deep, maxTokens: deep ? 8000 : 2600, temperature }))));
         return new Response(JSON.stringify(body.debug ? { answer: text, usage: _lastUsage, logic: _logicDbg, intent: _intentDbg } : { answer: text }), { headers: JSON_H });
       } catch (e) {
         return new Response(JSON.stringify({ error: e.message }), { status: 503, headers: JSON_H });
@@ -2715,7 +2792,7 @@ data: ${JSON.stringify({ done: true })}
         let r;
         try { r = await liveAnswer(messages, env, gr, String(body.query || ""), { deep: false, maxTokens: body.voice ? 600 : 3000, temperature: 0.2 }); }
         catch (_) { r = { text: fromSources(gr.live), verified: false }; }
-        return new Response(`data: ${JSON.stringify({ token: stripCiteArtifacts(r.text) })}\n\ndata: ${JSON.stringify({ done: true, sources: gr.live.sources, verified: r.verified, evidence: gr.live.evidence || [] })}\n\n`, { headers: SSE_H });
+        return new Response(`data: ${JSON.stringify({ token: stripCiteArtifacts(sanitizeOutputArtifacts(r.text)) })}\n\ndata: ${JSON.stringify({ done: true, sources: gr.live.sources, verified: r.verified, evidence: gr.live.evidence || [] })}\n\n`, { headers: SSE_H });
       }
       // ORDINARY CHAT (not live-grounded, not math/logic): this used to stream raw provider output
       // token-by-token with NO output-side check at all — a live, confirmed bypass of the exact class
@@ -2732,7 +2809,7 @@ data: ${JSON.stringify({ done: true })}
       // raw-streaming fallback this replaces, so no provider coverage is lost either.
       if (!brainConfigured(env)) return new Response(`data: ${JSON.stringify({ error: "no brain key" })}\n\n`, { status: 502, headers: SSE_H });
       try {
-        const text = stripCiteArtifacts(noLeak(await plainVerified(messages, env, { deep: false, maxTokens: body.voice ? 600 : 3000, temperature: 0.4 })));
+        const text = stripCiteArtifacts(sanitizeOutputArtifacts(noLeak(await plainVerified(messages, env, { deep: false, maxTokens: body.voice ? 600 : 3000, temperature: 0.4 }))));
         return new Response(`data: ${JSON.stringify({ token: text })}\n\ndata: ${JSON.stringify({ done: true })}\n\n`, { headers: SSE_H });
       } catch (e) {
         return new Response(`data: ${JSON.stringify({ error: "Cannot reach Noria's brain: " + e.message })}\n\n`, { status: 502, headers: SSE_H });
