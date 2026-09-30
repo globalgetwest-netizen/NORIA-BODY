@@ -1,5 +1,5 @@
 import { runProviders, searchHealth, probeUnknown } from "./agent/search.js";
-import { TOOLS, REGISTRY_VERSION, listTools, plannerCatalog, registrySummary, canUse } from "./agent/tools.js";
+import { TOOLS, REGISTRY_VERSION, listTools, plannerCatalog, registrySummary, canUse, testState } from "./agent/tools.js";
 import { readOnlyLiveGate } from "./agent/gate.js";
 import { safeCalc } from "./agent/calc.js";
 import { FAMILIES, validateFamilies, summarizeFamilies, explainFamilies } from "./agent/families.js";
@@ -2052,49 +2052,49 @@ async function liveAnswer(messages, env, g, q, opts) {
 // What Noria can do, stated from the running system and never from marketing. Each item is LIVE (works in production),
 // CONNECTED (works through an outside service, so it is only claimed while that service answers), or PLANNED (designed, not
 // operational: it is listed so nobody mistakes it for a feature). `need` names the runtime check an item depends on.
-const CAPS = [
+export const CAPS = [
   ["Conversation & reasoning", [
     ["Natural conversation, following instructions, multi-step reasoning", "live", "", "Answers in her own voice; the last several turns of the conversation are kept in view."],
     ["Task planning through guided documents (business plans, CVs, itineraries, roadmaps, series plans)", "live", "", "Fixed guided flows that ask the right questions, then write the document."],
     ["Long-context reasoning", "live", "", "Long files are read by picking the most relevant passages, not by holding everything at once."],
   ]],
   ["Live information", [
-    ["Live web search, current news and office-holders", "connected", "search", "Open web, Wikipedia and many news feeds, read at the moment of the question."],
-    ["Weather, currency exchange rates, cryptocurrency prices, exact clock, date and holiday calculations", "connected", "feeds", "Read from live data feeds, or calculated exactly. Stock-market prices have no dedicated feed; they come only from web search and may lag."],
+    ["Live web search, current news and office-holders", "connected", "search", "Open web, Wikipedia and many news feeds, read at the moment of the question.", ["web.search"]],
+    ["Weather, currency exchange rates, cryptocurrency prices, exact clock, date and holiday calculations", "connected", "feeds", "Read from live data feeds, or calculated exactly. Stock-market prices have no dedicated feed; they come only from web search and may lag.", ["weather.get", "fx.rate", "crypto.price", "clock.now"]],
     ["Source-grounded answers, checked before they are shown", "live", "", "Names, dates and figures must appear in the sources, and a second model checks the main claim; when it cannot confirm, she says so."],
   ]],
   ["Knowledge & documents", [
-    ["Reading PDF, Word, text, CSV, TSV and Excel files; whole-document search of long files on Noria Pro", "live", "", "The free plan reads the opening pages; Noria Pro searches the whole document. Retrieval is by keywords on the device, not by a vector database."],
-    ["Production retrieval over documents and knowledge bases (semantic chunking, keyword plus vector hybrid search, reranking, citation checks)", "not_built", "", "The pipeline is written and tested offline (public/rag.js), but it is not connected to the app or to an embedding service yet, so it is not available to you."],
+    ["Reading PDF, Word, text, CSV, TSV and Excel files; whole-document search of long files on Noria Pro", "live", "", "The free plan reads the opening pages; Noria Pro searches the whole document. Retrieval is by keywords on the device, not by a vector database.", ["doc.read"]],
+    ["Production retrieval over documents and knowledge bases (semantic chunking, keyword plus vector hybrid search, reranking, citation checks)", "not_built", "", "The pipeline is written and tested offline (public/rag.js), but it is not connected to the app or to an embedding service yet, so it is not available to you.", ["knowledge.search"]],
   ]],
   ["Memory", [
-    ["Remembering facts you share, on this device; deleting it whenever you like", "live", "", "Stored in the browser, private to the device."],
+    ["Remembering facts you share, on this device; deleting it whenever you like", "live", "", "Stored in the browser, private to the device.", ["memory.device"]],
     ["Saved conversations under a sign-in, synced across devices", "connected", "accounts", "Optional account; conversations are stored under it."],
-    ["Long-term project memory, task memory and cross-tool memory", "not_built", "", "Not built for you to use: a tested project-memory store exists in the task-graph system (agent/graph.js, the project.note tool — registered state \"live\"), but it is reachable only through the owner's own project tools, not through ordinary chat."],
+    ["Long-term project memory, task memory and cross-tool memory", "not_built", "", "Not built for you to use: a tested project-memory store exists in the task-graph system (agent/graph.js, the project.note tool — registered state \"live\"), but it is reachable only through the owner's own project tools, not through ordinary chat.", ["project.note"]],
   ]],
   ["Research", [
-    ["Deep research: several angles searched, a cited brief written, unsupported sentences removed, real sources listed", "connected", "search", "Noria Pro, a few briefs a day."],
+    ["Deep research: several angles searched, a cited brief written, unsupported sentences removed, real sources listed", "connected", "search", "Noria Pro, a few briefs a day.", ["research.deep"]],
     ["Automatic detection of contradictions between sources", "not_built", "", "Not built as a separate step; the fact-check only catches claims the sources do not support."],
   ]],
   ["Images & senses", [
     ["Identifying real people from their faces; realistic pictures of real people", "unsupported", "", "Declined on purpose: it can mislead and harm."],
-    ["Understanding photos and images", "connected", "ai", "Noria Pro. Reading the text in a photo also works on the device."],
-    ["Charts and tables drawn from your data or from a request", "live", "", "Drawn in the browser."],
-    ["Creating pictures", "connected", "ai", "Depends on a daily allowance and is not always available; no realistic pictures of real people."],
+    ["Understanding photos and images", "connected", "ai", "Noria Pro. Reading the text in a photo also works on the device.", ["vision.describe"]],
+    ["Charts and tables drawn from your data or from a request", "live", "", "Drawn in the browser.", ["chart.draw"]],
+    ["Creating pictures", "connected", "ai", "Depends on a daily allowance and is not always available; no realistic pictures of real people.", ["image.generate"]],
   ]],
   ["Data", [
-    ["Exact spreadsheet analysis: row counts, totals, averages, medians, distinct values, top-N, filters, group-by, correlation", "live", "", "Computed from every row on the device, not estimated by a model."],
-    ["Statistical modelling, forecasting, database access", "not_built", "", "Not built."],
+    ["Exact spreadsheet analysis: row counts, totals, averages, medians, distinct values, top-N, filters, group-by, correlation", "live", "", "Computed from every row on the device, not estimated by a model.", ["data.query"]],
+    ["Statistical modelling, forecasting, database access", "not_built", "", "Not built.", ["sql.query"]],
   ]],
   ["Programming", [
     ["Writing, explaining and debugging code; designing systems; automation scripts", "live", "", "Written and reviewed by the model; Noria does not run the code."],
-    ["Running code for you in a sealed sandbox", "not_built", "", "Not built for you to use: a tested, sealed JavaScript sandbox exists (agent/code-exec.js — no network, files or credentials; a 34-of-34 escape-test pass rate) and it passes the read-only-live authorisation gate, but it is not connected to chat, so there is no way to ask Noria to run code for you today."],
-    ["Repository analysis, calling outside APIs for you", "not_built", "", "Not built."],
+    ["Running code for you in a sealed sandbox", "not_built", "", "Not built for you to use: a tested, sealed JavaScript sandbox exists (agent/code-exec.js — no network, files or credentials; a 34-of-34 escape-test pass rate) and it passes the read-only-live authorisation gate, but it is not connected to chat, so there is no way to ask Noria to run code for you today.", ["code.run"]],
+    ["Repository analysis, calling outside APIs for you", "not_built", "", "Not built.", ["api.call"]],
   ]],
   ["Creation", [
     ["Professional writing, translation, marketing and educational material, presentations, proposals", "live", "", ""],
-    ["Exporting to Word, Excel, PowerPoint, PDF and Markdown", "live", "", "From the document view."],
-    ["Voice: speaking answers aloud and listening", "connected", "ai", "Hands-free conversation on Noria Pro."],
+    ["Exporting to Word, Excel, PowerPoint, PDF and Markdown", "live", "", "From the document view.", ["doc.export"]],
+    ["Voice: speaking answers aloud and listening", "connected", "ai", "Hands-free conversation on Noria Pro.", ["speech.speak"]],
   ]],
   ["Planning", [
     ["A read-only task planner: turns a goal into an auditable plan (tasks, tools, dependencies, order, checks, and what is missing) without executing anything", "connected", "", "Noria Pro. It shows the plan; it does not carry it out."],
@@ -2108,9 +2108,51 @@ const CAPS = [
     // description_t.mjs) — a different, more accurate statement than "blocked and not authorised", which wrongly
     // implied a permission check fails when none would.
     ["Autonomous multi-step agents that choose tools, run them in parallel, recover from errors and finish a job alone", "not_built", "", "Not built for real use. A permissioned executor exists and has been tested in dry-run and in read-only live mode (search, weather, exchange rates, crypto prices, clock, calculator, reference lists, running code in a sealed sandbox, and the person's own attached files): it can read but never change anything. It is not connected to the app screen at all, so none of this — including the sandbox above — is reachable from chat today. Separately, every tool that actually ACTS (email, calendar, purchases, deletion, publishing) is blocked and not authorised regardless of connection. Noria follows fixed pipelines (decide, retrieve, answer, verify, correct); she does not take actions in other apps, send messages or make purchases."],
-    ["Connections to email, calendars, maps or other accounts", "not_built", "", "Not built."],
+    ["Connections to email, calendars, maps or other accounts", "not_built", "", "Not built.", ["email.send", "calendar.create", "maps.route", "files.save"]],
   ]],
 ];
+// STAGE 3 (2026-10-01) of the owner's broader architecture direction: make Stage 1's bug class ("not built"
+// claimed for a tool the registry actually shows connected and tested, or worse, an affirmatively false
+// "blocked and not authorised") structurally hard to reintroduce, not just fixed-for-now in two entries. CAPS
+// entries above that name a specific tool now carry it as a 5th array element (a `tools:` list) — additive only,
+// `capabilityReport()`'s existing `[name, state, need, note]` destructuring below is untouched, so this cannot
+// change what a caller with the old shape sees. This validator checks the two directions Stage 1 actually found:
+//
+//   1. CAPS claims a state OTHER than not_built/unsupported/requires_auth (i.e. "you can use this") for a tool the
+//      registry itself says is not_built or unsupported — never claim availability for a tool that does not exist
+//      or was declined by design.
+//   2. CAPS says not_built with the exact bare phrase "Not built." while the tool is registered live/connected
+//      AND has an automated or accepted test — the precise shape of Stage 1's bug (a real, tested capability
+//      described with no nuance at all, as if it did not exist yet, or worse). This does not force every
+//      not_built entry to be "wrong" — a bare "Not built." is still correct and expected for a tool the registry
+//      ALSO shows as not_built/unsupported (most entries): the check only fires when the underlying engineering
+//      is actually done and the prose has not caught up, which is exactly the gap Stage 1 closed by hand and this
+//      makes automatic.
+//
+// This is deliberately NOT a claim that CAPS's prose is fully accurate in every other respect — that still needs
+// a person's judgement. It is the narrow, mechanical half of "know what it can actually do" that code can check:
+// consistency between what CAPS asserts and what the registry actually contains, on the exact axis Stage 1 found
+// drifting. See capability_self_description_t.mjs for the proof this actually catches a reintroduction, not just
+// passes trivially on the current, already-fixed array.
+export function validateCapsAgainstRegistry(caps, tools) {
+  const problems = [], byName = new Map(tools.map((t) => [t.name, t]));
+  const AVAILABLE_STATES = new Set(["live", "connected", "degraded", "unknown"]);
+  for (const [area, items] of caps) for (const item of items) {
+    const [name, state, , note, taggedTools] = item;
+    if (!taggedTools || !taggedTools.length) continue;
+    for (const toolName of taggedTools) {
+      const tool = byName.get(toolName);
+      if (!tool) { problems.push(area + "/" + name + ": names unknown tool \"" + toolName + "\""); continue; }
+      if (AVAILABLE_STATES.has(state) && ["not_built", "unsupported"].includes(tool.state)) {
+        problems.push(area + "/" + name + ": claims state \"" + state + "\" but " + toolName + " is registered \"" + tool.state + "\" — cannot claim availability for a tool the registry says does not exist or was declined");
+      }
+      if (state === "not_built" && /^not built\.?$/i.test(String(note || "").trim()) && ["live", "connected"].includes(tool.state) && ["automated", "accepted"].includes(testState(tool))) {
+        problems.push(area + "/" + name + ": says bare \"Not built.\" but " + toolName + " is registered \"" + tool.state + "\" and tested (" + testState(tool) + ") — explain the real reachability gap instead of an unqualified \"not built\", the exact shape of the bug Stage 1 fixed");
+      }
+    }
+  }
+  return problems;
+}
 // The read-only tools that run on the server. Each returns data only; none writes, sends or changes anything.
 const toolFail = (message, status) => Object.assign(new Error(message), { status });
 // A verified answer carries its value, its verdict and its evidence; anything else is a failure with the plain statement (the NO-ANSWER state).
@@ -2293,7 +2335,12 @@ async function capabilityReport(env) {
   const label = { live: "LIVE", connected: "CONNECTED (working now)", degraded: "DEGRADED (works, but weaker right now)", unknown: "STATUS UNKNOWN (no recent health check)", requires_auth: "REQUIRES YOUR AUTHORISATION", not_built: "NOT BUILT YET", unsupported: "NOT SUPPORTED (by policy or design)" };
   const text = groups.map((g) => g.area + ":\n" + g.items.map((i) => "  - [" + label[i.state] + "] " + i.name + (i.note ? " — " + i.note : "")).join("\n")).join("\n");
   const flat = groups.flatMap((g) => g.items), by_state = {}; for (const it of flat) by_state[it.state] = (by_state[it.state] || 0) + 1;
-  return { generated: new Date().toISOString(), counts: { capability_items: flat.length, by_state, note: "capability items are user-facing statements about what Noria can do, grouped by area; they are not the same thing as the executable tools in /brain/tools (a tool can support several items, and some items need no tool)" }, groups, text };
+  // STAGE 3: computed fresh on every call against the LIVE registry (not a cached snapshot), so this field is
+  // never stale itself — if the registry changes (a tool's test suite starts failing, a new tool is registered),
+  // the next call reflects it immediately. An empty array is the healthy state; anything else means this file's
+  // own capability claims have drifted from agent/tools.js the exact way Stage 1 found and fixed by hand.
+  const consistency_problems = validateCapsAgainstRegistry(CAPS, listTools(th));
+  return { generated: new Date().toISOString(), counts: { capability_items: flat.length, by_state, note: "capability items are user-facing statements about what Noria can do, grouped by area; they are not the same thing as the executable tools in /brain/tools (a tool can support several items, and some items need no tool)" }, groups, text, consistency_problems };
 }
 // The diagnostic pages (/brain/providers, /imgcheck, /retrieve, /feeds, /models) spend real free-tier calls each time they are opened
 // (model calls, web searches, image tries). They are for the owner, so they need a valid owner / Pro code (?code=…), checked by the
