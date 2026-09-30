@@ -1993,7 +1993,7 @@ const CAPS = [
   ["Memory", [
     ["Remembering facts you share, on this device; deleting it whenever you like", "live", "", "Stored in the browser, private to the device."],
     ["Saved conversations under a sign-in, synced across devices", "connected", "accounts", "Optional account; conversations are stored under it."],
-    ["Long-term project memory, task memory and cross-tool memory", "not_built", "", "Not built."],
+    ["Long-term project memory, task memory and cross-tool memory", "not_built", "", "Not built for you to use: a tested project-memory store exists in the task-graph system (agent/graph.js, the project.note tool — registered state \"live\"), but it is reachable only through the owner's own project tools, not through ordinary chat."],
   ]],
   ["Research", [
     ["Deep research: several angles searched, a cited brief written, unsupported sentences removed, real sources listed", "connected", "search", "Noria Pro, a few briefs a day."],
@@ -2011,7 +2011,8 @@ const CAPS = [
   ]],
   ["Programming", [
     ["Writing, explaining and debugging code; designing systems; automation scripts", "live", "", "Written and reviewed by the model; Noria does not run the code."],
-    ["Running code, repository analysis, calling outside APIs for you", "not_built", "", "Not built."],
+    ["Running code for you in a sealed sandbox", "not_built", "", "Not built for you to use: a tested, sealed JavaScript sandbox exists (agent/code-exec.js — no network, files or credentials; a 34-of-34 escape-test pass rate) and it passes the read-only-live authorisation gate, but it is not connected to chat, so there is no way to ask Noria to run code for you today."],
+    ["Repository analysis, calling outside APIs for you", "not_built", "", "Not built."],
   ]],
   ["Creation", [
     ["Professional writing, translation, marketing and educational material, presentations, proposals", "live", "", ""],
@@ -2022,7 +2023,14 @@ const CAPS = [
     ["A read-only task planner: turns a goal into an auditable plan (tasks, tools, dependencies, order, checks, and what is missing) without executing anything", "connected", "", "Noria Pro. It shows the plan; it does not carry it out."],
   ]],
   ["Autonomous action", [
-    ["Autonomous multi-step agents that choose tools, run them in parallel, recover from errors and finish a job alone", "not_built", "", "Not built for real use. A permissioned executor exists and has been tested in dry-run and in read-only live mode (search, weather, exchange rates, crypto prices, clock, calculator, reference lists, and the person's own attached files): it can read but never change anything. It is not connected to the app screen yet, and every tool that acts (email, calendar, purchases, deletion, publishing, code execution) is blocked and not authorised. Noria follows fixed pipelines (decide, retrieve, answer, verify, correct); she does not take actions in other apps, send messages or make purchases."],
+    // CORRECTED (2026-10-01), found during an audit of this file's capability claims against agent/tools.js and
+    // agent/gate.js: this used to list "code execution" among the tools that "act" and are "blocked and not
+    // authorised". Verified false — code.run is risk:"read" (it changes nothing outside its sealed boundary) and
+    // actually PASSES readOnlyLiveGate (confirmed by calling it directly: {ok:true}). The real reason Noria cannot
+    // run code for you is that no chat-reachable path ever constructs the Executor at all (see capability_self_
+    // description_t.mjs) — a different, more accurate statement than "blocked and not authorised", which wrongly
+    // implied a permission check fails when none would.
+    ["Autonomous multi-step agents that choose tools, run them in parallel, recover from errors and finish a job alone", "not_built", "", "Not built for real use. A permissioned executor exists and has been tested in dry-run and in read-only live mode (search, weather, exchange rates, crypto prices, clock, calculator, reference lists, running code in a sealed sandbox, and the person's own attached files): it can read but never change anything. It is not connected to the app screen at all, so none of this — including the sandbox above — is reachable from chat today. Separately, every tool that actually ACTS (email, calendar, purchases, deletion, publishing) is blocked and not authorised regardless of connection. Noria follows fixed pipelines (decide, retrieve, answer, verify, correct); she does not take actions in other apps, send messages or make purchases."],
     ["Connections to email, calendars, maps or other accounts", "not_built", "", "Not built."],
   ]],
 ];
