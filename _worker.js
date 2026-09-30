@@ -3,7 +3,9 @@ import { TOOLS, REGISTRY_VERSION, listTools, plannerCatalog, registrySummary, ca
 import { readOnlyLiveGate } from "./agent/gate.js";
 import { safeCalc } from "./agent/calc.js";
 import { FAMILIES, validateFamilies, summarizeFamilies, explainFamilies } from "./agent/families.js";
-import { validateInput, sanitizeOutput } from "./agent/executor.js";
+import { validateInput, sanitizeOutput, Executor } from "./agent/executor.js";
+import { AuditLog } from "./agent/audit.js";
+import { ChatToolRuntime } from "./agent/chat-tools.js";
 import { buildPlannerMessages, extractJson, validatePlan } from "./agent/planner.js";
 import { buildReplanMessages, parseProposal } from "./agent/control.js";
 import { describeReality, classifyUrl, detectLockDomain, admissible, ANSWERABLE } from "./agent/reality.js";
@@ -1036,25 +1038,24 @@ function calendarBlock(q) {
   } else return "";
   return head + lines.join("\n");
 }
-function calcEval(expr) { // safe arithmetic (no eval): + - * / ^ ( ) sqrt, unary minus
-  const toks = expr.match(/sqrt|\d+(?:\.\d+)?|\.\d+|[()+\-*\/^]/g); if (!toks || toks.join("").length < expr.replace(/\s+/g, "").length) return null;
-  let p = 0;
-  const peek = () => toks[p], next = () => toks[p++];
-  function prim() {
-    const t = next();
-    if (t === undefined) throw 0;
-    if (t === "(") { const v = add(); if (next() !== ")") throw 0; return v; }
-    if (t === "sqrt") { if (next() !== "(") throw 0; const v = add(); if (next() !== ")") throw 0; return Math.sqrt(v); }
-    if (t === "-") return -pow();
-    if (t === "+") return pow();
-    const n = parseFloat(t); if (isNaN(n)) throw 0; return n;
-  }
-  function pow() { const b = prim(); if (peek() === "^") { next(); return Math.pow(b, pow()); } return b; }
-  function mul() { let v = pow(); while (peek() === "*" || peek() === "/") { const o = next(), r = pow(); v = o === "*" ? v * r : v / r; } return v; }
-  function add() { let v = mul(); while (peek() === "+" || peek() === "-") { const o = next(), r = mul(); v = o === "+" ? v + r : v - r; } return v; }
-  try { const v = add(); return p === toks.length && isFinite(v) ? v : null; } catch (_) { return null; }
+// STAGE 4 (2026-10-01) of the owner's architecture direction: this used to call a second, separate, hand-rolled
+// expression evaluator (calcEval) instead of the registered, tested calc.math tool (agent/calc.js's safeCalc) —
+// exactly the "growing collection of hardcoded decisions bypassing the tool architecture" pattern the owner asked
+// to stop. calcEval is REMOVED, not kept as a fallback: it was strictly less capable (no percent, no thousands
+// separators, no depth cap) and safeCalc's one real gap (sqrt) was closed in agent/calc.js itself, benefiting the
+// shared tool for every future caller, not just this one. executedCalc() below routes the parsed expression
+// through the REAL Executor (registry check, availability, input schema, permission, risk/approval, idempotency,
+// execute, observe, verify, recover) — proven by chat_tool_bridge_t.mjs, which inspects the actual audit log
+// produced, not just the final number.
+export async function executedCalc(expr) {
+  const plan = { audit: { planId: "chat_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8), executed: false }, tasks: [], execution_order: [] };
+  const task = { id: "t1", description: "compute " + expr, tools: ["calc.math"], input: { "calc.math": { expression: expr } }, depends_on: [], status: "ready", approval_required: false, verification: [] };
+  const executor = new Executor({ catalog: listTools({}), runtime: new ChatToolRuntime({ safeCalc }), policy: { mode: "read-only-live" }, audit: new AuditLog() });
+  let r; try { r = await executor.runOne(plan, task, {}); } catch (e) { return { ok: false, error: String((e && e.message) || e), auditRecords: executor.audit.records }; }
+  if (r.status !== "done") return { ok: false, error: r.error || r.status, auditRecords: executor.audit.records };
+  return { ok: true, value: r.output.value, answer: r.output.answer, auditRecords: executor.audit.records };
 }
-function mathBlock(q) {
+async function mathBlock(q) {
   let s = String(q || "").toLowerCase();
   if (!/\d/.test(s) || !/\b(what(?:'s| is)?|calculate|compute|how much is|evaluate|solve|equals?|result of|answer to)\b|=/.test(s)) return "";
   s = s.replace(/(\d),(?=\d{3}\b)/g, "$1")
@@ -1071,12 +1072,11 @@ function mathBlock(q) {
   if (!/[+*\/^()]|sqrt/.test(raw) && !/\s-\s/.test(raw) && !/\b(calculate|compute|evaluate|solve)\b/.test(s)) return "";
   const expr = raw.replace(/\s+/g, "");
   if (expr.length > 80) return "";
-  const v = calcEval(expr);
-  if (v === null) return "";
-  const val = Number(v.toPrecision(12));
-  return "\n\nCOMPUTED EXACTLY BY THE SYSTEM (calculator) — authoritative; do not recompute or round differently.\n- " + expr.replace(/\*/g, " × ").replace(/\//g, " ÷ ").replace(/\^/g, " ^ ") + " = " + val.toLocaleString("en-US", { maximumFractionDigits: 10 }) + "\nState the result plainly.";
+  const r = await executedCalc(expr);
+  if (!r.ok) return "";
+  return "\n\nCOMPUTED EXACTLY BY THE SYSTEM (calculator) — authoritative; do not recompute or round differently.\n- " + expr.replace(/\*/g, " × ").replace(/\//g, " ÷ ").replace(/\^/g, " ^ ") + " = " + r.value.toLocaleString("en-US", { maximumFractionDigits: 10 }) + "\nState the result plainly.";
 }
-const calcBlock = (q) => calendarBlock(q) || mathBlock(q);
+const calcBlock = async (q) => calendarBlock(q) || await mathBlock(q);
 // ── A question that is ONLY about the clock or the calendar is answered by the clock itself, without a model ─────────
 // "What time is it in London", "what day is it", "how many days until Christmas". A model handed the exact figures still
 // slipped now and then (London an hour out, Christmas 12 days out), so these never go through one: instant and exact.
@@ -1132,16 +1132,26 @@ function clockDirect(q, tz) {
 }
 // Every plain "a + b = c" or "a × b = c" written in an answer is recomputed. A model once wrote "135 + 60 = 210" in a shop-bill
 // answer; a wrong sum inside a confident explanation is worse than no explanation, so it is corrected before anyone reads it.
-function arithmeticErrors(text) {
+export function arithmeticErrors(text) {
   const bad = [];
   const clean = String(text || "").replace(/\*\*|__/g, "").replace(/(\d),(?=\d{3}\b)/g, "$1");
   const rx = /(\d+(?:\.\d+)?)\s*([+\-\u00d7x*\u00f7\/])\s*(\d+(?:\.\d+)?)(?:\s*([+\-\u00d7x*\u00f7\/])\s*(\d+(?:\.\d+)?))?\s*=\s*(\d+(?:\.\d+)?)/g;
   const op = (o) => (o === "\u00d7" || o === "x" ? "*" : o === "\u00f7" ? "/" : o);
+  // STAGE 4 (2026-10-01): used to reconstruct an expression string and re-parse it through calcEval (removed, see
+  // mathBlock above). Pointless here — the regex already captured the numbers and operators as separate groups —
+  // so direct, precedence-aware arithmetic on those groups (at most 2 operators, 3 numbers, by construction of the
+  // regex above) needs no parser or async call at all.
+  const prec = (o) => (o === "*" || o === "/") ? 2 : 1;
+  const apply = (a, o, b) => o === "+" ? a + b : o === "-" ? a - b : o === "*" ? a * b : a / b;
   for (const m of clean.matchAll(rx)) {
-    const expr = m[1] + op(m[2]) + m[3] + (m[5] ? op(m[4]) + m[5] : "");
-    let v = null; try { v = calcEval(expr); } catch (_) {}
+    const a = Number(m[1]), o1 = op(m[2]), b = Number(m[3]);
+    // "a op1 b op2 c": op2 binds tighter than op1 exactly when op2 is * or / and op1 is + or -, matching standard
+    // precedence — the same result calcEval's full recursive-descent parser gave for this shape.
+    const v = m[5] !== undefined
+      ? (prec(op(m[4])) > prec(o1) ? apply(a, o1, apply(b, op(m[4]), Number(m[5]))) : apply(apply(a, o1, b), op(m[4]), Number(m[5])))
+      : apply(a, o1, b);
     const claimed = Number(m[6]);
-    if (v !== null && isFinite(v) && Math.abs(v - claimed) > Math.max(0.011, Math.abs(v) * 0.0005)) bad.push(m[0].trim() + " (the correct result is " + Number(v.toPrecision(12)) + ")");
+    if (isFinite(v) && Math.abs(v - claimed) > Math.max(0.011, Math.abs(v) * 0.0005)) bad.push(m[0].trim() + " (the correct result is " + Number(v.toPrecision(12)) + ")");
   }
   return bad;
 }
@@ -1335,12 +1345,12 @@ async function plainVerified(messages, env, opts) {
 // result placed in front of a model, one reply in a few came out wrong (39.78 for 397.8), so a plain sum never goes
 // through a model at all: instant, and correct every time. Anything with other words in it still goes to the model.
 const MATH_WORDS = /^(what|what's|whats|is|calculate|compute|how|much|solve|evaluate|the|result|of|percent|times|plus|minus|divided|by|multiplied|squared|cubed|power|to|square|root|equals?|please|tell|me|answer|[\d.,+\-*\/^()×÷x%=]+)$/i;
-function mathDirect(q) {
+export async function mathDirect(q) {
   const raw = String(q || "").trim();
   if (raw.length > 70 || !/\d/.test(raw)) return null;
   const toks = raw.replace(/[?!]/g, " ").split(/\s+/).filter(Boolean);
   if (!toks.length || !toks.every((t) => MATH_WORDS.test(t))) return null;
-  const blk = mathBlock(raw);
+  const blk = await mathBlock(raw);
   const m = /= ([^\n]+)\n/.exec(blk);
   if (!m) return null;
   const val = Number(String(m[1]).replace(/,/g, ""));
@@ -2277,7 +2287,7 @@ const TOOL_HANDLERS = {
   "clock.now": async (i, env, ctx) => { const a = clockDirect(String(i.question), ctx && ctx.tz); if (!a) throw toolFail("that is not a question the clock can answer exactly", 422); return { answer: a }; },
   // a worded question ("17% of 2,340") goes to the calculator that already handles words; a written expression ("(15 / 100) * 2480") to the safe parser (no eval)
   "calc.math": async (i) => {
-    const text = String(i.expression).slice(0, 160), a = mathDirect(text);
+    const text = String(i.expression).slice(0, 160), a = await mathDirect(text);
     if (a) { const m = /=\s*\**\s*(-?[\d,]+(?:\.\d+)?)/.exec(a); return { answer: a, value: m ? Number(m[1].replace(/,/g, "")) : NaN }; }
     const c = safeCalc(text); if (c && c.error) throw toolFail(c.error, 422); if (!c) throw toolFail("that is not a plain calculation", 422);
     return { answer: c.text, value: c.value };
@@ -2501,7 +2511,7 @@ async function groundMessages(messages, body, env) {
   // verdictResult) has it collected here and threaded into the response (see the `live:{...}` returns below), so
   // the final answer's provenance is inspectable rather than discarded.
   const evidence = [wx, fx, cr, st, cf, qr].map((x) => x && x.evidence).filter(Boolean);
-  const tools = [timeBlock(q, body.tz), calcBlock(q)].concat(live).filter(Boolean);
+  const tools = [timeBlock(q, body.tz), await calcBlock(q)].concat(live).filter(Boolean);
   if (tools.length) {
     messages = addSystem(messages, tools.join(""));
     // Web results would only add stale or conflicting numbers, so skip the search unless the question also needs it.
@@ -2767,7 +2777,7 @@ export default {
       let body; try { body = await request.json(); } catch (_) { body = {}; }
       let messages = buildMessages(body);
       if (!messages.length) return new Response(JSON.stringify({ error: "empty request" }), { status: 400, headers: JSON_H });
-      const refAns = refDirect(body.query) || mathDirect(body.query) || clockDirect(body.query, body.tz);
+      const refAns = refDirect(body.query) || await mathDirect(body.query) || clockDirect(body.query, body.tz);
       if (refAns) return new Response(JSON.stringify({ answer: refAns }), { headers: JSON_H });
       const g = await groundMessages(messages, body, env);
       if (g.refuse) return new Response(JSON.stringify(Object.assign({ answer: g.refuse }, body.debug ? { intent: _intentDbg } : {})), { headers: JSON_H });
@@ -2819,7 +2829,7 @@ export default {
     // ── Brain: streaming (SSE) — translate Groq deltas to the app's {token}/{done} ──
     if (path === "/brain/ask/stream" && request.method === "POST") {
       let body; try { body = await request.json(); } catch (_) { body = {}; }
-      const refAns = refDirect(body.query) || mathDirect(body.query) || clockDirect(body.query, body.tz);
+      const refAns = refDirect(body.query) || await mathDirect(body.query) || clockDirect(body.query, body.tz);
       if (refAns) return new Response(`data: ${JSON.stringify({ token: refAns })}
 
 data: ${JSON.stringify({ done: true })}

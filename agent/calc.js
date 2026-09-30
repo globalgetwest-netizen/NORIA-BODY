@@ -1,6 +1,16 @@
 // NORIA SAFE CALCULATOR — arithmetic without eval.
-// A small recursive-descent parser for numbers, + - * / × ÷ ^ **, parentheses, unary minus and a postfix % (15% = 0.15). Anything else
-// (letters, calls, property access, assignment) is rejected, so no input can run code. Exact decimal display, division by zero refused.
+// A small recursive-descent parser for numbers, + - * / × ÷ ^ **, parentheses, unary minus, sqrt(...) and a postfix
+// % (15% = 0.15). Anything else (letters other than the literal "sqrt", calls, property access, assignment) is
+// rejected, so no input can run code. Exact decimal display, division by zero refused.
+//
+// sqrt ADDED (2026-10-01), Stage 4 of the owner's architecture direction: found while building the chat<->Executor
+// bridge for calc.math that _worker.js's own mathBlock() used a SEPARATE, hand-rolled expression evaluator
+// (calcEval) instead of this shared, registered, already-tested tool — because this one could not parse "square
+// root of X" and that one could. Rather than keep two parallel implementations (exactly the duplication the owner
+// asked to stop building), the capability gap is closed HERE, in the one shared tool, so both chat and any future
+// agentic caller of calc.math get it for free. The only new grammar allowed is the exact literal token "sqrt"
+// (case-insensitive) immediately followed by "(" — no other letters are ever accepted, so this adds no injection
+// surface: "sqrt" alone does nothing without an eval, which this file has never had.
 
 const MAX_LEN = 160, MAX_DEPTH = 24;
 
@@ -9,7 +19,7 @@ export function safeCalc(input) {
   if (!s || s.length > MAX_LEN) return null;
   s = s.replace(/[×✕]/g, "*").replace(/[÷⁄]/g, "/").replace(/[−–—]/g, "-").replace(/\s+/g, "").replace(/\*\*/g, "^");
   s = s.replace(/(\d),(?=\d{3}(?!\d))/g, "$1"); // thousands separators: 2,480 -> 2480
-  if (!/^[0-9+\-*/^().%]+$/.test(s)) return null;
+  if (!/^(?:[0-9+\-*/^().%]|sqrt)+$/i.test(s)) return null;
   let i = 0, depth = 0;
   const peek = () => s[i];
   const fail = () => { throw new Error("bad"); };
@@ -20,7 +30,12 @@ export function safeCalc(input) {
   function primary() {
     if (++depth > MAX_DEPTH) fail();
     let v;
-    if (peek() === "(") { i++; v = expr(); if (peek() !== ")") fail(); i++; }
+    if (s.slice(i, i + 4).toLowerCase() === "sqrt" && s[i + 4] === "(") {
+      i += 5; v = expr(); if (peek() !== ")") fail(); i++;
+      if (v < 0) fail(); // no complex numbers
+      v = Math.sqrt(v);
+    }
+    else if (peek() === "(") { i++; v = expr(); if (peek() !== ")") fail(); i++; }
     else if (peek() === "-") { i++; v = -power(); }
     else if (peek() === "+") { i++; v = power(); }
     else v = number();
