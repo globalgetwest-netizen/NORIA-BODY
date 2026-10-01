@@ -1261,16 +1261,11 @@ const noLeak = (t) => (PROMPT_LEAK.test(String(t || "")) ? LEAK_REPLY : t);
 // untouched" technique public/workspace.js's renderMd() already uses client-side for a related reason) so the
 // citation/whitespace cleanup only ever touches prose.
 const FENCE = /```[\s\S]*?```/g;
-// FOUND 2026-10-01, while diagnosing the citation-leak bug below: the fence placeholder here was a BARE digit
-// string ("0", "1", ...) with no delimiter of its own, and the restore step at the end matched ANY digit run in
-// the whole cleaned text (`/(\d+)/g`) to put a fence block back - not just its own placeholders. With zero
-// fenced code blocks (the common case) `blocks` is empty, so EVERY plain number in EVERY answer - a year, a
-// count, anything - was being replaced by `blocks[+i]`, i.e. `undefined`, turning "World War II ended in 1945"
-// into "...in undefined". Confirmed locally; confirmed the currently-live deploy predates this regression
-// (verified live: "what year did world war 2 end" still correctly answers "1945"), so this was caught before
-// ever reaching production. Fixed by using Private-Use-Area characters as delimiters around the placeholder
-// index, so the restore regex can only ever match its own synthetic placeholder, never ordinary digits that
-// happen to appear in real prose.
+// The fence placeholder uses Private-Use-Area characters (/) around the block index so the restore
+// step at the end can only ever match its own synthetic marker, never an ordinary digit in real prose. These two
+// characters don't render in a terminal or in Read/Grep tool output, which is worth knowing before editing this
+// function by hand: a dump that looks like a bare digit placeholder may just be the real one with its delimiters
+// invisible, not a different, undelimited version — confirmed 2026-10-01 after wrongly suspecting this exact thing.
 const stripCiteArtifacts = (s) => {
   const blocks = [];
   const hidden = String(s || "").replace(FENCE, (m) => { blocks.push(m); return "\uE010" + (blocks.length - 1) + "\uE011"; });
