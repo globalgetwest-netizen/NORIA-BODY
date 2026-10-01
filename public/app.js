@@ -3,7 +3,7 @@
  * Ties the face (System 5), audio (System 3), vision stand-in (System 2) and the
  * embodiment layer to the live Noria Engine via the Body-OS proxy.
  */
-import { ImageFace } from './image-face.js'
+import { VideoFace } from './video-face.js'
 import { Embodiment } from './embodiment.js'
 import { Brain, detectLang, toSpeech } from './brain.js'
 import { noriaSystem } from './persona.js'
@@ -14,7 +14,7 @@ import { neuralVoice } from './voice.js'
 const $ = (id) => document.getElementById(id)
 const canvas = $('face')
 let variant = (() => { try { return localStorage.getItem('noria.variant') === 'M' ? 'M' : 'F' } catch { return 'F' } })()
-const face = new ImageFace(canvas, variant)
+const face = new VideoFace(canvas, variant)
 const body = new Embodiment(face)
 const brain = new Brain()
 window.__face = face // debug handle
