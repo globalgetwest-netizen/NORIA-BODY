@@ -638,7 +638,17 @@ function weatherPlace(q, userTz) {
       if (p && p.length > 1 && !fillerOnly.test(p)) return p;
     }
   }
-  if (userTz && userTz.includes("/")) return userTz.split("/").pop().replace(/_/g, " ");
+  // FOUND LIVE (2026-10-01): the userTz fallback below used to fire whenever ANY word in weatherBlock's bare
+  // keyword trigger ("weather|temperature|forecast|raining|rain|humidity|how hot/cold/warm|windy|sunny|snowing")
+  // appeared ANYWHERE in the text, even as a throwaway aside in an unrelated sentence. Reproduced live: "ok nvm
+  // the rain thing, more worried about money - is it expensive there for 2 people for a week?" contains "rain",
+  // matched none of the place patterns above (there is no place in a money question), and silently fell back to
+  // fetching the user's OWN city's weather and attaching it as "verified" evidence to an unrelated cost answer —
+  // the exact "Noria starts bringing something different" failure. The fallback is only honest when the
+  // question is ITSELF a genuine, placeless weather question ("what's the weather like", "is it raining") —
+  // never as a last resort for any sentence that merely contains a weather-adjacent word in passing.
+  const BARE_WEATHER_Q = /^\W*(?:what(?:'s| is)?\s+(?:the\s+)?weather(?:'s| is)?\s*(?:like)?|how(?:'s| is)\s+the\s+weather|what(?:'s| is)\s+the\s+(?:temperature|forecast)(?:\s+like)?|is\s+it\s+(?:raining|sunny|windy|snowing|hot|cold|warm))(?:\s+(?:right\s+now|now|today|tonight|currently|at\s+the\s+moment|outside|there))*\s*\W*$/i;
+  if (BARE_WEATHER_Q.test(s) && userTz && userTz.includes("/")) return userTz.split("/").pop().replace(/_/g, " ");
   return "";
 }
 // TRUTH-ARCHITECTURE FIX (2026-09-24): this used to be the ONLY weather path chat ever used — a single Open-Meteo
