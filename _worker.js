@@ -1008,14 +1008,40 @@ async function realityCountryFactBlock(q) {
 // have to interpret to decide relevance), and is skipped if the user's own question names the same qualifier
 // (so "who is the deputy prime minister" can still correctly match a "Deputy ..." title).
 const OFFICEHOLDER_WRONG_ROLE = /\b(spouse|husband|wife|partner of|deputy|vice[- ]|shadow|former|ex-|acting|assistant|office of|list of|under[- ]|first lady|first gentleman)\b/i;
+// FOUND LIVE 2026-10-01: OFFICEHOLDER_WRONG_ROLE is a BLOCKLIST (reject a candidate that names an adjacent-but-wrong
+// qualifier on the SAME office) — it has no concept of a candidate being a DIFFERENT office entirely. "who is the
+// current secretary general of the United Nations" matched "President of the United Nations General Assembly" (a
+// real, different UN office, with its own genuine current P1308 claim) because that title contains none of
+// OFFICEHOLDER_WRONG_ROLE's words, and was confidently named as the answer — the exact same failure SHAPE as the
+// "Spouse of the prime minister" near-miss this guard already exists to catch, just not the same words. Fixed with
+// a POSITIVE check alongside the existing blocklist: when the question names a recognisable office-type word
+// (president, secretary-general, ceo, ...), the candidate title must name the SAME office type (allowing known
+// synonyms — king/queen/monarch, prime minister/premier, ceo/chief executive). A question or title using an
+// office-type word outside this list is not checked further here (falls back to the blocklist alone, unchanged) —
+// this adds a positive requirement for the shapes now confirmed to need it, without narrowing coverage elsewhere.
+const OFFICE_SYNONYM_GROUPS = [
+  ["president"], ["prime minister", "premier"], ["secretary general", "secretary-general"], ["secretary of state"],
+  ["foreign minister"], ["finance minister"], ["chancellor"], ["governor"], ["mayor"],
+  ["king", "queen", "monarch", "emperor", "empress"], ["pope"], ["chief justice"], ["speaker"],
+  ["chairman", "chairperson", "chair"], ["ceo", "chief executive", "chief executive officer"],
+  ["director general", "director-general"],
+];
+function officeTypeGroups(s) {
+  const norm = String(s || "").toLowerCase().replace(/[-‑]/g, " ");
+  const groups = [];
+  OFFICE_SYNONYM_GROUPS.forEach((group, i) => { if (group.some((w) => new RegExp("\\b" + w.replace(/ /g, "[ -]") + "\\b", "i").test(norm))) groups.push(i); });
+  return groups;
+}
 async function realityOfficeholderBlock(q) {
   const none = { text: "", refuse: null };
   if (!officeAsk(q)) return none;
   let hits; try { hits = await wikiFetchHits(toSearchQuery(q), 8); } catch (_) { return none; }
   if (!hits || !hits.length) return none;
+  const qGroups = officeTypeGroups(q);
   for (const h of hits) {
     const m = OFFICEHOLDER_WRONG_ROLE.exec(h.title);
     if (m && !new RegExp("\\b" + m[1].replace(/[- ]/g, "[- ]?") + "\\b", "i").test(q)) continue;
+    if (qGroups.length) { const tGroups = officeTypeGroups(h.title); if (!tGroups.some((g) => qGroups.includes(g))) continue; }
     let holder; try { holder = await officeholderLookup(h.title); } catch (_) { continue; }
     if (!holder) continue;
     return { text: "\n\nLIVE OFFICEHOLDER [Wikidata — the Wikimedia Foundation's own structured data, not a third-party aggregator] " + h.title + ": " + holder.name + (holder.since ? " (in this role since " + holder.since + ")" : "") + ". Source: " + holder.wikidataUrl + "\nState this name plainly as the current holder; do not substitute a different name from memory. Wikidata is community-maintained and can occasionally lag a very recent change — if the question itself suggests a more recent development this does not reflect, say so, but never silently prefer an older memorised name over this sourced one.", refuse: null };
@@ -2059,7 +2085,16 @@ function fromSources(live, news) {
   // than an empty list — the raw evidence, stripped of its model-facing instructions, is always safer than any
   // paraphrase that already failed to match it.
   if (!(live.sources || []).length && live.ctx) {
-    const clean = String(live.ctx).replace(/\[[^\]]*\]/g, "").replace(/Use exactly this verified figure[^.]*\./gi, "").replace(/State it plainly[^.]*\./gi, "").replace(/Do not add, round differently[^.]*\./gi, "").replace(/Answer using ONLY[^.]*\./gi, "").replace(/\n{3,}/g, "\n\n").trim();
+    // FOUND LIVE 2026-10-01: this cleanup list is a hand-maintained, per-block set of regexes matching each exact-
+    // data block's OWN model-facing instruction wording — and was never updated when realityOfficeholderBlock and
+    // realityEventWinnerBlock were added, since neither says "State it plainly" (the phrase this list already
+    // caught). Confirmed live: "who is the current prime minister of the United Kingdom" reached this exact branch
+    // (three verification attempts failed) and the officeholder block's own trailing instruction — "State this name
+    // plainly as the current holder; do not substitute a different name from memory. Wikidata is community-
+    // maintained..." — leaked verbatim into the answer, matching none of the patterns below. Both newer blocks
+    // share the same trailing shape (an opening "State this ... plainly as ..." clause through a closing "...over
+    // this sourced one." sentence), so one general pattern closes both rather than two more block-specific ones.
+    const clean = String(live.ctx).replace(/\[[^\]]*\]/g, "").replace(/Use exactly this verified figure[^.]*\./gi, "").replace(/State it plainly[^.]*\./gi, "").replace(/Do not add, round differently[^.]*\./gi, "").replace(/Answer using ONLY[^.]*\./gi, "").replace(/State this (?:name )?plainly as [^.]*\.[\s\S]*?over this sourced one\./gi, "").replace(/\n{3,}/g, "\n\n").trim();
     return "I want to be exact here, so here is the verified information directly:\n\n" + clean;
   }
   const rows = (live.sources || []).slice(0, news ? 6 : 4).map((r) => "• **" + String(r.title || "").replace(/\s+/g, " ").slice(0, 110) + "**" + (r.date ? " (" + String(r.date).slice(0, 16) + ")" : "") + (r.snippet ? " — " + String(r.snippet).replace(/\s+/g, " ").replace(/https?:\/\/\S+/g, "").slice(0, 200) : "") + (host(r.url) ? " *(" + host(r.url) + ")*" : ""));
