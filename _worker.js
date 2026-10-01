@@ -1855,6 +1855,20 @@ function liveStrength(q) {
   // so it is caught by adminGeo being added to the "must" check below instead, without touching this bypass at all.
   if (CREATIVE_TASK.test(s) && !MOVING_VALUE.test(s) && !officeAsk(s)) return "no"; // a creative or language task is never a lookup
   if (STABLE_TASK.test(s) && !LIVE_CUE.test(s) && !officeAsk(s)) return "no";
+  // FOUND LIVE (2026-10-01): generic how-to and mechanism questions were falling all the way through to
+  // FACTUAL_QUESTION_DEFAULT ("maybe" -> search), even though they are exactly the evergreen, no-live-data-needed
+  // shape STABLE_TASK already exists to catch. STABLE_TASK's own "explain (how|why)" phrase never matches "How do
+  // I center a div in CSS?" or "Why is the sky blue?" — neither opens with the literal word "explain". Reproduced
+  // live: both questions triggered a real web search, the model's correct synthesized answer then failed the
+  // strict verifyAnswer/checkLive gate (calibrated for live numeric/named-entity facts, not free-form technical
+  // prose) three times, and the response fell back to fromSources()'s raw, fragmented search-snippet dump instead
+  // of actually answering — the precise "Noria doesn't answer the question, it brings something different"
+  // failure reported live. Guarded the same way STABLE_TASK already is (LIVE_CUE, officeAsk) PLUS MOVING_VALUE,
+  // STATUS_Q, EVENT_VERB and STATE_Q, since a bare "how do I ..." / "why is ..." has no built-in guard against a
+  // genuinely live financial or current-event question phrased that way ("how do I check today's Bitcoin price"
+  // stays live via LIVE_CUE; "why is Tesla stock down" stays live via MOVING_VALUE even with no LIVE_CUE word).
+  const HOWTO_OR_WHY = /\bhow (?:do|can|should|would) (?:i|you|we)\b|\bwhy (?:is|are|does|do|did|would|can'?t|doesn'?t|don'?t)\b/i;
+  if (HOWTO_OR_WHY.test(s) && !LIVE_CUE.test(s) && !officeAsk(s) && !MOVING_VALUE.test(s) && !STATUS_Q.test(s) && !EVENT_VERB.test(s) && !STATE_Q.test(s)) return "no";
   if (STABLE_FACT.test(s) && !LIVE_CUE.test(s)) return "no";
   if (officeAsk(s) || LIVE_CUE.test(s) || MOVING_VALUE.test(s) || STATUS_Q.test(s) || adminGeo || (EVENT_VERB.test(s) && hasEntity(s))) return "must";
   if (STATE_Q.test(s) && hasEntity(s)) return "maybe";
