@@ -12,7 +12,7 @@ import { describeReality, classifyUrl, detectLockDomain, admissible, ANSWERABLE 
 import { makeWebReadTool } from "./agent/web-read.js";
 import { fxVerdict, cryptoVerdict, weatherVerdict, stockVerdict, countryFactVerdict, quranVerdict, COUNTRY_ISO3 } from "./agent/reality-feeds.js";
 import { routeRequest, answerContract, LAYERS } from "./agent/reality-router.js";
-import { officeholderLookup } from "./agent/wikidata.js";
+import { officeholderLookup, eventWinnerLookup } from "./agent/wikidata.js";
 import { buildMap } from "./agent/capability-map.js";
 import { describeCodeRuntimes } from "./agent/code-exec.js";
 // Cloudflare Pages (Advanced Mode) — Noria's front door AND her brain, served
@@ -1021,6 +1021,25 @@ async function realityOfficeholderBlock(q) {
     return { text: "\n\nLIVE OFFICEHOLDER [Wikidata — the Wikimedia Foundation's own structured data, not a third-party aggregator] " + h.title + ": " + holder.name + (holder.since ? " (in this role since " + holder.since + ")" : "") + ". Source: " + holder.wikidataUrl + "\nState this name plainly as the current holder; do not substitute a different name from memory. Wikidata is community-maintained and can occasionally lag a very recent change — if the question itself suggests a more recent development this does not reflect, say so, but never silently prefer an older memorised name over this sourced one.", refuse: null };
   }
   return none;
+}
+// LIVE, STRUCTURED EVENT-WINNER LOOKUP (2026-10-01), same real-source principle as realityOfficeholderBlock, for
+// "who won the last X" instead of "who currently holds office X". FOUND LIVE: "who won the last FIFA World Cup"
+// fails for a DIFFERENT reason than the officeholder case — Wikipedia's own search ranks the tournament's many
+// near-identical sub-pages (a group stage, the knockout bracket, the squads list) above the one main article that
+// actually carries the Wikidata P1346 ("winner") claim. eventWinnerLookup (agent/wikidata.js) reconstructs that
+// main article's title directly from the shared "YYYY <Event Name>" prefix of at least two of the search hits —
+// requiring at least two to agree is what keeps a same-week but unrelated competition (confirmed live: "2027 FIFA
+// Women's World Cup" was a real hit for this exact search) from ever being treated as a match, since it is
+// outnumbered by the real edition's own sub-pages. Tried before the general web-search office-ask-adjacent flow;
+// falls through untouched on any failure.
+async function realityEventWinnerBlock(q) {
+  const none = { text: "", refuse: null };
+  if (!RECENT_EVENT_Q.test(q)) return none;
+  let hits; try { hits = await wikiFetchHits(toSearchQuery(q), 10); } catch (_) { return none; }
+  if (!hits || !hits.length) return none;
+  let win; try { win = await eventWinnerLookup(hits); } catch (_) { return none; }
+  if (!win) return none;
+  return { text: "\n\nLIVE EVENT WINNER [Wikidata — the Wikimedia Foundation's own structured data, not a third-party aggregator] " + win.eventTitle + ": " + win.name + ". Source: " + win.wikidataUrl + "\nState this plainly as the real result; do not substitute a different name from memory. Wikidata is community-maintained and can occasionally lag a very recent change — if the question itself suggests a more recent edition this does not reflect, say so, but never silently prefer an older memorised result over this sourced one.", refuse: null };
 }
 
 // A CITY/TOWN population question (a country is handled above by the World Bank feed). There is no single
@@ -2550,7 +2569,7 @@ async function groundMessages(messages, body, env) {
   // set of well-known stock tickers, and now real national statistics (population, GDP, life expectancy,
   // literacy) for any World Bank-recognised country — all live feeds, cross-checked where more than one
   // independent source exists.
-  const [wx, fx, cr, st, cf, pf, qr, oh] = await withTimeout(Promise.all([realityWeatherBlock(q, body.tz), realityFxBlock(q), realityCryptoBlock(q), realityStockBlock(q), realityCountryFactBlock(q), realityPlaceFactBlock(q), realityQuranBlock(q), realityOfficeholderBlock(q)]), 9000, [null, null, null, null, null, "", null, null]);
+  const [wx, fx, cr, st, cf, pf, qr, oh, ew] = await withTimeout(Promise.all([realityWeatherBlock(q, body.tz), realityFxBlock(q), realityCryptoBlock(q), realityStockBlock(q), realityCountryFactBlock(q), realityPlaceFactBlock(q), realityQuranBlock(q), realityOfficeholderBlock(q), realityEventWinnerBlock(q)]), 9000, [null, null, null, null, null, "", null, null, null]);
   // A WITHHELD reality verdict (CONFLICTING / STALE / UNAVAILABLE / UNVERIFIED) is
   // delivered verbatim as its own honest statement, bypassing the model — so the
   // model can never state a value the evidence layer refused to confirm.
@@ -2562,7 +2581,7 @@ async function groundMessages(messages, body, env) {
   // search stand in for real verification. Skipped entirely when the stock or country-fact block above
   // already answered — the router must never override a real answer with a refusal.
   if (!(st && st.text) && !(cf && cf.text)) { const rr = realityRouteBlock(q); if (rr && rr.refuse) return { messages, grounded: true, refuse: rr.refuse }; }
-  const live = [wx && wx.text, fx && fx.text, cr && cr.text, pr && pr.text, st && st.text, cf && cf.text, typeof pf === "string" ? pf : "", qr && qr.text, oh && oh.text];
+  const live = [wx && wx.text, fx && fx.text, cr && cr.text, pr && pr.text, st && st.text, cf && cf.text, typeof pf === "string" ? pf : "", qr && qr.text, oh && oh.text, ew && ew.text];
   // TRUTH-ARCHITECTURE FIX (2026-09-24): evidence provenance used to vanish the moment these blocks' text was
   // joined into one string — the same exact-data-tool label (`verified: true`) covered a real cross-checked
   // reading and a timeout-degraded guess alike. Each block that carries a structured `evidence` object (see
@@ -2583,7 +2602,7 @@ async function groundMessages(messages, body, env) {
     // liveAnswer/checkLive/verifyAnswer pipeline already proven for search-grounded answers — verifyAnswer rejects
     // any number of 3+ digits that does not appear in the evidence, forcing a correction, and self-corrects rather
     // than silently letting the wrong figure through (see answer_evidence_drift_t.mjs).
-    if ((st && st.text) || (cf && cf.text) || (oh && oh.text) || !/\b(news|headline|happen|happened|stock|score|scores|president|prime minister|who is|who won)\b/i.test(q)) return { messages, grounded: true, live: { ctx: tools.join(""), sources: [], evidence } };
+    if ((st && st.text) || (cf && cf.text) || (oh && oh.text) || (ew && ew.text) || !/\b(news|headline|happen|happened|stock|score|scores|president|prime minister|who is|who won)\b/i.test(q)) return { messages, grounded: true, live: { ctx: tools.join(""), sources: [], evidence } };
   }
   if (CLOCK_Q.test(q) && !CLOCK_NOT.test(q)) return { messages, grounded: true }; // the clock line above is the whole answer
   const office = officeAsk(q);
