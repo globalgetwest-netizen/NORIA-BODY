@@ -1501,6 +1501,21 @@ function futureBlock(q) {
   return "\n\nFUTURE-DATE NOTICE — today is " + now.toISOString().slice(0, 10) + ". The question is about " + yrs[0] + ", which has NOT happened yet, so nobody can know who won, the result, or what happened. " +
     "Do NOT invent a winner, score or outcome. Say plainly that it hasn't happened yet (and only if you are certain, add a known scheduled fact such as the host or dates). Never mention this note.";
 }
+// FOUND LIVE 2026-10-01, in a capability battery run: "what will the price of gold be like next week" was answered
+// with a confident "Key Takeaway" ("the price is expected to stay within a narrow band around $4,090-$4,100") built
+// by averaging several SPECULATIVE third-party "price prediction" blog pages (tradersunion.com, litefinance.org)
+// that search happened to surface — each is genuinely real (the exact figures matched their real snippets, not
+// invented by the model), but a prediction site's own guess is not a live data feed, and synthesizing several such
+// guesses into one confident "expected" figure presents speculation as settled fact. Unlike futureBlock just above
+// (a definite past-tense outcome — who WON a future election — that truly has no answer yet, so search is skipped
+// entirely), a future price genuinely can have useful search context (scheduled events, analyst commentary): search
+// still runs, but the model needs an explicit instruction not to launder "one site's prediction" into "the expected
+// price". Found to be inconsistent without this: an identical-shaped question about bitcoin's price a year out was,
+// in a separate run, correctly refused by the model's own unprompted judgement ("the sources do not include
+// predictive data") — proving this is not a reliable, structural safeguard without this notice, just incidental
+// model behaviour that happened to go the safe way once and the unsafe way the next time.
+const FUTURE_VALUE_Q = /\b(?:price|value|worth|rate|cost|exchange rate)\b[^?.!]{0,60}\b(?:next (?:week|month|year|monday|tuesday|wednesday|thursday|friday|saturday|sunday)|tomorrow|this weekend|in (?:a|one|\d+) (?:days?|weeks?|months?|years?)|(?:a|one|\d+) (?:days?|weeks?|months?|years?) from (?:now|today|tomorrow)|by (?:next|the end of))\b|\bwill\b[^?.!]{0,40}\b(?:be worth|be priced|cost|trade at)\b/i;
+const FUTURE_VALUE_NOTE = "\n\n[FUTURE-VALUE CARE — this question asks for a price, rate or value at a FUTURE point in time, which nobody can know with certainty. If a search result shows a numeric 'forecast' or 'prediction' for it, that is ONE named analyst or site's speculative opinion, never settled fact: name the source and say plainly it is a prediction, do not average several predictions into one confident 'expected' figure, and do not present it as what the price 'will be'. If the sources do not actually contain a real forecast, say so plainly rather than guessing one.]";
 function addSystem(messages, block) {
   const out = messages.slice();
   const i = out.findIndex((m) => m.role === "system");
@@ -2626,6 +2641,7 @@ async function groundMessages(messages, body, env) {
   if (rb) return { messages: addSystem(messages, rb), grounded: true }; // a fixed list is read off the library, not the web
   const fb = futureBlock(q);
   if (fb) return { messages: addSystem(messages, fb), grounded: true }; // no search: there is nothing true to find
+  if (FUTURE_VALUE_Q.test(q)) messages = addSystem(messages, FUTURE_VALUE_NOTE); // search still runs; the model just can't launder a prediction into a fact
   // A pasted link is read live before anything else: it is the most specific source the person could give,
   // and a failed read is delivered as its own honest statement (see pageReadBlock), never left for the
   // model to paper over or guess about from training-data familiarity with the domain.
