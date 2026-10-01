@@ -12,6 +12,7 @@ import { describeReality, classifyUrl, detectLockDomain, admissible, ANSWERABLE 
 import { makeWebReadTool } from "./agent/web-read.js";
 import { fxVerdict, cryptoVerdict, weatherVerdict, stockVerdict, countryFactVerdict, quranVerdict, COUNTRY_ISO3 } from "./agent/reality-feeds.js";
 import { routeRequest, answerContract, LAYERS } from "./agent/reality-router.js";
+import { officeholderLookup } from "./agent/wikidata.js";
 import { buildMap } from "./agent/capability-map.js";
 import { describeCodeRuntimes } from "./agent/code-exec.js";
 // Cloudflare Pages (Advanced Mode) — Noria's front door AND her brain, served
@@ -102,15 +103,21 @@ function toSearchQuery(q) {
   s = s.trim();
   return s.length >= 2 ? s : String(q || "").trim();
 }
-async function wikiFetchHits(query) {
+// limit defaults to 3 (unchanged for every existing caller — general grounding only ever wants a few best
+// candidates). realityOfficeholderBlock passes a higher limit: the real office article can rank below several
+// adjacent-but-wrong pages (a "List of...", "Spouse of...", "Deputy..." — found live for "Prime Minister of the
+// United Kingdom", which ranked 5th), and trying more candidates there is safe (never produces a wrong answer)
+// precisely because OFFICEHOLDER_WRONG_ROLE and officeholderLookup's own strict P1308 check gate what gets
+// accepted, not merely how many candidates are offered.
+async function wikiFetchHits(query, limit = 3) {
   const s = await fetch(
-    "https://en.wikipedia.org/w/api.php?action=query&list=search&format=json&srlimit=3&srsearch=" +
+    "https://en.wikipedia.org/w/api.php?action=query&list=search&format=json&srlimit=" + limit + "&srsearch=" +
       encodeURIComponent(query) + "&origin=*",
     { headers: { "User-Agent": UA, "Api-User-Agent": "NoriaBody/1.0 (grounding)" } }
   );
   if (!s.ok) return [];
   const sj = await s.json();
-  return ((sj.query && sj.query.search) || []).slice(0, 3);
+  return ((sj.query && sj.query.search) || []).slice(0, limit);
 }
 export async function wikiSearch(q) {
   try {
@@ -980,6 +987,40 @@ async function realityCountryFactBlock(q) {
   const vr = verdictResult(r, "COUNTRY FACT", { line: (v) => v.attribute + " of " + v.entity + " = " + (v.unit === "USD" ? "$" : "") + fmtNum(v.value, v.unit === "years" || v.unit === "%" ? 1 : 0) + (COUNTRY_ATTR_UNIT_SUFFIX[v.unit] || (v.unit ? " " + v.unit : "")) });
   if (vr.text && AMBIGUOUS_COUNTRY_NOTE[country]) vr.text += "\n" + AMBIGUOUS_COUNTRY_NOTE[country];
   return vr;
+}
+// LIVE, STRUCTURED OFFICEHOLDER LOOKUP (2026-10-01), explicitly requested by the owner: "a real API key provider
+// from the real sources not a third party" — Wikidata (the Wikimedia Foundation's own structured-data project,
+// free, keyless, official) instead of general web search or a plain-text Wikipedia summary, which was proven live
+// to lack the actual incumbent's name for an institutional/office article (see agent/wikidata.js's header for the
+// full reproduction). Tried BEFORE the general web-search office-ask flow further down: when Wikidata resolves the
+// office cleanly, the answer is exact and sourced, and the slower, year-poisoning-prone, Tavily-degraded general
+// search path is skipped entirely for this fact — the same way a resolved stock or country-fact verdict already
+// skips it (see the tools.length check below). Falls through to the existing search-based flow untouched on any
+// failure (office not found, no P1308 claim, ambiguous title match): this can only ever ADD a better answer for a
+// question that already worked, never remove or weaken the existing path.
+// A candidate Wikipedia title that is clearly about something OTHER than the office itself, even though it may
+// well carry its own, perfectly valid P1308 claim on Wikidata (several of these are modelled as positions in
+// their own right). FOUND LIVE 2026-10-01: for "who is the current prime minister of the United Kingdom", trying
+// every non-"List of" hit in turn accepted "Spouse of the prime minister of the United Kingdom" — a real Wikidata
+// item with its own real, current officeholder claim (Carrie Johnson) — and confidently named her as the prime
+// minister. A candidate's own claim being genuine is not the same as the candidate being the right OFFICE; this
+// guard is checked ONLY against the Wikipedia title (never against Wikidata data, which this function must not
+// have to interpret to decide relevance), and is skipped if the user's own question names the same qualifier
+// (so "who is the deputy prime minister" can still correctly match a "Deputy ..." title).
+const OFFICEHOLDER_WRONG_ROLE = /\b(spouse|husband|wife|partner of|deputy|vice[- ]|shadow|former|ex-|acting|assistant|office of|list of|under[- ]|first lady|first gentleman)\b/i;
+async function realityOfficeholderBlock(q) {
+  const none = { text: "", refuse: null };
+  if (!officeAsk(q)) return none;
+  let hits; try { hits = await wikiFetchHits(toSearchQuery(q), 8); } catch (_) { return none; }
+  if (!hits || !hits.length) return none;
+  for (const h of hits) {
+    const m = OFFICEHOLDER_WRONG_ROLE.exec(h.title);
+    if (m && !new RegExp("\\b" + m[1].replace(/[- ]/g, "[- ]?") + "\\b", "i").test(q)) continue;
+    let holder; try { holder = await officeholderLookup(h.title); } catch (_) { continue; }
+    if (!holder) continue;
+    return { text: "\n\nLIVE OFFICEHOLDER [Wikidata — the Wikimedia Foundation's own structured data, not a third-party aggregator] " + h.title + ": " + holder.name + (holder.since ? " (in this role since " + holder.since + ")" : "") + ". Source: " + holder.wikidataUrl + "\nState this name plainly as the current holder; do not substitute a different name from memory. Wikidata is community-maintained and can occasionally lag a very recent change — if the question itself suggests a more recent development this does not reflect, say so, but never silently prefer an older memorised name over this sourced one.", refuse: null };
+  }
+  return none;
 }
 
 // A CITY/TOWN population question (a country is handled above by the World Bank feed). There is no single
@@ -2509,7 +2550,7 @@ async function groundMessages(messages, body, env) {
   // set of well-known stock tickers, and now real national statistics (population, GDP, life expectancy,
   // literacy) for any World Bank-recognised country — all live feeds, cross-checked where more than one
   // independent source exists.
-  const [wx, fx, cr, st, cf, pf, qr] = await withTimeout(Promise.all([realityWeatherBlock(q, body.tz), realityFxBlock(q), realityCryptoBlock(q), realityStockBlock(q), realityCountryFactBlock(q), realityPlaceFactBlock(q), realityQuranBlock(q)]), 9000, [null, null, null, null, null, "", null]);
+  const [wx, fx, cr, st, cf, pf, qr, oh] = await withTimeout(Promise.all([realityWeatherBlock(q, body.tz), realityFxBlock(q), realityCryptoBlock(q), realityStockBlock(q), realityCountryFactBlock(q), realityPlaceFactBlock(q), realityQuranBlock(q), realityOfficeholderBlock(q)]), 9000, [null, null, null, null, null, "", null, null]);
   // A WITHHELD reality verdict (CONFLICTING / STALE / UNAVAILABLE / UNVERIFIED) is
   // delivered verbatim as its own honest statement, bypassing the model — so the
   // model can never state a value the evidence layer refused to confirm.
@@ -2521,7 +2562,7 @@ async function groundMessages(messages, body, env) {
   // search stand in for real verification. Skipped entirely when the stock or country-fact block above
   // already answered — the router must never override a real answer with a refusal.
   if (!(st && st.text) && !(cf && cf.text)) { const rr = realityRouteBlock(q); if (rr && rr.refuse) return { messages, grounded: true, refuse: rr.refuse }; }
-  const live = [wx && wx.text, fx && fx.text, cr && cr.text, pr && pr.text, st && st.text, cf && cf.text, typeof pf === "string" ? pf : "", qr && qr.text];
+  const live = [wx && wx.text, fx && fx.text, cr && cr.text, pr && pr.text, st && st.text, cf && cf.text, typeof pf === "string" ? pf : "", qr && qr.text, oh && oh.text];
   // TRUTH-ARCHITECTURE FIX (2026-09-24): evidence provenance used to vanish the moment these blocks' text was
   // joined into one string — the same exact-data-tool label (`verified: true`) covered a real cross-checked
   // reading and a timeout-degraded guess alike. Each block that carries a structured `evidence` object (see
@@ -2542,7 +2583,7 @@ async function groundMessages(messages, body, env) {
     // liveAnswer/checkLive/verifyAnswer pipeline already proven for search-grounded answers — verifyAnswer rejects
     // any number of 3+ digits that does not appear in the evidence, forcing a correction, and self-corrects rather
     // than silently letting the wrong figure through (see answer_evidence_drift_t.mjs).
-    if ((st && st.text) || (cf && cf.text) || !/\b(news|headline|happen|happened|stock|score|scores|president|prime minister|who is|who won)\b/i.test(q)) return { messages, grounded: true, live: { ctx: tools.join(""), sources: [], evidence } };
+    if ((st && st.text) || (cf && cf.text) || (oh && oh.text) || !/\b(news|headline|happen|happened|stock|score|scores|president|prime minister|who is|who won)\b/i.test(q)) return { messages, grounded: true, live: { ctx: tools.join(""), sources: [], evidence } };
   }
   if (CLOCK_Q.test(q) && !CLOCK_NOT.test(q)) return { messages, grounded: true }; // the clock line above is the whole answer
   const office = officeAsk(q);
