@@ -29,7 +29,14 @@ const RULES = [
   { domain: "time", tool: "calc.math", computed: true, re: /\b\d[\d,.]*\s*%\s*of\s*\d|\b(?:what is|calculate|compute)\s+\(?\d[\d,.]*\s*[+\-*/x×÷^]\s*\(?\d/i },
   { domain: "appointment_availability", tool: null, lock: "immigration", re: /\b(visa|embassy|consulate|consular|residence permit|work permit|schengen|type d|appointment (?:system|slots?|booking|availability)|immigration)\b/i },
   { domain: "government_announcement", tool: null, lock: "legal", re: /\b(law|legislation|statute|regulation|court|ruling|judgement|judgment|bill|act of parliament|tax (?:rate|law)|is it (?:legal|illegal))\b/i },
-  { domain: "company_registration", tool: null, re: /\b(company registration|registered company|business register|who owns|ownership of|ceo of|director of|is .+ (?:registered|licensed|a legitimate company))\b/i },
+  // FOUND LIVE 2026-10-01, in a capability battery measuring real question coverage: "who is the CEO of Tesla" and
+  // "who is the CEO of Microsoft" both hit this rule via the bare "ceo of"/"director of" triggers and were refused
+  // with "a business-registry provider and adapter are not built yet" — a company's CEO is a role-identity fact
+  // (the same shape as a government officeholder), not business-registration data; it needs no registry at all, and
+  // was answerable from general knowledge/search before this rule intercepted it. Narrowed to the registry-specific
+  // phrasings this domain actually has no source for; a bare "CEO of X" / "director of X" now falls through to the
+  // ordinary knowledge/search path like any other "who is" question, instead of a hard, unconditional refusal.
+  { domain: "company_registration", tool: null, re: /\b(company registration|registered company|business register|who owns|ownership of|is .+ (?:registered|licensed|a legitimate company))\b/i },
   { domain: "news", tool: "web.search", re: /\b(latest|breaking|news|headlines?|what happened|just (?:announced|happened)|this (?:week|morning)|yesterday)\b/i },
   { domain: "general", tool: "web.search", re: /\b(who is the (?:current|new|present)|current (?:president|prime minister|ceo|minister|governor|champion|leader)|who (?:won|wins) the (?:latest|last|most recent)|latest .*(?:winner|champion)|is .* still (?:the|a))\b/i },
 ];
