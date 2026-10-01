@@ -607,18 +607,36 @@ const fmtNum = (n, d) => Number(n).toLocaleString("en-US", { maximumFractionDigi
 
 // Weather ------------------------------------------------------------------------------------------
 const WMO = { 0: "clear sky", 1: "mainly clear", 2: "partly cloudy", 3: "overcast", 45: "fog", 48: "freezing fog", 51: "light drizzle", 53: "drizzle", 55: "heavy drizzle", 56: "freezing drizzle", 57: "freezing drizzle", 61: "light rain", 63: "rain", 65: "heavy rain", 66: "freezing rain", 67: "freezing rain", 71: "light snow", 73: "snow", 75: "heavy snow", 77: "snow grains", 80: "light rain showers", 81: "rain showers", 82: "violent rain showers", 85: "snow showers", 86: "heavy snow showers", 95: "thunderstorm", 96: "thunderstorm with hail", 99: "thunderstorm with heavy hail" };
+// FOUND LIVE 2026-10-01, in a capability battery run: "what will the weather be like tomorrow in Lagos" returned
+// weather for "Will, Haiti" (a real place matched by the geocoder) — "Lagos" was never even reached. The first,
+// most reliable pattern below requires "weather" to be followed immediately (with only "like/forecast/report"
+// allowed between) by the preposition before a place; "weather BE LIKE tomorrow in Lagos" has two extra filler
+// words ("be", "tomorrow") that pattern didn't tolerate, so it never matched here. Falling through to the last,
+// much looser pattern (built for "the <place> weather" phrasing), its lazy capture happily grabbed "will the" —
+// the sentence's OWN modal verb and article, not a place at all — because nothing checked that the captured text
+// was plausibly a place name rather than ordinary sentence filler. Fixed with two independent layers: the first
+// pattern now tolerates a run of the same filler words the existing trailing-strip regex already treats as noise
+// (be/like/going to be/tomorrow/today/etc.), so the explicit, safe "...in/at/for PLACE" pattern matches BEFORE the
+// loose fallback ever gets a chance to guess; and a final sanity check rejects a candidate that is itself nothing
+// but one of those same filler/modal words, so a future untested phrasing cannot repeat this exact failure even if
+// it reaches the fallback pattern.
+const WEATHER_FILLER = "right now|now|today|tonight|tomorrow|this (?:week|weekend|morning|afternoon|evening)|currently|at the moment|please|like|going to be|will be|will|be|the";
 function weatherPlace(q, userTz) {
   const s = String(q || "");
   const pats = [
-    /\b(?:weather|temperature|forecast|humidity|rain(?:ing)?|windy|sunny)\b(?:\s+(?:like|forecast|report))?\s+(?:in|at|for|of|near|around)\s+([^?.!,;]+)/i,
+    new RegExp("\\b(?:weather|temperature|forecast|humidity|rain(?:ing)?|windy|sunny)\\b(?:\\s+(?:" + WEATHER_FILLER + "))*\\s+(?:in|at|for|of|near|around)\\s+([^?.!,;]+)", "i"),
     /\bhow\s+(?:hot|cold|warm)\b[^?.!,;]*?\b(?:in|at)\s+([^?.!,;]+)/i,
     /\bhow\s+(?:hot|cold|warm)\s+is\s+(?!it\b|there\b|outside\b)([A-Za-z][^?.!,;]*)/i, // "how cold is London today"
     /\b(?:in|at|for|near|around)\s+([^?.!,;]+?)\s+(?:weather|temperature|forecast)\b/i,
     /^\W*(?:what(?:'s| is)?\s+|how(?:'s| is)\s+|tell me\s+)?(?:the\s+)?([A-Za-z][A-Za-z .'-]{1,30}?)\s+(?:weather|temperature|forecast)\b/i,
   ];
+  const fillerOnly = new RegExp("^(?:" + WEATHER_FILLER + ")$", "i");
   for (const re of pats) {
     const m = s.match(re);
-    if (m) { const p = m[1].replace(/\b(right now|now|today|tonight|tomorrow|this (?:week|weekend|morning|afternoon|evening)|currently|at the moment|please|like|going to be|will be|the)\b.*$/i, "").replace(/^the\s+/i, "").trim(); if (p && p.length > 1) return p; }
+    if (m) {
+      const p = m[1].replace(new RegExp("\\b(?:" + WEATHER_FILLER + ")\\b.*$", "i"), "").replace(/^the\s+/i, "").trim();
+      if (p && p.length > 1 && !fillerOnly.test(p)) return p;
+    }
   }
   if (userTz && userTz.includes("/")) return userTz.split("/").pop().replace(/_/g, " ");
   return "";
