@@ -2819,7 +2819,10 @@ async function cfAiComplete(env, messages, opts) {
 }
 // Task-based routing: deep queries (analysis/coding/math/reasoning) go to the
 // strongest models with a big budget; everyday chat goes to fast, low-latency models.
+let _brainDbg = []; // read only by the body.debug flag on /brain/ask, same pattern as _intentDbg: a truncated snippet
+// of each discarded "rambling" candidate, so a real failure can be diagnosed from its actual text instead of guessed.
 async function brainComplete(messages, env, opts = {}) {
+  _brainDbg = [];
   const attempts = [];
   // The strongest Groq model first, then Mistral's strongest, and only then Groq's small fast model (it made arithmetic and logic
   // slips the others do not), then the remaining providers.
@@ -2837,8 +2840,31 @@ async function brainComplete(messages, env, opts = {}) {
   for (const key of rotate(openrouterKeys(env)).slice(0, 2)) attempts.push({ name: "openrouter", fn: () => openaiCompatible("https://openrouter.ai/api/v1/chat/completions", key, om, messages, opts, { "HTTP-Referer": "https://noria.skyglobegroup.com", "X-Title": "Noria" }) });
   if (env.AI) attempts.push({ name: "cloudflare", fn: () => cfAiComplete(env, messages, opts) });
   if (!attempts.length) throw new Error("no model key configured");
+  // FOUND LIVE 2026-10-01: with no overall ceiling, a bad stretch (several providers in a row either rate-limited
+  // or producing output isDegenerate() correctly discards) ran EVERY configured attempt in full before giving up —
+  // confirmed live at 65-72 seconds for "explain how a for loop works in python" across repeated real-worker runs,
+  // close to (number of attempts) x (their ~20s individual timeout). Re-tested the identical question moments
+  // later in isolation and it answered correctly on the FIRST attempt in under 3 seconds — this is not a
+  // deterministic bug in one question, it is what happens on the rare occasions several free-tier providers are
+  // degraded at once, most likely worsened by this same session's own repeated, rapid test batches saturating
+  // shared rate limits. Either way, a user should not wait over a minute to be told the brain is unavailable: an
+  // overall deadline caps the total time this function will spend trying attempts, so a bad stretch fails fast
+  // instead of exhausting every remaining key and provider. The FIRST attempt always gets to run (so a lone slow-
+  // but-working provider is never pre-empted); the deadline is only checked BEFORE starting each subsequent one.
+  // Deep mode (long-form writing/research) keeps a larger budget — the existing per-attempt comment above already
+  // notes "long writing asks for more time", and that is a real, legitimate need, not the failure being fixed here.
+  const overallDeadline = Date.now() + (opts.overallBudgetMs ?? (opts.deep ? 45000 : 24000));
   const errs = [];
-  for (const a of attempts) { try { const t = await a.fn(); if (t && isDegenerate(t)) { errs.push(a.name + ": rambling answer discarded"); continue; } if (t) return t; errs.push(a.name + ": empty"); } catch (e) { errs.push(a.name + ": " + e.message); } }
+  for (let i = 0; i < attempts.length; i++) {
+    if (i > 0 && Date.now() > overallDeadline) { errs.push("(stopped after " + i + " attempts: overall time budget used up)"); break; }
+    const a = attempts[i];
+    try {
+      const t = await a.fn();
+      if (t && isDegenerate(t)) { errs.push(a.name + ": rambling answer discarded"); _brainDbg.push(a.name + ": " + t.slice(0, 400)); continue; }
+      if (t) return t;
+      errs.push(a.name + ": empty");
+    } catch (e) { errs.push(a.name + ": " + e.message); }
+  }
   throw new Error("Noria's brain is unavailable → " + errs.join(" | "));
 }
 
@@ -2925,7 +2951,7 @@ export default {
         const text = stripCiteArtifacts(sanitizeOutputArtifacts(noLeak(await plainVerified(messages, env, { deep, maxTokens: deep ? 8000 : 2600, temperature }))));
         return new Response(JSON.stringify(body.debug ? { answer: text, usage: _lastUsage, logic: _logicDbg, intent: _intentDbg } : { answer: text }), { headers: JSON_H });
       } catch (e) {
-        return new Response(JSON.stringify({ error: e.message }), { status: 503, headers: JSON_H });
+        return new Response(JSON.stringify(Object.assign({ error: e.message }, body.debug ? { brain: _brainDbg } : {})), { status: 503, headers: JSON_H });
       }
     }
 
