@@ -1240,9 +1240,17 @@ const mathWordProblem = (q) => ((String(q || "").match(/\d+(?:[.,]\d+)?/g) || []
 const PROMPT_LEAK = /IDENTITY & DISCRETION|PRESENCE & CONFIDENCE|HANDLING QUESTIONS ABOUT YOURSELF|YOUR HIGHEST DUTY IS TRUTH|SAFETY IS NON-NEGOTIABLE/i;
 const LEAK_REPLY = "I keep my inner instructions private, but I am glad to tell you what I can help with and how I work. What would you like to do?";
 const noLeak = (t) => (PROMPT_LEAK.test(String(t || "")) ? LEAK_REPLY : t);
-// Some models cite with their own bracket tokens (e.g. 【3†L1-L3】) instead of the plain [n] the context asks for.
-// Those are internal retrieval artifacts, not readable sources, and they must never reach the reader as raw glyphs.
-// Only bracket blocks that contain a dagger (the citation separator) are removed, so ordinary text is untouched.
+// Some models cite with their own bracket tokens (e.g. 【3†L1-L3】, or just a bare 【2】) instead of the plain [n] the
+// context asks for. Those are internal retrieval artifacts, not readable sources, and they must never reach the
+// reader as raw glyphs.
+//
+// FOUND LIVE 2026-10-01: the original version here only stripped a 【...】 block if it contained a dagger (the
+// citation separator in the fuller form), so a bare 【2】 — the same underlying leaked-retrieval-marker behaviour,
+// just without the extra detail — reached the user verbatim ("The capital of Australia is Canberra【2】"). Noria's
+// own prompts never ask any model to use these specific CJK fullwidth brackets for anything — her own citation
+// convention is the plain ASCII "[n]" the comment above already names — so the bracket CHARACTERS themselves are
+// the leak signal, not merely the dagger inside them; any 【...】/〖...〗/〚...〛 content is now stripped regardless of
+// what it contains, closing both the fuller and the bare form with one general rule instead of two cases.
 //
 // FOUND LIVE 2026-10-01, while building output_quality_t.mjs for an unrelated fix: the whitespace-tidy step below
 // (`[ \t]{2,}` -> a single space) applies to the WHOLE text with no awareness of fenced code blocks, so any code
@@ -1253,16 +1261,26 @@ const noLeak = (t) => (PROMPT_LEAK.test(String(t || "")) ? LEAK_REPLY : t);
 // untouched" technique public/workspace.js's renderMd() already uses client-side for a related reason) so the
 // citation/whitespace cleanup only ever touches prose.
 const FENCE = /```[\s\S]*?```/g;
+// FOUND 2026-10-01, while diagnosing the citation-leak bug below: the fence placeholder here was a BARE digit
+// string ("0", "1", ...) with no delimiter of its own, and the restore step at the end matched ANY digit run in
+// the whole cleaned text (`/(\d+)/g`) to put a fence block back - not just its own placeholders. With zero
+// fenced code blocks (the common case) `blocks` is empty, so EVERY plain number in EVERY answer - a year, a
+// count, anything - was being replaced by `blocks[+i]`, i.e. `undefined`, turning "World War II ended in 1945"
+// into "...in undefined". Confirmed locally; confirmed the currently-live deploy predates this regression
+// (verified live: "what year did world war 2 end" still correctly answers "1945"), so this was caught before
+// ever reaching production. Fixed by using Private-Use-Area characters as delimiters around the placeholder
+// index, so the restore regex can only ever match its own synthetic placeholder, never ordinary digits that
+// happen to appear in real prose.
 const stripCiteArtifacts = (s) => {
   const blocks = [];
-  const hidden = String(s || "").replace(FENCE, (m) => { blocks.push(m); return "" + (blocks.length - 1) + ""; });
+  const hidden = String(s || "").replace(FENCE, (m) => { blocks.push(m); return "\uE010" + (blocks.length - 1) + "\uE011"; });
   const cleaned = hidden
-    .replace(/[【〖〚][^】〗〛]*†[^】〗〛]*[】〗〛]/g, "") // 【N†L1-L3】 and kin
-    .replace(/\[[^\]\n]*†[^\]\n]*\]/g, "")                                                                // ascii [N†L1-L3] variant
+    .replace(/[【〖〚][^】〗〛]*[】〗〛]/g, "")        // any CJK fullwidth bracket content, dagger or not - the brackets themselves are the leak signal (covers both the fuller "【N†...】" form and a bare "【2】")
+    .replace(/\[[^\]\n]*\u2020[^\]\n]*\]/g, "")                                                                // ascii [N†L1-L3] variant (dagger required: plain "[2]" is a legitimate footnote-style reference, not an artifact)
     .replace(/[ \t]+([.,;:!?])/g, "$1")                                                                        // tidy any space left before punctuation
     .replace(/[ \t]{2,}/g, " ")
     .trim();
-  return cleaned.replace(/(\d+)/g, (_, i) => blocks[+i]);
+  return cleaned.replace(/\uE010(\d+)\uE011/g, (_, i) => blocks[+i]);
 };
 // ── OUTPUT QUALITY (STAGE 2, 2026-10-01) — "the final response should be treated as a controlled output, not
 // raw model text" — check for accidental JSON, broken markup, duplicated tag artifacts, and internal debugging
