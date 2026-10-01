@@ -95,20 +95,37 @@ export async function officeholderLookup(title) {
 // "2027 FIFA Women's World Cup", a real hit for the identical search, is a different year and a different
 // competition entirely) from ever being treated as a match: it is outnumbered by the real edition's own sub-pages
 // and is correctly never counted as part of the majority group.
+// FOUND LIVE 2026-10-01, in a capability battery re-run once Tavily's search quota recovered: "who won the most
+// recent US presidential election" surfaced a confusing mix including "2028 United States presidential election" —
+// a real hit, but a SCHEDULED FUTURE election that by definition has no winner yet — alongside several 2020 hits,
+// with zero 2024 hits in the actual search results. Two related fixes: (1) a future-dated edition (year greater
+// than the real current year) can never be the answer to a "who WON" question and is now excluded from candidacy
+// entirely, regardless of how many sub-pages it has; (2) selection switched from "the year with the MOST
+// corroborating hits" to "the MOST RECENT year that still has at least two corroborating hits" — "most hits" suits
+// a single sports tournament (one edition generates dozens of sub-pages, vastly outnumbering any other year's
+// mention, the original FIFA World Cup case this function was built for), but is a noisy signal for an event type
+// like an election where each year typically has only a handful of pages; "most recent, sufficiently corroborated"
+// more directly matches what "most recent/last X" actually asks for, in both cases. The >=2-corroborating-hits
+// safety requirement is unchanged: a lone, unconfirmed year is still never treated as a match.
 function dominantEventTitle(hits) {
   const yearStart = /^(\d{4})\s+(.+)$/;
+  const currentYear = new Date().getUTCFullYear();
   const byYear = new Map(); // year -> [ [word,word,...], ... ]
   for (const h of hits || []) {
     if (/^list of\b/i.test(h.title)) continue;
     const m = yearStart.exec(h.title);
     if (!m) continue;
+    if (Number(m[1]) > currentYear) continue; // a scheduled future edition cannot have a winner yet
     const words = h.title.split(/\s+/);
     if (!byYear.has(m[1])) byYear.set(m[1], []);
     byYear.get(m[1]).push(words);
   }
   let bestYear = null, bestGroup = null;
-  for (const [year, group] of byYear) if (!bestGroup || group.length > bestGroup.length) { bestYear = year; bestGroup = group; }
-  if (!bestGroup || bestGroup.length < 2) return null; // need at least two sub-pages agreeing, never a lone, unconfirmed guess
+  for (const [year, group] of byYear) {
+    if (group.length < 2) continue; // need at least two sub-pages agreeing, never a lone, unconfirmed guess
+    if (!bestYear || year > bestYear) { bestYear = year; bestGroup = group; }
+  }
+  if (!bestGroup) return null;
   let lcp = bestGroup[0];
   for (const words of bestGroup.slice(1)) {
     let i = 0; while (i < lcp.length && i < words.length && lcp[i].toLowerCase() === words[i].toLowerCase()) i++;
