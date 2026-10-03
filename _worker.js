@@ -1866,7 +1866,17 @@ function liveStrength(q) {
   if (asksAboutNoriaItself(s)) return "no";
   if (ACTION_ASK.test(s)) return "no";
   if (OPINION_OR_SELF.test(s) && !officeAsk(s) && !MOVING_VALUE.test(s)) return "no";
-  if (s.length < 400 && ENTITY_PROBE.test(s)) return "must";
+  // FOUND LIVE (2026-10-03): "What is the capital of France and why is Paris important?" matches ENTITY_PROBE
+  // ("what is" + a capitalised entity, "France"/"Paris") and returned "must" HERE, before ever reaching the
+  // STABLE_FACT check below that exists specifically to exempt exactly this shape ("capital of", "currency of",
+  // "official language"...). Forced into an unnecessary search for one of the most basic facts there is, the
+  // model's correct answer then failed the strict live-evidence verification (built for checkable current facts,
+  // not encyclopedic trivia) three times and fell back to a raw, fragmented, English-template search dump —
+  // reproduced identically in English and French, so this was never a language issue, just this ordering one.
+  // Guarded the same way the STABLE_FACT check itself already is (LIVE_CUE) so a genuinely current version of
+  // the same shape ("what is the current capital of..." / "...current official language of the newly split
+  // country") still forces "must" as before.
+  if (s.length < 400 && ENTITY_PROBE.test(s) && !(STABLE_FACT.test(s) && !LIVE_CUE.test(s))) return "must";
   const adminGeo = ADMIN_DIVISION.test(s) && hasEntity(s);
   // a puzzle with its own numbers ("a bat and a ball cost 1.10 in total…") is worked out, not looked up; a market or rate word keeps it a lookup
   if (mathWordProblem(s) && !LIVE_CUE.test(s) && !officeAsk(s) && !/\b(bitcoin|btc|stock|share price|gold|oil|exchange|rate|dollar|cedi|euro|pound|crypto|market|today|now|current|latest)\b/i.test(s)) return "no";
