@@ -1947,9 +1947,22 @@ function FACTUAL_QUESTION_DEFAULT(s) {
   const words = s.trim().split(/\s+/).filter(Boolean);
   if (words.length < 4) return false; // "really?", "you sure?" — too short to carry a checkable claim
   // a WH-question word opening the sentence, or a yes/no auxiliary-inversion question, or an explicit "?"
+  // FOUND LIVE (2026-10-03), far more serious than the STABLE_FACT additions above: "من هو الرئيس الحالي لمصر؟"
+  // (Arabic for "who is the current president of Egypt?") reached bare model memory with NO search, NO
+  // verification, NO evidence field at all in the response — not a quality gap, the exact fabrication risk the
+  // whole Reality Layer exists to prevent, just not triggered because every classifier in this file (officeAsk,
+  // liveStrength, the lock-domain detector) is built entirely on English keywords, and even THIS catch-all safety
+  // net's own trailing-"?" check looked only for the ASCII question mark (U+003F), never the distinct Arabic one,
+  // "؟" (U+061F), that the sentence actually ended with. It happened to answer correctly this time (el-Sisi is
+  // genuinely the current president) — that was luck, not the guard working. This does not make officeAsk/
+  // liveStrength/lock-domain detection multilingual (a translation of every keyword list is a far larger, separate
+  // piece of work), but it does make the one DEFAULT safety net this function exists to be ("still recognisably
+  // asking about an external fact → evidence-required BY DEFAULT") recognize a non-English question as a question,
+  // so a script this file has no keyword coverage for fails toward search/verification, never toward silent,
+  // unguarded memory.
   return /^\s*(?:and\s+|so\s+|well\s+|please\s+|okay?,?\s+)?(?:what|who|whom|whose|which|when|where|why|how)\b/i.test(s) ||
     /^\s*(?:is|are|was|were|does|did|do|has|have|had|can|could|will|would)\b/i.test(s) ||
-    /\?\s*$/.test(s);
+    /[?؟]\s*$/.test(s);
 }
 const NO_LIVE_ANSWER = "I couldn't find reliable, current information about that: either nothing matches, or my live sources did not answer just now. It is the kind of question where a guess could mislead you, so I would rather not make one. If it is a real company, person or event, tell me a little more (the country or the field) and I will look again.";
 
