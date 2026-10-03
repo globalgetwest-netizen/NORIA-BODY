@@ -1485,8 +1485,19 @@ async function plainVerified(messages, env, opts) {
   // travel-day narrative) is completely unaffected; only a specific figure absent from the client's own supplied
   // evidence is flagged. Any future guided document gets this for free just by using the same injection marker;
   // no per-topic keyword list involved.
+  // FOUND LIVE (2026-10-03): this regex was case-insensitive and required no more than the bracket+phrase, so it
+  // matched far more than the real structural marker it was built for. persona.js's own always-present system
+  // prompt contains the ordinary sentence "If [live web results] are provided, base factual answers on them" (the
+  // TRUTH paragraph) — lowercase, plain prose, not a data block — and the /i flag made that an exact hit on every
+  // single turn, for every client, forever. The result: plainVerified's "client-injected evidence" check fired on
+  // ~every answer, and finish() flagged ANY number in the model's own reply that didn't happen to appear verbatim
+  // in the 14KB persona text as "could not be confirmed" — reproduced live on "the ball costs $0.05" for a bat-
+  // and-ball riddle the model solved correctly and unaided. The REAL markers this was built to catch (public/
+  // workspace.js) are always uppercase and always followed immediately by " — " (an em dash) before real injected
+  // content: '[LIVE WEB RESULTS — retrieved ...' / '[ATTACHED BY THE USER — use this ...'. Matching that exact
+  // shape (case-sensitive, em dash required) catches only the real structural marker and never ordinary prose.
   const sysText = messages.filter((m) => m.role === "system").map((m) => m.content).join(" ");
-  const clientEvidence = /\[LIVE WEB RESULTS|\[ATTACHED BY THE USER/i.test(sysText) ? sysText : "";
+  const clientEvidence = /\[LIVE WEB RESULTS —|\[ATTACHED BY THE USER —/.test(sysText) ? sysText : "";
   const finish = (t) => {
     if (!clientEvidence) return t;
     const mismatches = numbersNotIn(t, clientEvidence);
