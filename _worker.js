@@ -409,14 +409,24 @@ function noLiveBlock() {
 // A long or multi-part question makes a poor web-search phrase (the results drift off-topic). Turn it
 // into at most two short, focused search queries with a fast model; short questions are used as-is.
 // Any failure falls back to the original question, so this can only ever help.
-async function planSearchQueries(q, env) {
+// FOUND LIVE (2026-10-03), a real multi-turn conversation: after several turns comparing two named delivery
+// apps' commission rates, the follow-up "going back to the apps you mentioned earlier, which one had the
+// lower commission again?" searched the web for bare "commission" with zero conversation context — the
+// question was passed to this function ALONE, with no way to know "those apps" meant the two named earlier.
+// Google found real-estate-agent commission comparisons and Noria answered confidently and entirely off
+// topic — the exact "brings something different" failure reported live, specifically in a continuing
+// conversation. historyContext (the recent turns, built by the caller) lets the planner resolve a pronoun or
+// backreference into a self-contained, on-topic query before anything is searched.
+async function planSearchQueries(q, env, historyContext) {
   const s = String(q || "").trim();
-  if (s.split(/\s+/).length <= 10 && (s.match(/\?/g) || []).length <= 1) return [s];
+  // A short, plain question is safe to use as-is ONLY with no conversation history to possibly refer back to —
+  // "which one had the lower commission" is 8 words and would take this shortcut unresolved if history existed.
+  if (!historyContext && s.split(/\s+/).length <= 10 && (s.match(/\?/g) || []).length <= 1) return [s];
   for (const key of rotate(groqKeys(env))) {
     try {
       const t = await openaiCompatible("https://api.groq.com/openai/v1/chat/completions", key, [env.GROQ_FAST_MODEL || "openai/gpt-oss-20b"], [
-        { role: "system", content: "Turn the user's question into at most 2 short, focused web-search queries that together find the facts needed (for example one for who currently holds an office, one for the recent news about it). Output ONLY a JSON array of strings, nothing else." },
-        { role: "user", content: s.slice(0, 500) },
+        { role: "system", content: "Turn the user's question into at most 2 short, focused web-search queries that together find the facts needed (for example one for who currently holds an office, one for the recent news about it). If the question refers back to the conversation (words like 'those', 'that one', 'it', 'the one you mentioned', 'again'), use the conversation so far to work out exactly what is being asked about and write a self-contained query that names it directly — never output a vague query that drops the real subject. Output ONLY a JSON array of strings, nothing else." },
+        { role: "user", content: (historyContext ? "CONVERSATION SO FAR:\n" + historyContext + "\n\n" : "") + "CURRENT QUESTION: " + s.slice(0, 500) },
       ], { maxTokens: 800, temperature: 0 });
       const m = String(t || "").match(/\[[\s\S]*\]/);
       const arr = m ? JSON.parse(m[0]) : [];
@@ -2747,7 +2757,12 @@ async function groundMessages(messages, body, env) {
   const evidenceRequired = requiresEvidence(q, taskAssistance);
   const want = office || body.ground === true || evidenceRequired || (body.ground !== false && strength !== "no");
   if (!want || !q) return { messages, grounded: false };
-  const queries = office ? [q.replace(/[?!.]+$/, "") + " " + new Date().getUTCFullYear()] : await withTimeout(planSearchQueries(q, env), 4000, [q]);
+  // Recent turns only (not the current question, already `q`; not the system prompt, which is instructions,
+  // not content) — enough for the query planner to resolve "those", "that one", "again" into what was
+  // actually being discussed, without ballooning the planning call with the whole conversation.
+  const recentHistory = messages.slice(0, -1).filter((m) => m.role !== "system").slice(-6)
+    .map((m) => (m.role === "assistant" ? "Noria: " : "User: ") + String(m.content || "").slice(0, 300)).join("\n");
+  const queries = office ? [q.replace(/[?!.]+$/, "") + " " + new Date().getUTCFullYear()] : await withTimeout(planSearchQueries(q, env, recentHistory), 4000, [q]);
   const lists = await Promise.all(queries.map((x) => withTimeout(webSearch(x, env, strength === "must" || office), 9000, [])));
   const seen = new Set(), results = [];
   for (const list of lists) for (const r of list || []) { const k = r && (r.url || r.title); if (k && !seen.has(k)) { seen.add(k); results.push(r); } }
