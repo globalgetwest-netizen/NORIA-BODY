@@ -1761,7 +1761,17 @@ const STATE_Q = /\b(who|what|which)\s+(is|are|was|were)\b|\b(?:what|which)\s+\w+
 // fails after a French word ending in an accented letter (inventé, composé: the accented char and a following
 // space are BOTH non-word characters, so no boundary ever occurs there), confirmed by direct testing before this
 // shipped. The leading \b is kept, so this still cannot match mid-word ("decapitalize" does not trigger it).
-const STABLE_FACT = /\b(capital of|currency of|official language|largest (country|city|ocean)|who (wrote|invented|discovered|painted|composed)|meaning of|definition of|synonym|antonym|boiling point|melting point|formula for|symbol for|atomic number|capitale d[eu]|devise de|monnaie de|langue officielle|plus grande? (?:pays|ville|océan)|qui a (?:écrit|invent[ée]|découvert|peint|compos[ée])|signification de|définition de|synonyme|antonyme|point d.ébullition|point de fusion|formule de|symbole de|numéro atomique)(?=[^A-Za-zÀ-ÿ]|$)/i;
+// FOUND LIVE (2026-10-03), same session as the French addition just above: the Swahili phrasing of the identical
+// compound question ("Mji mkuu wa Kenya ni mji gani na kwa nini ni muhimu?") reproduced the exact same raw-dump
+// failure — confirmed first that a SHORT Swahili capital question alone answers fine (the model's short answer
+// just happened to pass verification anyway), then confirmed the compound form fails exactly like the French
+// case did, for the identical reason. East Africa (Kenya, Tanzania, Uganda) is as real a Noria market as the
+// Francophone one above, so the same small set of evergreen noun-phrase categories is added. Deliberately
+// SCOPED to simple noun phrases (capital/currency/official-language/largest X) rather than the verb-phrase ones
+// ("who invented/wrote/discovered") — getting Swahili verb morphology wrong risks shipping an incorrect phrase,
+// and since this is purely additive, an imperfect phrase would only mean no improvement for it, never a
+// regression, so the simple, high-confidence phrases are added now and the rest can follow if found live.
+const STABLE_FACT = /\b(capital of|currency of|official language|largest (country|city|ocean)|who (wrote|invented|discovered|painted|composed)|meaning of|definition of|synonym|antonym|boiling point|melting point|formula for|symbol for|atomic number|capitale d[eu]|devise de|monnaie de|langue officielle|plus grande? (?:pays|ville|océan)|qui a (?:écrit|invent[ée]|découvert|peint|compos[ée])|signification de|définition de|synonyme|antonyme|point d.ébullition|point de fusion|formule de|symbole de|numéro atomique|mji mkuu wa|sarafu ya|lugha rasmi|nchi kubwa zaidi|mji mkubwa zaidi|jiji kubwa zaidi|bahari kubwa zaidi)(?=[^A-Za-zÀ-ÿ]|$)/i;
 const STATUS_Q = /\bis\s+.{2,40}\b(available|open|closed|legal|banned|allowed|working|down|operating)\b/i;
 const NOT_ENTITY = new Set("I,I'm,I've,I'd,I'll,Noria,The,A,An,What,Who,Which,Where,When,Why,How,Is,Are,Was,Were,Do,Does,Did,Can,Could,Should,Would,Will,Tell,Give,Show,Please,Monday,Tuesday,Wednesday,Thursday,Friday,Saturday,Sunday,January,February,March,April,May,June,July,August,September,October,November,December,English,Ok,Okay,Hi,Hello,Hey,Thanks".split(","));
 function hasEntity(q) { // a capitalised name somewhere after the first word: a specific person, place or organisation is being asked about
