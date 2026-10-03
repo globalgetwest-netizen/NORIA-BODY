@@ -1752,7 +1752,16 @@ const MOVING_VALUE = /\b(price|cost of|rate|worth|net worth|population|score|sco
 // crops are grown in X", "what religions are practised in Y") — proven live: this exact phrasing about
 // Burkina Faso's languages produced an unsourced table with invented population-share percentages.
 const STATE_Q = /\b(who|what|which)\s+(is|are|was|were)\b|\b(?:what|which)\s+\w+(?:\s+\w+){0,3}\s+(?:is|are|was|were)\b|\bwho\s+(leads|runs|heads|owns|manages|coaches|captains|founded|won|wins|plays|represents|replaced|succeeded|replaces|took over)\b|\bhow (much|many)\b|\bis\s+.{2,40}\b(still|alive|dead|married|open|closed|available|legal|banned|real|true|dating|retired)\b/i;
-const STABLE_FACT = /\b(capital of|currency of|official language|largest (country|city|ocean)|who (wrote|invented|discovered|painted|composed)|meaning of|definition of|synonym|antonym|boiling point|melting point|formula for|symbol for|atomic number)\b/i;
+// FOUND LIVE (2026-10-03): the French phrasing of this exact same question ("Quelle est la capitale de la
+// France...") hit the same raw-search-dump failure as the ENTITY_PROBE-ordering bug just fixed above, but for a
+// different reason — STABLE_FACT itself only ever recognized the English phrases. Given Noria's own Africa-wide
+// audience includes major Francophone markets (Senegal, Côte d'Ivoire, Mali, Cameroon, DR Congo…), the identical
+// French phrasing of the same handful of evergreen trivia categories is added here, not a general translation
+// layer. The trailing \b was replaced with a lookahead accepting "any non-letter, or end of string" — a bare \b
+// fails after a French word ending in an accented letter (inventé, composé: the accented char and a following
+// space are BOTH non-word characters, so no boundary ever occurs there), confirmed by direct testing before this
+// shipped. The leading \b is kept, so this still cannot match mid-word ("decapitalize" does not trigger it).
+const STABLE_FACT = /\b(capital of|currency of|official language|largest (country|city|ocean)|who (wrote|invented|discovered|painted|composed)|meaning of|definition of|synonym|antonym|boiling point|melting point|formula for|symbol for|atomic number|capitale d[eu]|devise de|monnaie de|langue officielle|plus grande? (?:pays|ville|océan)|qui a (?:écrit|invent[ée]|découvert|peint|compos[ée])|signification de|définition de|synonyme|antonyme|point d.ébullition|point de fusion|formule de|symbole de|numéro atomique)(?=[^A-Za-zÀ-ÿ]|$)/i;
 const STATUS_Q = /\bis\s+.{2,40}\b(available|open|closed|legal|banned|allowed|working|down|operating)\b/i;
 const NOT_ENTITY = new Set("I,I'm,I've,I'd,I'll,Noria,The,A,An,What,Who,Which,Where,When,Why,How,Is,Are,Was,Were,Do,Does,Did,Can,Could,Should,Would,Will,Tell,Give,Show,Please,Monday,Tuesday,Wednesday,Thursday,Friday,Saturday,Sunday,January,February,March,April,May,June,July,August,September,October,November,December,English,Ok,Okay,Hi,Hello,Hey,Thanks".split(","));
 function hasEntity(q) { // a capitalised name somewhere after the first word: a specific person, place or organisation is being asked about
