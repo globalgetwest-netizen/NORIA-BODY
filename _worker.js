@@ -3181,6 +3181,53 @@ export default {
       });
       return new Response(stream, { headers: SSE_H });
     }
+    // ── Brain: agent (Noria Pro) — Stage 5 of the owner's architecture direction (2026-10-04). ──
+    // The planner (agent/planner.js), the Executor (agent/executor.js, read-only-live, owner-authorised at the
+    // gate), the tool registry and the audit log have all existed, tested, for a while; calc.math has been
+    // genuinely wired through them since Stage 4 (see executedCalc above). What was missing — the exact gap the
+    // capability registry itself names under "Autonomous action: not built for real use... not connected to the
+    // app at all" — was a chat-reachable route that actually calls the planner, runs the validated plan through
+    // the Executor, and hands the real results back. This is that route, extended to the three tools that need no
+    // cross-source verdict reconciliation (calc.math, clock.now, reference.list — see chat-tools.js). It is NOT a
+    // claim that every tool in the registry is agentic yet: weather/fx/crypto/stock/web.search remain future,
+    // separately-scoped work, and nothing that ACTS (email, calendar, purchases) is reachable here or anywhere —
+    // that stays blocked at agent/gate.js regardless of what this route does.
+    if (path === "/brain/agent" && request.method === "POST") {
+      let b; try { b = await request.json(); } catch (_) { b = {}; }
+      const objective = String(b.query || b.objective || "").trim().slice(0, 1200), code = String(b.pro || "");
+      if (objective.length < 4) return new Response(JSON.stringify({ error: "Tell me what you'd like the agent to do." }), { status: 400, headers: JSON_H });
+      if (!(await proValid(env, code))) return new Response(JSON.stringify({ error: "The agent is part of Noria Pro." }), { status: 402, headers: JSON_H });
+      const catalog = listTools({});
+      let raw;
+      try {
+        const t = await brainComplete(buildPlannerMessages(objective, plannerCatalog({}), new Date().toISOString().slice(0, 10)), env, { maxTokens: 1800, temperature: 0, timeoutMs: 25000 });
+        raw = extractJson(t);
+      } catch (e) { return new Response(JSON.stringify({ error: "Could not build a plan right now. Please try again in a moment.", detail: b.debug ? String((e && e.message) || e).slice(0, 300) : undefined }), { status: 502, headers: JSON_H }); }
+      const { valid, plan, issues } = validatePlan(raw, objective, catalog, { now: new Date().toISOString() });
+      if (!valid || !plan) return new Response(JSON.stringify({ error: "Could not build a usable plan for that.", issues: issues || [] }), { status: 502, headers: JSON_H });
+      const runtime = new ChatToolRuntime({ safeCalc, clockDirect, refDirect, tz: b.tz });
+      const executor = new Executor({ catalog, runtime, policy: { mode: "read-only-live" }, audit: new AuditLog() });
+      let outcome;
+      try { outcome = await executor.execute({ valid: true, plan }); }
+      catch (e) { return new Response(JSON.stringify({ error: "The plan could not be run.", detail: b.debug ? String((e && e.message) || e).slice(0, 300) : undefined }), { status: 502, headers: JSON_H }); }
+      // Composed strictly from what the tasks actually returned — never from the objective or the model's own
+      // memory — the same evidence-only discipline the rest of this file holds every other answer to.
+      const evidence = outcome.tasks.map((t) => "TASK " + t.id + " (" + t.description + "): status=" + t.status +
+        (t.output ? " output=" + JSON.stringify(t.output).slice(0, 500) : "") + (t.notes && t.notes.length ? " notes=" + t.notes.join("; ") : "") + (t.error ? " error=" + t.error : "")).join("\n");
+      let answer;
+      try {
+        answer = await brainComplete([
+          { role: "system", content: "You just ran a plan using real tools. Below is exactly what each task returned — nothing else is true. Write a clear, direct answer to the objective using ONLY these results: never add a fact, name, date or number that is not in them. If a task failed, was blocked or is missing a capability, say so plainly and name what is missing — never guess to fill the gap." },
+          { role: "user", content: "OBJECTIVE: " + objective + "\n\nTASK RESULTS:\n" + evidence },
+        ], env, { maxTokens: 1200, temperature: 0.2, timeoutMs: 20000 });
+      } catch (_) { answer = "Here is exactly what the plan's tasks found:\n\n" + evidence; }
+      return new Response(JSON.stringify({
+        answer: stripCiteArtifacts(sanitizeOutputArtifacts(answer)),
+        plan: { objective: plan.objective, tasks: plan.tasks.map((t) => ({ id: t.id, description: t.description, tools: t.tools, status: t.status, blocked_by: t.blocked_by })), missing_capabilities: plan.missing_capabilities, summary: plan.summary },
+        execution: { state: outcome.state, counts: outcome.counts, tasks: outcome.tasks.map((t) => ({ id: t.id, status: t.status, tool: t.tool, notes: t.notes })) },
+        audit: outcome.audit,
+      }), { headers: JSON_H });
+    }
     // ── Brain: streaming (SSE) — translate Groq deltas to the app's {token}/{done} ──
     if (path === "/brain/ask/stream" && request.method === "POST") {
       let body; try { body = await request.json(); } catch (_) { body = {}; }

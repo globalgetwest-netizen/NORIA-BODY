@@ -23,8 +23,15 @@
 // availability, input schema, permission, risk/approval, idempotency, execute, observe/sanitize, verify, recover)
 // — this is not a relabelled direct function call. See chat_tool_bridge_t.mjs for the proof: it inspects the real
 // audit log the Executor produces, not just the final answer.
+//
+// EXTENDED (2026-10-04), same incremental spirit as the calc.math bridge above: clock.now and reference.list are
+// added because, like calc.math, they are deterministic (verify:"exact") and carry no cross-source verdict model
+// to reconcile — _worker.js's existing clockDirect/refDirect already produce a plain string answer with nothing
+// else to adjudicate. weather/fx/crypto/stock are deliberately still NOT here, for the exact reason stated above:
+// their VERIFIED/PARTIALLY_VERIFIED/CONFLICTING/STALE verdict model is real, separate work, not something to
+// shortcut just to make this runtime serve more tool names.
 
-export const CHAT_TOOL_NAMES = new Set(["calc.math"]);
+export const CHAT_TOOL_NAMES = new Set(["calc.math", "clock.now", "reference.list"]);
 
 export class ChatToolRuntime {
   constructor(deps) {
@@ -33,6 +40,9 @@ export class ChatToolRuntime {
     this.readOnly = true; // this runtime never serves a write-risk tool; enforced again by the shared gate regardless
     this.touched = [];
     this.calc = (deps && deps.safeCalc) || null;
+    this.clockFn = (deps && deps.clockDirect) || null;
+    this.refFn = (deps && deps.refDirect) || null;
+    this.tz = (deps && deps.tz) || "UTC";
   }
   supports(tool) { return CHAT_TOOL_NAMES.has(tool.name); }
   report() { return { requests: 0, unexpected: [], storage_changed: false, internal_store_only: true }; }
@@ -43,6 +53,18 @@ export class ChatToolRuntime {
       if (!r) return { ok: false, error: "not a plain calculation the clock, calculator or reference library can answer", retryable: false };
       if (r.error) return { ok: false, error: r.error, retryable: false }; // e.g. division by zero: refused, never guessed
       return { ok: true, output: { value: r.value, answer: r.text } };
+    }
+    if (tool.name === "clock.now") {
+      if (!this.clockFn) return { ok: false, error: "no clock implementation was provided", retryable: false };
+      let answer; try { answer = this.clockFn(input && input.question, this.tz); } catch (e) { return { ok: false, error: String((e && e.message) || e), retryable: false }; }
+      if (!answer) return { ok: false, error: "not a date/time question the clock can answer directly", retryable: false };
+      return { ok: true, output: { answer } };
+    }
+    if (tool.name === "reference.list") {
+      if (!this.refFn) return { ok: false, error: "no reference-library implementation was provided", retryable: false };
+      let answer; try { answer = this.refFn(input && input.list); } catch (e) { return { ok: false, error: String((e && e.message) || e), retryable: false }; }
+      if (!answer) return { ok: false, error: "not a fixed reference list in the verified library", retryable: false };
+      return { ok: true, output: { answer } };
     }
     return { ok: false, error: "not a chat-served tool", retryable: false };
   }
