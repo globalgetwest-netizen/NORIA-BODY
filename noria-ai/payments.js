@@ -64,7 +64,11 @@ async function paystack(env, path, opts = {}) {
   try {
     r = await fetch(PAYSTACK_API + path, {
       method: opts.method || 'GET',
-      headers: Object.assign({ Authorization: 'Bearer ' + env.PAYSTACK_SECRET_KEY, 'Content-Type': 'application/json' }, opts.headers || {}),
+      // .trim(): found live — "Format is Authorization Bearer [secret key]" from Paystack points to a
+      // stray whitespace/newline character in the stored secret (an easy slip when pasting into an
+      // interactive `wrangler secret put` prompt). Trimming is ordinary input hygiene, not a security
+      // change — it does not alter what key is accepted, only strips accidental surrounding whitespace.
+      headers: Object.assign({ Authorization: 'Bearer ' + String(env.PAYSTACK_SECRET_KEY || '').trim(), 'Content-Type': 'application/json' }, opts.headers || {}),
       body: opts.body ? JSON.stringify(opts.body) : undefined,
     })
     d = await r.json()
