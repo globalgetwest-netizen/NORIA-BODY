@@ -166,28 +166,5 @@ export async function handlePayments(request, env, url, json) {
     return json({ active: !!row && row.status === 'active', status: row ? row.status : 'none' })
   }
 
-  // TEMPORARY DIAGNOSTIC — only live when DEV_MODE=1 is explicitly set (already true, per the earlier
-  // debugging step). Reveals ONLY metadata about the stored secret (length, whether it carries stray
-  // whitespace/quotes/the literal word "Bearer", its first 8 characters — the public "sk_test_"/
-  // "sk_live_" marker every Paystack key starts with, not sensitive on its own) — never the key value
-  // itself or any portion of its actual secret portion. Built specifically to diagnose a live, repeated
-  // "Format is Authorization Bearer [secret key]" rejection without ever asking for or seeing the real
-  // key. Remove this route once the real root cause is confirmed and fixed.
-  if (path === '/pay/debug-key' && env.DEV_MODE === '1') {
-    const raw = String(env.PAYSTACK_SECRET_KEY || '')
-    return json({
-      length: raw.length,
-      trimmedLength: raw.trim().length,
-      first8: raw.slice(0, 8),
-      startsWithSk: /^sk_(test|live)_/.test(raw.trim()),
-      containsBearerWord: /bearer/i.test(raw),
-      containsWhitespaceInside: /\s/.test(raw.trim()),
-      containsQuotes: /["'`]/.test(raw),
-      containsNewline: /[\r\n]/.test(raw),
-      planCodeLength: String(env.PAYSTACK_PLAN_CODE || '').length,
-      planCodeFirst4: String(env.PAYSTACK_PLAN_CODE || '').slice(0, 4),
-    })
-  }
-
   return json({ error: 'Not found.' }, 404)
 }
