@@ -451,14 +451,23 @@ async function planSearchQueries(q, env, historyContext) {
 // output, all keys exhausted) this returns null and the caller falls back to the exact regex behavior already
 // proven in task_assistance_lock_t.mjs — this can only ever REFINE the decision, never remove the existing floor.
 let _intentDbg = ""; // read only by the body.debug flag on /brain/ask, same pattern as _judgeDbg/_logicDbg above
-async function classifyIntent(q, env) {
+// FOUND LIVE (2026-10-04), a real multi-turn conversation: Noria's OWN earlier turn said "...Gumboro around
+// day 14, and a Newcastle booster around day 21-28" (a vaccine schedule for a poultry farm); the follow-up
+// "which one comes right after the Gumboro one?" matches LOCK_WORDS.medical ("vaccine") and, judged on the bare
+// question alone, looks exactly like a brand-new fact_claim needing a live source — so it searched, found
+// nothing (this is personal conversational context, not a web-searchable question), and refused outright with
+// the medical-lock message, even though the actual answer was sitting right there in the conversation history,
+// already stated by Noria itself a few turns earlier. historyContext (the recent turns) lets the classifier see
+// that this is a RECALL of something already established, not a new unverified claim — the same root fix
+// already applied to planSearchQueries() for the "which delivery app had the lower commission again" case.
+async function classifyIntent(q, env, historyContext) {
   const s = String(q || "").trim();
   if (!s) return null;
   for (const key of rotate(groqKeys(env))) {
     try {
       const t = await openaiCompatible("https://api.groq.com/openai/v1/chat/completions", key, [env.GROQ_FAST_MODEL || "openai/gpt-oss-20b"], [
-        { role: "system", content: "Classify the user's message about a medical, immigration, legal or financial topic. Reply with ONLY a JSON object, nothing else, in this exact shape: {\"shape\":\"task_assistance\",\"needs_live_source\":false} or {\"shape\":\"fact_claim\",\"needs_live_source\":true} or {\"shape\":\"other\",\"needs_live_source\":true}. \"task_assistance\" means the user wants help DOING, ORGANISING, WRITING or UNDERSTANDING a task or their options (filling a form, preparing paperwork, planning, drafting, weighing choices) WITHOUT asking you to state one specific current number or status as certain. \"fact_claim\" means the user wants you to state one specific, checkable, time-sensitive fact as true right now (an exact fee, rate, deadline, or a yes/no legal status). needs_live_source must be true for \"fact_claim\" and for anything else genuinely uncertain; only \"task_assistance\" may have needs_live_source:false, and only when the help itself never requires asserting a specific current figure." },
-        { role: "user", content: s.slice(0, 500) },
+        { role: "system", content: "Classify the user's message about a medical, immigration, legal or financial topic. Reply with ONLY a JSON object, nothing else, in this exact shape: {\"shape\":\"task_assistance\",\"needs_live_source\":false} or {\"shape\":\"fact_claim\",\"needs_live_source\":true} or {\"shape\":\"other\",\"needs_live_source\":true}. \"task_assistance\" means the user wants help DOING, ORGANISING, WRITING or UNDERSTANDING a task or their options (filling a form, preparing paperwork, planning, drafting, weighing choices) WITHOUT asking you to state one specific current number or status as certain — OR the user is asking you to recall, repeat, clarify or continue something about a fact that an earlier message IN THE CONVERSATION BELOW already stated (not a brand-new, unverified claim); that also counts as task_assistance with needs_live_source:false. \"fact_claim\" means the user wants you to state one specific, checkable, time-sensitive fact as true right now that was NOT already given earlier in this conversation (an exact fee, rate, deadline, or a yes/no legal status). needs_live_source must be true for \"fact_claim\" and for anything else genuinely uncertain; only \"task_assistance\" may have needs_live_source:false." },
+        { role: "user", content: (historyContext ? "CONVERSATION SO FAR:\n" + historyContext + "\n\n" : "") + "CURRENT MESSAGE: " + s.slice(0, 500) },
       // maxTokens found live 2026-09-30 to matter a lot: this Groq model (openai/gpt-oss-20b) spends tokens on an
       // internal reasoning pass BEFORE its visible answer (confirmed via a live response's own
       // usage.completion_tokens_details.reasoning_tokens: 70) — a small budget here returned completely EMPTY
@@ -2753,6 +2762,13 @@ const LOGIC_Q = /\b(?:can we (?:conclude|say|infer|deduce)|does it (?:logically 
 const LOGIC_NOTE = "\n\n[REASONING CARE — this is a question of deductive logic. Decide by the FORM of the argument, not by whether the conclusion sounds plausible. Two premises 'All A are B' and 'Some B are C' do NOT allow 'Some A are C' (the B's that are C may all be outside A). Only conclude what must be true in every possible case; if it does not follow, say so plainly and give a short counter-example.]";
 async function groundMessages(messages, body, env) {
   const q = String(body.query || "");
+  // Recent turns only (not the current question, already `q`; not the system prompt, which is instructions,
+  // not content) — hoisted here, ahead of the lock-domain/classifyIntent block below, specifically so a
+  // follow-up that just asks Noria to recall something IT ALREADY SAID earlier in this same conversation isn't
+  // treated as a brand-new, unverified claim. See the classifyIntent() call below and planSearchQueries() further
+  // down for the two places this same context is used.
+  const recentHistory = messages.slice(0, -1).filter((m) => m.role !== "system").slice(-6)
+    .map((m) => (m.role === "assistant" ? "Noria: " : "User: ") + String(m.content || "").slice(0, 300)).join("\n");
   messages = addSystem(messages, nowBlock(body.tz));
   if (LOGIC_Q.test(q)) messages = addSystem(messages, LOGIC_NOTE);
   // LIVE FINDING (2026-09-30), same night as the isTaskAssistance(q) fix below: once the hard refuse was lifted for
@@ -2777,7 +2793,7 @@ async function groundMessages(messages, body, env) {
     // JSON) legitimately takes longer than 2500ms on this model, so the original timeout was ALSO silently
     // discarding a real, in-flight, eventually-successful classification on every call, same failure mode as the
     // token-budget bug, just at the caller's edge instead of the model's.
-    const intent = await withTimeout(classifyIntent(q, env), 6500, null);
+    const intent = await withTimeout(classifyIntent(q, env, recentHistory), 6500, null);
     if (intent) taskAssistance = intent.shape === "task_assistance" && !intent.needsLiveSource;
   }
   if (lockDomain0 && taskAssistance) messages = addSystem(messages, "\n\nThis is a task-assistance request in a locked domain (medical, immigration, legal or financial). Give real, useful, general structural help (what to gather, typical steps, how to organise it) — but do not state specific numbers as fact from memory: no exact fees, dosages, interest rates, deadlines or processing times. For any such figure, say plainly that the current number must be checked on the relevant official source (the government, court, medical or financial institution's own site) instead of stating one. Never guarantee approval or a specific outcome.");
@@ -2843,11 +2859,6 @@ async function groundMessages(messages, body, env) {
   const evidenceRequired = requiresEvidence(q, taskAssistance);
   const want = office || body.ground === true || evidenceRequired || (body.ground !== false && strength !== "no");
   if (!want || !q) return { messages, grounded: false };
-  // Recent turns only (not the current question, already `q`; not the system prompt, which is instructions,
-  // not content) — enough for the query planner to resolve "those", "that one", "again" into what was
-  // actually being discussed, without ballooning the planning call with the whole conversation.
-  const recentHistory = messages.slice(0, -1).filter((m) => m.role !== "system").slice(-6)
-    .map((m) => (m.role === "assistant" ? "Noria: " : "User: ") + String(m.content || "").slice(0, 300)).join("\n");
   const queries = office ? [q.replace(/[?!.]+$/, "") + " " + new Date().getUTCFullYear()] : await withTimeout(planSearchQueries(q, env, recentHistory), 4000, [q]);
   const lists = await Promise.all(queries.map((x) => withTimeout(webSearch(x, env, strength === "must" || office), 9000, [])));
   const seen = new Set(), results = [];
