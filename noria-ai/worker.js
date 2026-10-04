@@ -7,6 +7,7 @@
 import { handleAccounts, authed } from './accounts.js'
 import { handleGraph } from './graph-api.js'
 import { handleKb } from './kb.js'
+import { handlePayments } from './payments.js'
 const CORS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'POST, GET, OPTIONS',
@@ -24,6 +25,9 @@ export default {
       if (url.pathname.startsWith('/graph/')) return await handleGraph(request, env, url, json, await authed(request, env))
       // The person's own documents, searched by keywords and meaning (D1 + Workers AI embeddings, signed-in users only). Only reached on /kb/…
       if (url.pathname.startsWith('/kb/')) return await handleKb(request, env, url, json, await authed(request, env))
+      // Noria Agent (Business) — the real, billed $1000/month subscription via Paystack, separate from
+      // Noria Pro's stateless access code. Only reached on /pay/…
+      if (url.pathname.startsWith('/pay/')) return await handlePayments(request, env, url, json)
       // Noria Pro features (image creation, photo understanding) cost real compute, so they need a valid Pro
       // access code, checked here on the server — not only hidden in the app.
       if ((url.pathname === '/vision' && request.method === 'POST') || (url.pathname === '/image' && (request.method === 'POST' || request.method === 'GET'))) {
