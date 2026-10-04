@@ -1771,7 +1771,22 @@ const STATE_Q = /\b(who|what|which)\s+(is|are|was|were)\b|\b(?:what|which)\s+\w+
 // ("who invented/wrote/discovered") — getting Swahili verb morphology wrong risks shipping an incorrect phrase,
 // and since this is purely additive, an imperfect phrase would only mean no improvement for it, never a
 // regression, so the simple, high-confidence phrases are added now and the rest can follow if found live.
-const STABLE_FACT = /\b(capital of|currency of|official language|largest (country|city|ocean)|who (wrote|invented|discovered|painted|composed)|meaning of|definition of|synonym|antonym|boiling point|melting point|formula for|symbol for|atomic number|capitale d[eu]|devise de|monnaie de|langue officielle|plus grande? (?:pays|ville|océan)|qui a (?:écrit|invent[ée]|découvert|peint|compos[ée])|signification de|définition de|synonyme|antonyme|point d.ébullition|point de fusion|formule de|symbole de|numéro atomique|mji mkuu wa|sarafu ya|lugha rasmi|nchi kubwa zaidi|mji mkubwa zaidi|jiji kubwa zaidi|bahari kubwa zaidi)(?=[^A-Za-zÀ-ÿ]|$)/i;
+// FOUND LIVE (2026-10-03), right after making non-English questions require evidence by default (see
+// FACTUAL_QUESTION_DEFAULT below): that fix correctly closed the fabrication risk for a non-English OFFICEHOLDER
+// question (fail toward search, never toward silent memory) — but it also meant an Arabic EVERGREEN trivia
+// question that used to answer fine now fails closed too, since the search/officeholder tools are themselves
+// English-only and find nothing for Arabic text: "ما هي عاصمة مصر ولماذا هي مهمة؟" (what is the capital of
+// Egypt...) started refusing with "I couldn't find reliable information" instead of just answering. Same
+// remedy as French/Swahili above: give Arabic the same STABLE_FACT exemption for the same evergreen shapes, so
+// the genuinely safe case answers directly again while the genuinely risky one (confirmed moments earlier:
+// an Arabic "who is the current president" question) still correctly requires evidence.
+// Rebuilt the boundary mechanism for this addition: \b does not work before/after Arabic text at all (Arabic
+// letters are not \w in a non-Unicode JS regex, so a space-then-Arabic-letter transition is non-word-to-non-word
+// — no boundary ever occurs, confirmed by direct testing: /\bعاصمة\b/ never matches "ما هي عاصمة مصر"). Replaced
+// with an explicit lookbehind/lookahead pair that knows about Latin, Latin-extended and Arabic letters, applied
+// uniformly to every alternative (English, French, Swahili, Arabic) in place of the old \b...(?=...) mix — the
+// full existing test suite for every prior language was re-run against this rebuilt form before shipping.
+const STABLE_FACT = /(?<![A-Za-zÀ-ÿ؀-ۿ])(capital of|currency of|official language|largest (country|city|ocean)|who (wrote|invented|discovered|painted|composed)|meaning of|definition of|synonym|antonym|boiling point|melting point|formula for|symbol for|atomic number|capitale d[eu]|devise de|monnaie de|langue officielle|plus grande? (?:pays|ville|océan)|qui a (?:écrit|invent[ée]|découvert|peint|compos[ée])|signification de|définition de|synonyme|antonyme|point d.ébullition|point de fusion|formule de|symbole de|numéro atomique|mji mkuu wa|sarafu ya|lugha rasmi|nchi kubwa zaidi|mji mkubwa zaidi|jiji kubwa zaidi|bahari kubwa zaidi|عاصمة|عملة|اللغة الرسمية|أكبر دولة|أكبر مدينة|أكبر محيط)(?=[^A-Za-zÀ-ÿ؀-ۿ]|$)/i;
 const STATUS_Q = /\bis\s+.{2,40}\b(available|open|closed|legal|banned|allowed|working|down|operating)\b/i;
 const NOT_ENTITY = new Set("I,I'm,I've,I'd,I'll,Noria,The,A,An,What,Who,Which,Where,When,Why,How,Is,Are,Was,Were,Do,Does,Did,Can,Could,Should,Would,Will,Tell,Give,Show,Please,Monday,Tuesday,Wednesday,Thursday,Friday,Saturday,Sunday,January,February,March,April,May,June,July,August,September,October,November,December,English,Ok,Okay,Hi,Hello,Hey,Thanks".split(","));
 function hasEntity(q) { // a capitalised name somewhere after the first word: a specific person, place or organisation is being asked about
@@ -1942,10 +1957,18 @@ function liveStrength(q) {
 // chemicals, dropping a ball), not a lookup of a specific real-world current fact — found live while testing this
 // same fix ("what will happen if I add more yeast to bread dough" was wrongly forced into a refusal).
 const HYPOTHETICAL_REASONING = /\bwhat (?:will|would|might|could) happen if\b|\bwhat (?:will|would) .{0,40}\bif i\b/i;
+// Chinese and Japanese write with no spaces between words at all, so a whitespace split treats an entire
+// sentence as ONE "word" — found live right after the Arabic fix: "谁是现任美国总统？" (who is the current US
+// president?) split to a single 9-character token, word count 1, under the words<4 floor, so it returned false
+// and reached bare memory for a SECOND reason even after the question-mark fix below — and did so with a
+// genuinely wrong answer (Joe Biden, stale), confirming this was a real live fabrication risk, not a hypothetical
+// one. A character-count floor stands in for the word-count one specifically for CJK text.
+const CJK_TEXT = /[一-鿿぀-ヿ]/;
 function FACTUAL_QUESTION_DEFAULT(s) {
   if (OPINION_OR_SELF.test(s) || HYPOTHETICAL_REASONING.test(s)) return false;
   const words = s.trim().split(/\s+/).filter(Boolean);
-  if (words.length < 4) return false; // "really?", "you sure?" — too short to carry a checkable claim
+  if (CJK_TEXT.test(s)) { if (s.trim().length < 6) return false; }
+  else if (words.length < 4) return false; // "really?", "you sure?" — too short to carry a checkable claim
   // a WH-question word opening the sentence, or a yes/no auxiliary-inversion question, or an explicit "?"
   // FOUND LIVE (2026-10-03), far more serious than the STABLE_FACT additions above: "من هو الرئيس الحالي لمصر؟"
   // (Arabic for "who is the current president of Egypt?") reached bare model memory with NO search, NO
@@ -1953,8 +1976,12 @@ function FACTUAL_QUESTION_DEFAULT(s) {
   // whole Reality Layer exists to prevent, just not triggered because every classifier in this file (officeAsk,
   // liveStrength, the lock-domain detector) is built entirely on English keywords, and even THIS catch-all safety
   // net's own trailing-"?" check looked only for the ASCII question mark (U+003F), never the distinct Arabic one,
-  // "؟" (U+061F), that the sentence actually ended with. It happened to answer correctly this time (el-Sisi is
-  // genuinely the current president) — that was luck, not the guard working. This does not make officeAsk/
+  // "؟" (U+061F) — or, confirmed moments later testing Chinese, the CJK fullwidth one, "？" (U+FF1F) — that the
+  // sentence actually ended with. The Arabic case happened to answer correctly anyway (el-Sisi is genuinely the
+  // current president) — that was luck, not the guard working. The Chinese case (the same question, "who is the
+  // current US president?") did NOT get lucky: it answered Joe Biden, stale and wrong, with the same complete
+  // absence of any verification — direct proof this was a real, live fabrication risk, not a hypothetical one.
+  // This does not make officeAsk/
   // liveStrength/lock-domain detection multilingual (a translation of every keyword list is a far larger, separate
   // piece of work), but it does make the one DEFAULT safety net this function exists to be ("still recognisably
   // asking about an external fact → evidence-required BY DEFAULT") recognize a non-English question as a question,
@@ -1962,7 +1989,7 @@ function FACTUAL_QUESTION_DEFAULT(s) {
   // unguarded memory.
   return /^\s*(?:and\s+|so\s+|well\s+|please\s+|okay?,?\s+)?(?:what|who|whom|whose|which|when|where|why|how)\b/i.test(s) ||
     /^\s*(?:is|are|was|were|does|did|do|has|have|had|can|could|will|would)\b/i.test(s) ||
-    /[?؟]\s*$/.test(s);
+    /[?؟？]\s*$/.test(s);
 }
 const NO_LIVE_ANSWER = "I couldn't find reliable, current information about that: either nothing matches, or my live sources did not answer just now. It is the kind of question where a guess could mislead you, so I would rather not make one. If it is a real company, person or event, tell me a little more (the country or the field) and I will look again.";
 
