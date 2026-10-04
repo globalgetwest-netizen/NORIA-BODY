@@ -1465,6 +1465,20 @@ const CITATION_SHAPE = /doi\.org\/10\.\d{3,}|\b[A-Z][a-zA-Z'-]+,\s*[A-Z]\..{0,80
 function outputMakesUncheckedCitation(text) {
   return CITATION_SHAPE.test(String(text || ""));
 }
+// THIRD output-side net, found live auditing general quality (2026-10-04): asked for the real arguments on
+// capital punishment, the model's bare-memory draft cited "Atkins v. Virginia (2002)" and "Hall v. Florida
+// (2014)" — both real, both accurately described, so nothing was actually wrong this time, but neither
+// outputMakesUncheckedReference (built for chapter:verse-style references) nor outputMakesUncheckedCitation's
+// CITATION_SHAPE (built for "Author, F. (Year)... journal/study" academic citations) recognises the standard
+// "Party v. Party (Year)" legal-case-citation shape at all — this specific, highly checkable, highly
+// authoritative-LOOKING claim type had no safety net whatsoever, same unguarded-fabrication risk class as the
+// scripture and academic-citation gaps already closed above, just not yet reproduced with an actually invented
+// case name. Requires a literal "v." (period) rather than bare "v"/"vs" specifically to avoid a false hit on
+// ordinary sports score mentions ("France v Germany, 1998") which almost never use the court-citation period.
+const LEGAL_CASE_SHAPE = /\b[A-Z][A-Za-z.'-]+(?:\s+(?:of|the|and|for)?\s*[A-Z][A-Za-z.'-]+){0,5}\s+v\.\s+[A-Z][A-Za-z.'-]+(?:\s+(?:of|the|and|for)?\s*[A-Z][A-Za-z.'-]+){0,5}\s*\(\d{4}\)/;
+function outputMakesUncheckedLegalCase(text) {
+  return LEGAL_CASE_SHAPE.test(String(text || ""));
+}
 async function plainVerified(messages, env, opts) {
   let text = await brainComplete(messages, env, opts);
   if (LOGIC_Q.test(String((messages.filter((m) => m.role === "user").pop() || {}).content || ""))) text = await logicChecked(messages, env, text, opts);
@@ -1477,6 +1491,9 @@ async function plainVerified(messages, env, opts) {
   }
   if (outputMakesUncheckedCitation(text)) {
     return "I'm not able to confirm specific research citations from memory alone — details like authors, journal names, page numbers and DOIs are easy to get wrong or invent without meaning to, and I don't want to hand you a citation that turns out not to be real. Ask me to search for real, current sources on this and I will check them before citing anything.";
+  }
+  if (outputMakesUncheckedLegalCase(text)) {
+    return "I'm not able to confirm specific case citations from memory alone — a case name, party or year can be easy to misremember or invent without meaning to, and I don't want to hand you a citation that turns out not to be real. Ask me to search for real, current sources on this and I will check any case citations before stating them.";
   }
   // CLIENT-INJECTED EVIDENCE HONESTY CHECK (found and reproduced live 2026-09-29, tracing every client-side path
   // per the owner's audit): the workspace client (public/workspace.js) fetches its OWN real web results for a
