@@ -2767,7 +2767,13 @@ async function groundMessages(messages, body, env) {
   // follow-up that just asks Noria to recall something IT ALREADY SAID earlier in this same conversation isn't
   // treated as a brand-new, unverified claim. See the classifyIntent() call below and planSearchQueries() further
   // down for the two places this same context is used.
-  const recentHistory = messages.slice(0, -1).filter((m) => m.role !== "system").slice(-6)
+  // FOUND LIVE (2026-10-04) testing the classifyIntent fix itself: a 10-message poultry-farming conversation
+  // established the vaccine schedule in messages 3-4, then moved on to feed and budget for 6 more messages
+  // before the recall question — a slice(-6) window kept only the LATER messages and silently dropped the exact
+  // ones containing the fact being recalled, so the classifier correctly (from what it could actually see)
+  // called it a brand-new claim. Matches buildMessages()'s own existing history cap (history.slice(-12)) instead
+  // of an arbitrarily smaller one, so nothing the client already chose to send is invisible here.
+  const recentHistory = messages.slice(0, -1).filter((m) => m.role !== "system").slice(-12)
     .map((m) => (m.role === "assistant" ? "Noria: " : "User: ") + String(m.content || "").slice(0, 300)).join("\n");
   messages = addSystem(messages, nowBlock(body.tz));
   if (LOGIC_Q.test(q)) messages = addSystem(messages, LOGIC_NOTE);
