@@ -106,7 +106,11 @@ export async function handlePayments(request, env, url, json) {
     const email = String((body && body.email) || '').trim().toLowerCase()
     if (!validEmail(email)) return json({ error: 'A valid email is required.' }, 400)
     if (!env.PAYSTACK_PLAN_CODE) return json({ error: 'The Agent plan is not set up yet.' }, 503)
-    const callback_url = (env.APP_URL || 'https://noria.africa') + '/pay/callback'
+    // BUG FOUND live (2026-10-04) setting this up: /pay/callback is a route on THIS worker
+    // (noria-ai), not on noria.africa (the separate main site) - env.APP_URL's default was pointing
+    // Paystack's post-checkout redirect at the wrong domain entirely. url.origin is always correct
+    // regardless of where this worker is deployed or renamed, so it replaces the env-var default here.
+    const callback_url = url.origin + '/pay/callback'
     const r = await paystack(env, '/transaction/initialize', { method: 'POST', body: { email, plan: env.PAYSTACK_PLAN_CODE, callback_url } })
     if (!r.ok || !r.data.data) return json({ error: 'Could not start checkout right now. Please try again.', detail: env.DEV_MODE === '1' ? r.data.message : undefined }, 502)
     await upsertSubscription(env, email, { status: 'pending', last_reference: r.data.data.reference })
